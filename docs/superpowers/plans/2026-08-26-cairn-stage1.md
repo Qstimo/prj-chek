@@ -10323,6 +10323,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // Даты форматируются по локали; без фиксированного пояса тесты
+    // с датами прошли бы на одной машине и упали на другой.
+    env: { TZ: 'Europe/Moscow' },
   },
 });
 ```
@@ -10331,7 +10334,19 @@ export default defineConfig({
 
 ```typescript
 import '@testing-library/jest-dom/vitest';
+import { vi } from 'vitest';
+
+// Компоненты используют навигацию Next.js, которой в тестовой среде нет.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn() }),
+  usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
+  notFound: vi.fn(),
+  redirect: vi.fn(),
+}));
 ```
+
+`next/link` мокать не нужно: вне маршрутизатора он отрисовывается обычной ссылкой, и тесты проверяют именно её `href`.
 
 - [ ] **Step 9: Создать `apps/web/src/app/layout.tsx`**
 
@@ -10579,13 +10594,35 @@ describe('apiClient', () => {
 Run: `pnpm --filter @cairn/web test src/api/client`
 Expected: FAIL — «Failed to resolve import "./client"».
 
+- [ ] **Step 6a: Создать `apps/web/src/api/response.ts`**
+
+Разбор ответа вынесен в отдельный модуль **без** директивы `'use client'`. Причина: его вызывают обе стороны — и браузерный клиент, и серверные компоненты. Если бы он лежал в файле с директивой, все его экспорты стали бы клиентскими ссылками, и вызов с сервера упал бы с «Attempted to call readResponse() from the server».
+
+```typescript
+import { ApiError, messageForStatus } from './errors';
+
+/** Разбирает ответ, превращая отказ в {@link ApiError}. */
+export async function readResponse<T>(response: Response): Promise<T> {
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message =
+      (payload as { message?: string } | null)?.message ?? messageForStatus(response.status);
+
+    throw new ApiError(response.status, message, payload);
+  }
+
+  return payload as T;
+}
+```
+
 - [ ] **Step 7: Создать `apps/web/src/api/client.ts`**
 
 ```typescript
 'use client';
 
 import { BROWSER_API_URL } from './config';
-import { ApiError, messageForStatus } from './errors';
+import { readResponse } from './response';
 
 /** Параметры запроса. */
 export interface ApiRequestOptions {
@@ -10611,29 +10648,17 @@ export async function apiClient<T>(path: string, options: ApiRequestOptions = {}
 
   return readResponse<T>(response);
 }
-
-/** Разбирает ответ, превращая отказ в {@link ApiError}. */
-export async function readResponse<T>(response: Response): Promise<T> {
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    const message =
-      (payload as { message?: string } | null)?.message ?? messageForStatus(response.status);
-
-    throw new ApiError(response.status, message, payload);
-  }
-
-  return payload as T;
-}
 ```
 
 - [ ] **Step 8: Создать `apps/web/src/api/server.ts`**
 
 ```typescript
+import 'server-only';
+
 import { cookies } from 'next/headers';
 
-import { readResponse } from './client';
 import { serverApiUrl } from './config';
+import { readResponse } from './response';
 
 /**
  * Запрос к API из серверного компонента.
@@ -10659,17 +10684,24 @@ export async function apiServer<T>(path: string): Promise<T> {
 
 - [ ] **Step 9: Создать `apps/web/src/api/index.ts`**
 
+Серверный модуль в баррель **не входит**. Он импортирует `next/headers`, и любой клиентский компонент, обратившийся к барелю, потянул бы этот импорт в свой граф — Next.js отвечает на это отказом сборки. Серверные страницы импортируют `apiServer` из `@/api/server` напрямую, а маркер `server-only` в нём превращает случайный клиентский импорт в понятную ошибку вместо загадочной.
+
 ```typescript
 export * from './client';
 export * from './config';
 export * from './errors';
-export * from './server';
+export * from './response';
 ```
+
+- [ ] **Step 9a: Установить маркер серверного модуля**
+
+Run: `pnpm --filter @cairn/web add server-only`
+Expected: пакет добавлен в `dependencies`.
 
 - [ ] **Step 10: Запустить тесты**
 
 Run: `pnpm --filter @cairn/web test src/api`
-Expected: PASS, 10 тестов.
+Expected: PASS, 11 тестов.
 
 - [ ] **Step 11: Коммит**
 
@@ -10684,8 +10716,9 @@ git commit -m "Добавить клиент API"
 
 **Files:**
 - Create: `apps/web/src/components/LoginForm/LoginForm.tsx`, `types.ts`, `constants.ts`, `index.ts`
-- Create: `apps/web/src/app/login/page.tsx`
 - Test: `apps/web/src/components/LoginForm/LoginForm.test.tsx`
+
+Страница входа появится в следующей задаче, вместе с формой второго фактора: показывать форму пароля без второго шага нечестно — вход не заработает.
 
 - [ ] **Step 1: Написать падающий тест `apps/web/src/components/LoginForm/LoginForm.test.tsx`**
 
@@ -11150,7 +11183,7 @@ pnpm --filter @cairn/web test
 pnpm --filter @cairn/web typecheck
 ```
 
-Expected: PASS, 23 теста; типы без ошибок.
+Expected: PASS, 24 теста; типы без ошибок.
 
 - [ ] **Step 9: Проверить вход вручную**
 
@@ -11164,13 +11197,15 @@ pnpm --filter @cairn/api cli create-superadmin admin@example.com
 
 Expected: форма отображается; попытка входа с неверным паролем показывает сообщение об ошибке.
 
-Заметь: пока веб-приложение обращается к API напрямую по адресу `/api`, а реверс-прокси появится в последнем чанке. Для локальной разработки добавь в `apps/web/next.config.ts` временную переадресацию:
+Заметь: пока веб-приложение обращается к API по адресу `/api`, а реверс-прокси появится в последнем чанке. Для локальной разработки добавь в `apps/web/next.config.ts` переадресацию (в чанке 15 она будет ограничена режимом разработки):
 
 ```typescript
   async rewrites() {
     return [{ source: '/api/:path*', destination: 'http://localhost:3001/api/:path*' }];
   },
 ```
+
+Включи `apps/web/next.config.ts` в коммит этого шага — иначе следующий чанк будет править файл, которого он не ожидает.
 
 - [ ] **Step 10: Коммит**
 
@@ -11421,7 +11456,7 @@ export function InviteScreen({ token }: IProps) {
 ```tsx
 import { notFound } from 'next/navigation';
 
-import { apiServer } from '@/api';
+import { apiServer } from '@/api/server';
 import { InviteScreen } from './InviteScreen';
 
 /** Страница установки пароля по ссылке. */
@@ -11870,6 +11905,11 @@ describe('ProjectList', () => {
 });
 ```
 
+- [ ] **Step 7a: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/ProjectList`
+Expected: FAIL — «Failed to resolve import "./ProjectList"».
+
 - [ ] **Step 8: Создать `apps/web/src/components/ProjectList/types.ts` и компонент**
 
 `types.ts`:
@@ -11926,7 +11966,8 @@ export type { IProps } from './types';
 import type { ProjectMetadata } from '@cairn/shared';
 import { redirect } from 'next/navigation';
 
-import { apiServer, ApiError } from '@/api';
+import { ApiError } from '@/api';
+import { apiServer } from '@/api/server';
 import { ProjectList } from '@/components/ProjectList';
 
 /** Сводка проектов. */
@@ -11955,7 +11996,7 @@ export default async function HomePage() {
 - [ ] **Step 10: Запустить тесты**
 
 Run: `pnpm --filter @cairn/web test src/components`
-Expected: PASS, 20 тестов.
+Expected: PASS, 26 тестов.
 
 - [ ] **Step 11: Коммит**
 
@@ -12150,7 +12191,8 @@ export type { IProps } from './types';
 import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
 import { notFound, redirect } from 'next/navigation';
 
-import { apiServer, ApiError } from '@/api';
+import { ApiError } from '@/api';
+import { apiServer } from '@/api/server';
 import { ProjectSections } from '@/components/ProjectSections';
 
 /** Карточка проекта. */
@@ -12189,7 +12231,7 @@ pnpm --filter @cairn/web test
 pnpm --filter @cairn/web typecheck
 ```
 
-Expected: PASS, 26 тестов; типы без ошибок.
+Expected: PASS, 46 тестов; типы без ошибок.
 
 - [ ] **Step 9: Коммит**
 
@@ -12454,20 +12496,45 @@ export function ProjectForm({ initial, onSubmit, error, isSubmitting = false }: 
   );
 }
 
-/** Поле ввода с подписью. */
-function TextField({
-  id,
-  label,
-  value,
-  onChange,
-  multiline = false,
-}: {
+/** Превращает пустую строку в отсутствие значения. */
+function emptyToNull(value: string | null): string | null {
+  const trimmed = value?.trim() ?? '';
+
+  return trimmed.length > 0 ? trimmed : null;
+}
+```
+
+Импорт поля добавь вверху: `import { TextField } from '../TextField';`
+
+- [ ] **Step 5a: Создать `apps/web/src/components/TextField/`**
+
+Поле вынесено в отдельный компонент: оно нужно и форме проекта, и форме приглашения из следующего чанка, а держать его внутри формы значило бы превысить лимит в сто строк на файл.
+
+`types.ts`:
+
+```typescript
+/** Пропсы поля ввода. */
+export interface IProps {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
+  /** Многострочное поле вместо однострочного. */
   multiline?: boolean;
-}) {
+  /** Тип поля. Игнорируется для многострочного. */
+  type?: 'text' | 'email';
+}
+```
+
+`TextField.tsx`:
+
+```tsx
+'use client';
+
+import type { IProps } from './types';
+
+/** Поле ввода с подписью, связанной с полем по идентификатору. */
+export function TextField({ id, label, value, onChange, multiline = false, type = 'text' }: IProps) {
   const className = 'w-full rounded-md border border-border px-3 py-2';
 
   return (
@@ -12486,6 +12553,7 @@ function TextField({
       ) : (
         <input
           id={id}
+          type={type}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           className={className}
@@ -12494,13 +12562,46 @@ function TextField({
     </div>
   );
 }
+```
 
-/** Превращает пустую строку в отсутствие значения. */
-function emptyToNull(value: string | null): string | null {
-  const trimmed = value?.trim() ?? '';
+`index.ts`:
 
-  return trimmed.length > 0 ? trimmed : null;
-}
+```typescript
+export { TextField } from './TextField';
+export type { IProps } from './types';
+```
+
+`TextField.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { TextField } from './TextField';
+
+describe('TextField', () => {
+  it('связывает подпись с полем', () => {
+    render(<TextField id="name" label="Название" value="" onChange={vi.fn()} />);
+
+    expect(screen.getByLabelText('Название')).toBeInTheDocument();
+  });
+
+  it('сообщает о вводе', async () => {
+    const onChange = vi.fn();
+    render(<TextField id="name" label="Название" value="" onChange={onChange} />);
+
+    await userEvent.type(screen.getByLabelText('Название'), 'а');
+
+    expect(onChange).toHaveBeenCalledWith('а');
+  });
+
+  it('отдаёт многострочное поле при multiline', () => {
+    render(<TextField id="notes" label="Заметки" value="" onChange={vi.fn()} multiline />);
+
+    expect(screen.getByLabelText('Заметки').tagName).toBe('TEXTAREA');
+  });
+});
 ```
 
 - [ ] **Step 6: Создать `apps/web/src/components/ProjectForm/index.ts`**
@@ -12563,7 +12664,8 @@ export function EditProjectScreen({ projectId, initial }: IProps) {
 import type { ProjectDetail } from '@cairn/shared';
 import { notFound, redirect } from 'next/navigation';
 
-import { apiServer, ApiError } from '@/api';
+import { ApiError } from '@/api';
+import { apiServer } from '@/api/server';
 import { EditProjectScreen } from './EditProjectScreen';
 
 /** Страница правки проекта. */
@@ -12742,21 +12844,47 @@ export const LEVEL_OPTIONS: { value: AccessLevel | ''; label: string }[] = [
 ];
 ```
 
-- [ ] **Step 4: Создать `apps/web/src/components/AccessMatrix/types.ts`**
+- [ ] **Step 3a: Создать `apps/web/src/api/grant-change.ts`**
+
+Тип живёт в слое данных, а не в компоненте: им пользуется и матрица, и хук изменения выдачи, а зависимость слоя данных от слоя представления перевернула бы порядок слоёв.
 
 ```typescript
-import type { AccessLevel, GrantMatrixRow, Section } from '@cairn/shared';
+import type { AccessLevel, Section } from '@cairn/shared';
 
-/** Изменение ячейки матрицы. Пустой уровень означает отзыв. */
+/**
+ * Изменение ячейки матрицы доступов.
+ *
+ * Пустой уровень означает отзыв: в модели данных отсутствие доступа
+ * выражается отсутствием строки выдачи (спека 4.3).
+ */
 export interface GrantChange {
   subjectId: string;
   section: Section;
   level: AccessLevel | null;
 }
+```
+
+Добавь его в баррель `apps/web/src/api/index.ts`.
+
+- [ ] **Step 4: Создать `apps/web/src/components/AccessMatrix/types.ts`**
+
+```typescript
+import type { GrantMatrixRow } from '@cairn/shared';
+
+import type { GrantChange } from '@/api/grant-change';
+
+/** Строка матрицы: субъект с выдачами либо без них. */
+export interface MatrixSubject {
+  subjectId: string;
+  subjectLabel: string;
+  isRevoked: boolean;
+  levels: GrantMatrixRow['levels'];
+}
 
 /** Пропсы матрицы доступов. */
 export interface IProps {
-  rows: GrantMatrixRow[];
+  /** Все субъекты, которым можно выдать доступ, включая тех, у кого его нет. */
+  rows: MatrixSubject[];
   onChange: (change: GrantChange) => void;
 }
 ```
@@ -12776,12 +12904,17 @@ import type { IProps } from './types';
  *
  * Все шесть секций видны сразу, включая нереализованные: модель прав знает
  * о них с этапа 1, и выдать доступ заранее — нормальный сценарий (спека 4.3).
+ *
+ * Строки приходят по всем субъектам, а не только по тем, у кого уже есть
+ * выдачи: иначе первому доступу неоткуда взяться — субъект без выдач
+ * не появился бы в таблице, и выдать ему что-либо было бы нечем.
  */
 export function AccessMatrix({ rows, onChange }: IProps) {
   if (rows.length === 0) {
     return (
       <p className="text-muted-foreground">
-        Доступ к этому проекту никому не выдан. Выберите пользователя в списке ниже.
+        В системе пока нет ни одного пользователя, кроме вас. Пригласите людей на странице
+        «Пользователи», и они появятся в этой таблице.
       </p>
     );
   }
@@ -12882,7 +13015,7 @@ export function useQueryGrants(projectId: string) {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
-import type { GrantChange } from '@/components/AccessMatrix';
+import type { GrantChange } from '../grant-change';
 import { GRANT_KEYS } from './useQueryGrants';
 
 /**
@@ -12912,7 +13045,31 @@ export function useMutationSetGrant(projectId: string) {
 }
 ```
 
-Дополни `apps/web/src/api/hooks/index.ts` двумя новыми экспортами.
+`apps/web/src/api/hooks/useQueryUsers.ts` — список пользователей. Нужен матрице доступов: без него в таблице не появятся субъекты, которым доступ ещё не выдавали.
+
+```typescript
+'use client';
+
+import type { UserRow } from '@cairn/shared';
+import { useQuery } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+
+/** Ключи кэша пользователей. */
+export const USER_KEYS = {
+  all: ['users'] as const,
+};
+
+/** Список пользователей. Доступен только суперадмину (спека 8). */
+export function useQueryUsers() {
+  return useQuery({
+    queryKey: USER_KEYS.all,
+    queryFn: () => apiClient<UserRow[]>('/users'),
+  });
+}
+```
+
+Дополни `apps/web/src/api/hooks/index.ts` тремя новыми экспортами.
 
 - [ ] **Step 8: Создать экран управления доступами**
 
@@ -12921,7 +13078,7 @@ export function useMutationSetGrant(projectId: string) {
 ```tsx
 'use client';
 
-import { useQueryGrants, useMutationSetGrant } from '@/api/hooks';
+import { useMutationSetGrant, useQueryGrants, useQueryUsers } from '@/api/hooks';
 import { AccessMatrix } from '@/components/AccessMatrix';
 
 /** Пропсы экрана доступов. */
@@ -12929,16 +13086,23 @@ interface IProps {
   projectId: string;
 }
 
-/** Управление доступами к проекту. Экран суперадмина (спека 9.1). */
+/**
+ * Управление доступами к проекту. Экран суперадмина (спека 9.1).
+ *
+ * Строки матрицы собираются из двух источников: списка всех пользователей
+ * и выдач по этому проекту. Одних выдач недостаточно — субъект без доступа
+ * в них не попадает, и выдать ему первый доступ было бы невозможно.
+ */
 export function AccessScreen({ projectId }: IProps) {
   const grants = useQueryGrants(projectId);
+  const users = useQueryUsers();
   const setGrant = useMutationSetGrant(projectId);
 
-  if (grants.isPending) {
+  if (grants.isPending || users.isPending) {
     return <p className="text-muted-foreground">Загрузка…</p>;
   }
 
-  if (grants.isError) {
+  if (grants.isError || users.isError) {
     return (
       <p role="alert" className="text-destructive">
         Не удалось загрузить матрицу доступов.
@@ -12946,7 +13110,16 @@ export function AccessScreen({ projectId }: IProps) {
     );
   }
 
-  return <AccessMatrix rows={grants.data} onChange={(change) => setGrant.mutate(change)} />;
+  const levelsBySubject = new Map(grants.data.map((row) => [row.subjectId, row.levels]));
+
+  const rows = users.data.map((user) => ({
+    subjectId: user.subjectId,
+    subjectLabel: user.email,
+    isRevoked: user.isRevoked,
+    levels: levelsBySubject.get(user.subjectId) ?? {},
+  }));
+
+  return <AccessMatrix rows={rows} onChange={(change) => setGrant.mutate(change)} />;
 }
 ```
 
@@ -12986,9 +13159,12 @@ git commit -m "Добавить матрицу управления доступ
 
 **Files:**
 - Create: `apps/web/src/components/UserList/UserList.tsx`, `types.ts`, `constants.ts`, `index.ts`
-- Create: `apps/web/src/app/users/page.tsx`, `UsersScreen.tsx`
-- Create: `apps/web/src/api/hooks/useQueryUsers.ts`, `useMutationUserAction.ts`
-- Test: `apps/web/src/components/UserList/UserList.test.tsx`
+- Create: `apps/web/src/components/IssuedLink/` и `apps/web/src/components/InviteForm/` (компонент, `types.ts`, `index.ts`, тест)
+- Create: `apps/web/src/app/(app)/users/page.tsx`, `UsersScreen.tsx`
+- Create: `apps/web/src/api/hooks/useMutationUserAction.ts`
+- Test: `apps/web/src/components/UserList/UserList.test.tsx`, `IssuedLink.test.tsx`, `InviteForm.test.tsx`
+
+Хук `useQueryUsers` создан в предыдущей задаче — он нужен матрице доступов.
 
 - [ ] **Step 1: Написать падающий тест `apps/web/src/components/UserList/UserList.test.tsx`**
 
@@ -12996,7 +13172,7 @@ git commit -m "Добавить матрицу управления доступ
 import { InvitationKind, SubjectKind } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UserList } from './UserList';
 
@@ -13016,6 +13192,11 @@ const user = {
 const handlers = { onRevoke: vi.fn(), onRestore: vi.fn(), onResetPassword: vi.fn(), onResetTotp: vi.fn() };
 
 describe('UserList', () => {
+  beforeEach(() => {
+    // Обработчики общие на весь файл: без сброса вызовы копились бы между тестами.
+    vi.clearAllMocks();
+  });
+
   it('показывает адрес пользователя', () => {
     render(<UserList users={[user]} {...handlers} />);
 
@@ -13156,7 +13337,12 @@ export function UserList({ users, onRevoke, onRestore, onResetPassword, onResetT
             className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3"
           >
             <div>
-              <p className="font-medium">{user.email}</p>
+              <p className="font-medium">
+                {user.email}
+                {user.isSuperadmin && (
+                  <span className="ml-2 text-xs text-muted-foreground">Суперадмин</span>
+                )}
+              </p>
               <p className="text-sm text-muted-foreground">{statusOf(user)}</p>
             </div>
 
@@ -13213,7 +13399,12 @@ export function UserList({ users, onRevoke, onRestore, onResetPassword, onResetT
   );
 }
 
-/** Описывает состояние пользователя человеческими словами. */
+/**
+ * Описывает состояние пользователя человеческими словами.
+ *
+ * Роль здесь не участвует: суперадмин может быть и отозванным,
+ * и приглашённым, и смешение двух признаков скрыло бы одно из них.
+ */
 function statusOf(user: UserRow): string {
   if (user.isRevoked) {
     return 'Отозван';
@@ -13223,7 +13414,7 @@ function statusOf(user: UserRow): string {
     return user.lastLinkKind === InvitationKind.PasswordReset ? 'Пароль сброшен' : 'Приглашён';
   }
 
-  return user.isSuperadmin ? 'Суперадмин' : 'Активен';
+  return 'Активен';
 }
 
 /** Оформление кнопок действий. */
@@ -13242,11 +13433,356 @@ export type { IProps } from './types';
 Run: `pnpm --filter @cairn/web test src/components/UserList`
 Expected: PASS, 9 тестов.
 
-- [ ] **Step 8: Коммит**
+- [ ] **Step 8: Создать `apps/web/src/components/IssuedLink/`**
+
+Ссылка показывается один раз: почты на этапе 1 нет, и передать её — забота суперадмина (спека 6.7). Если он закроет страницу, не скопировав ссылку, придётся выдавать новую.
+
+`types.ts`:
+
+```typescript
+import type { IssuedLinkResponse } from '@cairn/shared';
+
+/** Пропсы блока с выданной ссылкой. */
+export interface IProps {
+  link: IssuedLinkResponse;
+  /** Что за ссылка: приглашение или сброс пароля. */
+  title: string;
+}
+```
+
+`IssuedLink.tsx`:
+
+```tsx
+'use client';
+
+import type { IProps } from './types';
+
+/** Показывает выданную одноразовую ссылку с предупреждением. */
+export function IssuedLink({ link, title }: IProps) {
+  return (
+    <div className="space-y-2 rounded-md border border-border p-4">
+      <p className="font-medium">{title}</p>
+      <p className="break-all rounded-md bg-muted p-2 font-mono text-sm">{link.url}</p>
+      <p className="text-sm text-muted-foreground">
+        Скопируйте ссылку и передайте её лично: она показывается один раз и действует до{' '}
+        {new Date(link.expiresAt).toLocaleString('ru-RU')}.
+      </p>
+    </div>
+  );
+}
+```
+
+`index.ts`:
+
+```typescript
+export { IssuedLink } from './IssuedLink';
+export type { IProps } from './types';
+```
+
+`IssuedLink.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+
+import { IssuedLink } from './IssuedLink';
+
+const link = { url: 'https://cairn.local/invite/token', expiresAt: '2026-01-02T10:00:00.000Z' };
+
+describe('IssuedLink', () => {
+  it('показывает адрес ссылки', () => {
+    render(<IssuedLink link={link} title="Приглашение создано" />);
+
+    expect(screen.getByText(link.url)).toBeInTheDocument();
+  });
+
+  it('предупреждает, что ссылка показывается один раз', () => {
+    render(<IssuedLink link={link} title="Приглашение создано" />);
+
+    expect(screen.getByText(/один раз/i)).toBeInTheDocument();
+  });
+
+  it('показывает срок действия', () => {
+    render(<IssuedLink link={link} title="Приглашение создано" />);
+
+    expect(screen.getByText(/02\.01\.2026/)).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 9: Создать хуки действий над пользователями**
+
+`apps/web/src/api/hooks/useMutationUserAction.ts`:
+
+```typescript
+'use client';
+
+import type { InviteUserInput, IssuedLinkResponse } from '@cairn/shared';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+import { USER_KEYS } from './useQueryUsers';
+
+/** Приглашение пользователя. Возвращает одноразовую ссылку. */
+export function useMutationInviteUser() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: InviteUserInput) =>
+      apiClient<IssuedLinkResponse>('/invitations', { method: 'POST', body: input }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: USER_KEYS.all });
+    },
+  });
+}
+
+/** Сброс пароля. Возвращает одноразовую ссылку. */
+export function useMutationResetPassword() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (userId: string) =>
+      apiClient<IssuedLinkResponse>(`/users/${userId}/reset-password`, { method: 'POST' }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: USER_KEYS.all });
+    },
+  });
+}
+
+/**
+ * Прочие действия над пользователем: отзыв, восстановление, сброс второго фактора.
+ *
+ * Все три возвращают пустой ответ и различаются только адресом, поэтому
+ * собраны в один хук с параметром.
+ */
+export function useMutationUserAction() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ userId, action }: { userId: string; action: UserAction }) =>
+      apiClient(`/users/${userId}/${action}`, { method: 'POST' }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: USER_KEYS.all });
+    },
+  });
+}
+
+/** Действия над пользователем, не возвращающие ссылку. */
+export type UserAction = 'revoke' | 'restore' | 'reset-totp';
+```
+
+- [ ] **Step 10: Создать экран пользователей**
+
+`apps/web/src/app/(app)/users/UsersScreen.tsx`:
+
+```tsx
+'use client';
+
+import type { IssuedLinkResponse } from '@cairn/shared';
+import { useState } from 'react';
+
+import {
+  useMutationInviteUser,
+  useMutationResetPassword,
+  useMutationUserAction,
+  useQueryUsers,
+} from '@/api/hooks';
+import { InviteForm } from '@/components/InviteForm';
+import { IssuedLink } from '@/components/IssuedLink';
+import { UserList } from '@/components/UserList';
+
+/** Управление пользователями: приглашение и действия над учётными записями. */
+export function UsersScreen() {
+  const users = useQueryUsers();
+  const invite = useMutationInviteUser();
+  const resetPassword = useMutationResetPassword();
+  const action = useMutationUserAction();
+
+  const [issued, setIssued] = useState<{ link: IssuedLinkResponse; title: string } | null>(null);
+
+  if (users.isPending) {
+    return <p className="text-muted-foreground">Загрузка…</p>;
+  }
+
+  if (users.isError) {
+    return (
+      <p role="alert" className="text-destructive">
+        Не удалось загрузить список пользователей.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <InviteForm
+        onSubmit={(input) =>
+          invite.mutate(input, {
+            onSuccess: (link) => setIssued({ link, title: 'Приглашение создано' }),
+          })
+        }
+        error={invite.error?.message}
+        isSubmitting={invite.isPending}
+      />
+
+      {issued && <IssuedLink link={issued.link} title={issued.title} />}
+
+      <UserList
+        users={users.data}
+        onRevoke={(userId) => action.mutate({ userId, action: 'revoke' })}
+        onRestore={(userId) => action.mutate({ userId, action: 'restore' })}
+        onResetTotp={(userId) => action.mutate({ userId, action: 'reset-totp' })}
+        onResetPassword={(userId) =>
+          resetPassword.mutate(userId, {
+            onSuccess: (link) => setIssued({ link, title: 'Пароль сброшен' }),
+          })
+        }
+      />
+    </div>
+  );
+}
+```
+
+`apps/web/src/app/(app)/users/page.tsx`:
+
+```tsx
+import { UsersScreen } from './UsersScreen';
+
+/** Страница управления пользователями. */
+export default function UsersPage() {
+  return (
+    <main className="mx-auto max-w-4xl space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Пользователи</h1>
+      <UsersScreen />
+    </main>
+  );
+}
+```
+
+- [ ] **Step 11: Создать форму приглашения**
+
+`apps/web/src/components/InviteForm/types.ts`:
+
+```typescript
+import type { InviteUserInput } from '@cairn/shared';
+
+/** Пропсы формы приглашения. */
+export interface IProps {
+  onSubmit: (input: InviteUserInput) => void;
+  error?: string;
+  isSubmitting?: boolean;
+}
+```
+
+`apps/web/src/components/InviteForm/InviteForm.tsx`:
+
+```tsx
+'use client';
+
+import { useState, type FormEvent } from 'react';
+
+import { TextField } from '../TextField';
+import type { IProps } from './types';
+
+/** Приглашение нового пользователя по адресу почты (спека 6.7). */
+export function InviteForm({ onSubmit, error, isSubmitting = false }: IProps) {
+  const [email, setEmail] = useState('');
+
+  const canSubmit = email.trim().length > 0 && !isSubmitting;
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    if (canSubmit) {
+      onSubmit({ email: email.trim().toLowerCase() });
+      setEmail('');
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3">
+      <div className="min-w-64 flex-1">
+        <TextField
+          id="invite-email"
+          label="Пригласить по адресу"
+          type="email"
+          value={email}
+          onChange={setEmail}
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+      >
+        {isSubmitting ? 'Создание…' : 'Пригласить'}
+      </button>
+
+      {error && (
+        <p role="alert" className="w-full text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}
+```
+
+`index.ts`:
+
+```typescript
+export { InviteForm } from './InviteForm';
+export type { IProps } from './types';
+```
+
+`InviteForm.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { InviteForm } from './InviteForm';
+
+describe('InviteForm', () => {
+  it('передаёт адрес в нижнем регистре', async () => {
+    const onSubmit = vi.fn();
+    render(<InviteForm onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Пригласить по адресу'), 'User@Cairn.Local');
+    await userEvent.click(screen.getByRole('button', { name: 'Пригласить' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ email: 'user@cairn.local' });
+  });
+
+  it('не отправляет пустой адрес', async () => {
+    const onSubmit = vi.fn();
+    render(<InviteForm onSubmit={onSubmit} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Пригласить' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('показывает отказ по уже существующему адресу', () => {
+    // Бэкенд отвечает 409 для действующего пользователя (спека 4.6).
+    render(<InviteForm onSubmit={vi.fn()} error="Пользователь уже работает в системе" />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Пользователь уже работает в системе');
+  });
+});
+```
+
+- [ ] **Step 12: Запустить тесты**
+
+Run: `pnpm --filter @cairn/web test src/components`
+Expected: PASS, 47 тестов.
+
+- [ ] **Step 13: Коммит**
 
 ```bash
 git add apps/web/src
-git commit -m "Добавить список пользователей"
+git commit -m "Добавить экран пользователей с приглашением"
 ```
 
 ---
@@ -13515,12 +14051,19 @@ function buildQuery(filters: AuditFilters): string {
 import { useState } from 'react';
 
 import { useQueryAudit } from '@/api/hooks/useQueryAudit';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { AuditTable } from '@/components/AuditTable';
 
-/** Журнал действий с фильтрами (спека 9.1). */
+/**
+ * Журнал действий с фильтрами (спека 9.1).
+ *
+ * Значение фильтра откладывается на 300 мс: без этого каждое нажатие
+ * клавиши отправляло бы запрос и создавало новую запись в кэше.
+ */
 export function AuditScreen() {
   const [action, setAction] = useState('');
-  const audit = useQueryAudit({ action: action || undefined });
+  const debouncedAction = useDebouncedValue(action, FILTER_DELAY_MS);
+  const audit = useQueryAudit({ action: debouncedAction || undefined });
 
   return (
     <div className="space-y-4">
@@ -13548,12 +14091,110 @@ export function AuditScreen() {
       {audit.isSuccess && (
         <>
           <AuditTable entries={audit.data.entries} />
-          <p className="text-sm text-muted-foreground">Всего записей: {audit.data.total}</p>
+          <p className="text-sm text-muted-foreground">
+            Показаны последние {audit.data.entries.length} из {audit.data.total} записей.
+          </p>
         </>
       )}
     </div>
   );
 }
+
+/** Задержка фильтра. */
+const FILTER_DELAY_MS = 300;
+```
+
+Формулировка «показаны последние N из M» намеренно точна: журнал отдаётся страницами по пятьдесят записей, и надпись «всего записей» рядом с неполным списком вводила бы в заблуждение. Постраничный переход в объём этапа не входит — фильтр по типу действия покрывает основной сценарий расследования.
+
+- [ ] **Step 6a: Создать `apps/web/src/hooks/useDebouncedValue.ts`**
+
+```typescript
+'use client';
+
+import { useEffect, useState } from 'react';
+
+/**
+ * Возвращает значение с задержкой.
+ *
+ * Нужен фильтрам: без задержки запрос уходил бы на каждое нажатие клавиши.
+ */
+export function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debounced;
+}
+```
+
+`apps/web/src/hooks/useDebouncedValue.test.ts`:
+
+```typescript
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { useDebouncedValue } from './useDebouncedValue';
+
+describe('useDebouncedValue', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('сразу отдаёт начальное значение', () => {
+    const { result } = renderHook(() => useDebouncedValue('старт', 300));
+
+    expect(result.current).toBe('старт');
+  });
+
+  it('откладывает изменение', () => {
+    const { result, rerender } = renderHook(({ value }) => useDebouncedValue(value, 300), {
+      initialProps: { value: 'первое' },
+    });
+
+    rerender({ value: 'второе' });
+
+    expect(result.current).toBe('первое');
+  });
+
+  it('отдаёт новое значение после задержки', () => {
+    const { result, rerender } = renderHook(({ value }) => useDebouncedValue(value, 300), {
+      initialProps: { value: 'первое' },
+    });
+
+    rerender({ value: 'второе' });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(result.current).toBe('второе');
+  });
+
+  it('отбрасывает промежуточные значения', () => {
+    // Иначе быстрый набор дал бы запрос на каждый символ.
+    const { result, rerender } = renderHook(({ value }) => useDebouncedValue(value, 300), {
+      initialProps: { value: '' },
+    });
+
+    rerender({ value: 'п' });
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    rerender({ value: 'пр' });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(result.current).toBe('пр');
+  });
+});
 ```
 
 `apps/web/src/app/audit/page.tsx`:
@@ -13591,8 +14232,9 @@ git commit -m "Добавить экран журнала действий"
 Пункты меню, ведущие на экраны суперадмина, не показываются остальным: интерфейс не должен предлагать переход, заканчивающийся отказом (спека 9.1).
 
 **Files:**
-- Create: `apps/web/src/components/AppNav/AppNav.tsx`, `types.ts`, `constants.ts`, `index.ts`
-- Modify: `apps/web/src/app/layout.tsx`
+- Create: `apps/web/src/components/AppNav/AppNav.tsx`, `AppNavContainer.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Create: `apps/web/src/app/(app)/layout.tsx`
+- Move: `app/page.tsx`, `app/projects/`, `app/audit/`, `app/users/` → в группу `app/(app)/`
 - Test: `apps/web/src/components/AppNav/AppNav.test.tsx`
 
 - [ ] **Step 1: Написать падающий тест `apps/web/src/components/AppNav/AppNav.test.tsx`**
@@ -13758,16 +14400,34 @@ export function AppNavContainer({ subject }: { subject: CurrentSubjectResponse }
 }
 ```
 
-- [ ] **Step 7: Подключить навигацию в разметку страниц**
+- [ ] **Step 7: Перенести страницы в группу маршрутов `(app)`**
 
-Навигация добавляется в разметку раздела, а не в корневую: страницы входа и приёма приглашения меню не нужны. Создай `apps/web/src/app/(app)/layout.tsx` и перенеси в группу `(app)` страницы сводки, проектов, пользователей и журнала.
+Навигация добавляется в разметку раздела, а не в корневую: страницам входа и приёма приглашения меню не нужно, а на странице входа оно ещё и невозможно — пользователь не определён.
+
+Группа маршрутов в круглых скобках не влияет на адреса: `app/(app)/page.tsx` по-прежнему отвечает на `/`.
+
+Выполни перенос:
+
+```bash
+cd apps/web/src/app
+mkdir -p "(app)"
+git mv page.tsx "(app)/page.tsx"
+git mv projects "(app)/projects"
+git mv audit "(app)/audit"
+git mv users "(app)/users"
+```
+
+Страница `users` создана в Task 50 сразу в группе `(app)` — если её там уже нет, последнюю строку пропусти.
+
+Не переноси: `login/`, `invite/`, `layout.tsx`, `globals.css`.
 
 ```tsx
 import type { CurrentSubjectResponse } from '@cairn/shared';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
-import { apiServer, ApiError } from '@/api';
+import { ApiError } from '@/api';
+import { apiServer } from '@/api/server';
 import { AppNavContainer } from '@/components/AppNav/AppNavContainer';
 
 /** Разметка раздела для вошедших пользователей. */
@@ -13827,9 +14487,12 @@ WORKDIR /app
 
 RUN corepack enable
 
+# Манифесты всех рабочих пространств: pnpm сверяет лок-файл целиком
+# и отказывается ставить, если хоть один importer отсутствует.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile
 
 COPY packages/shared ./packages/shared
@@ -13844,6 +14507,7 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
@@ -13864,6 +14528,7 @@ WORKDIR /app
 RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/api/package.json ./apps/api/
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile
@@ -13879,6 +14544,7 @@ RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json ./packages/shared/
+COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile --prod
 
@@ -13964,9 +14630,17 @@ Caddy получает сертификат автоматически, если
 CAIRN_DOMAIN=localhost
 ```
 
-- [ ] **Step 6: Убрать временную переадресацию из `apps/web/next.config.ts`**
+Проверь, что `CAIRN_WEB_URL` из раздела «Приложение» указывает на тот же домен: из него строятся ссылки приглашений. Со значением по умолчанию все выданные ссылки укажут на `localhost`, и приглашённый не сможет ими воспользоваться.
 
-Переадресация из чанка 12 нужна была только для разработки без прокси. В развёрнутой системе её роль выполняет Caddy, а двойной путь до API — источник расхождений между средами.
+```bash
+# Пример для развёрнутой системы:
+# CAIRN_DOMAIN=cairn.example.com
+# CAIRN_WEB_URL=https://cairn.example.com
+```
+
+- [ ] **Step 6: Ограничить переадресацию режимом разработки в `apps/web/next.config.ts`**
+
+Переадресация, добавленная в чанке 12 (Task 43, Step 9), нужна только для разработки без прокси. В развёрнутой системе её роль выполняет Caddy, и два разных пути до API стали бы источником расхождений между средами. Поэтому переадресация не удаляется, а обусловливается режимом.
 
 ```typescript
 import type { NextConfig } from 'next';
