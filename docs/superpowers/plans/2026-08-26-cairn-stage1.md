@@ -11169,3 +11169,1022 @@ git commit -m "Добавить страницу входа"
 ---
 
 **Результат чанка 12:** веб-приложение поднимается, клиент API пробрасывает сессию с обеих сторон, человек входит с паролем и вторым фактором. Следующий чанк добавляет сводку и карточку проекта.
+
+## Chunk 13: Сводка и карточка проекта
+
+Результат чанка: человек видит доступные ему проекты и открывает карточку, в которой присутствуют только доступные секции.
+
+### Task 44: Приём приглашения
+
+**Files:**
+- Create: `apps/web/src/components/SetPasswordForm/SetPasswordForm.tsx`, `types.ts`, `index.ts`
+- Create: `apps/web/src/app/invite/[token]/page.tsx`, `apps/web/src/app/invite/[token]/InviteScreen.tsx`
+- Test: `apps/web/src/components/SetPasswordForm/SetPasswordForm.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/SetPasswordForm/SetPasswordForm.test.tsx`**
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { SetPasswordForm } from './SetPasswordForm';
+
+describe('SetPasswordForm', () => {
+  it('просит пароль дважды', () => {
+    render(<SetPasswordForm onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText('Новый пароль')).toBeInTheDocument();
+    expect(screen.getByLabelText('Повторите пароль')).toBeInTheDocument();
+  });
+
+  it('передаёт пароль при совпадении', async () => {
+    const onSubmit = vi.fn();
+    render(<SetPasswordForm onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Новый пароль'), 'очень длинный пароль');
+    await userEvent.type(screen.getByLabelText('Повторите пароль'), 'очень длинный пароль');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить пароль' }));
+
+    expect(onSubmit).toHaveBeenCalledWith('очень длинный пароль');
+  });
+
+  it('не отправляет при расхождении', async () => {
+    // Опечатка во втором поле оставила бы человека без доступа: ссылка
+    // одноразовая, а пароль он не запомнил бы.
+    const onSubmit = vi.fn();
+    render(<SetPasswordForm onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Новый пароль'), 'очень длинный пароль');
+    await userEvent.type(screen.getByLabelText('Повторите пароль'), 'другой длинный пароль');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить пароль' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('сообщает о расхождении', async () => {
+    render(<SetPasswordForm onSubmit={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText('Новый пароль'), 'очень длинный пароль');
+    await userEvent.type(screen.getByLabelText('Повторите пароль'), 'другой');
+
+    expect(screen.getByText('Пароли не совпадают')).toBeInTheDocument();
+  });
+
+  it('требует пароль не короче двенадцати символов', async () => {
+    const onSubmit = vi.fn();
+    render(<SetPasswordForm onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Новый пароль'), 'короткий');
+    await userEvent.type(screen.getByLabelText('Повторите пароль'), 'короткий');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить пароль' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/12 символов/)).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/SetPasswordForm`
+Expected: FAIL — «Failed to resolve import "./SetPasswordForm"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/SetPasswordForm/types.ts`**
+
+```typescript
+/** Пропсы формы установки пароля. */
+export interface IProps {
+  /** Вызывается с проверенным паролем. */
+  onSubmit: (password: string) => void;
+  /** Сообщение об ошибке. */
+  error?: string;
+  /** Отправка в процессе. */
+  isSubmitting?: boolean;
+}
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/SetPasswordForm/SetPasswordForm.tsx`**
+
+```tsx
+'use client';
+
+import { useState, type FormEvent } from 'react';
+
+import type { IProps } from './types';
+
+/** Установка пароля по одноразовой ссылке (спека 6.7). */
+export function SetPasswordForm({ onSubmit, error, isSubmitting = false }: IProps) {
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+
+  const isTooShort = password.length > 0 && password.length < MIN_LENGTH;
+  const isMismatched = confirmation.length > 0 && password !== confirmation;
+  const canSubmit = password.length >= MIN_LENGTH && password === confirmation && !isSubmitting;
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    if (canSubmit) {
+      onSubmit(password);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-1">
+        <label htmlFor="new-password" className="block text-sm font-medium">
+          Новый пароль
+        </label>
+        <input
+          id="new-password"
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          className="w-full rounded-md border border-border px-3 py-2"
+        />
+        {isTooShort && (
+          <p className="text-sm text-destructive">Пароль должен быть не короче 12 символов</p>
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <label htmlFor="confirm-password" className="block text-sm font-medium">
+          Повторите пароль
+        </label>
+        <input
+          id="confirm-password"
+          type="password"
+          autoComplete="new-password"
+          value={confirmation}
+          onChange={(event) => setConfirmation(event.target.value)}
+          className="w-full rounded-md border border-border px-3 py-2"
+        />
+        {isMismatched && <p className="text-sm text-destructive">Пароли не совпадают</p>}
+      </div>
+
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="w-full rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+      >
+        {isSubmitting ? 'Сохранение…' : 'Сохранить пароль'}
+      </button>
+    </form>
+  );
+}
+
+/** Минимальная длина пароля. Совпадает с проверкой контракта. */
+const MIN_LENGTH = 12;
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/SetPasswordForm/index.ts`**
+
+```typescript
+export { SetPasswordForm } from './SetPasswordForm';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 6: Создать `apps/web/src/app/invite/[token]/InviteScreen.tsx`**
+
+```tsx
+'use client';
+
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+
+import { apiClient, ApiError } from '@/api';
+import { SetPasswordForm } from '@/components/SetPasswordForm';
+
+/** Пропсы экрана приглашения. */
+interface IProps {
+  token: string;
+}
+
+/**
+ * Установка пароля по ссылке.
+ *
+ * Если у пользователя привязан второй фактор, ответ не содержит сессии —
+ * человек отправляется на обычный вход, где введёт код (спека 4.6).
+ */
+export function InviteScreen({ token }: IProps) {
+  const router = useRouter();
+  const [error, setError] = useState<string>();
+  const [isSubmitting, setSubmitting] = useState(false);
+
+  async function submit(password: string): Promise<void> {
+    setSubmitting(true);
+    setError(undefined);
+
+    try {
+      const response = await apiClient<{ kind: 'session' | 'totp_required' }>(
+        `/invitations/${token}/accept`,
+        { method: 'POST', body: { password } },
+      );
+
+      router.replace(response.kind === 'session' ? '/' : '/login');
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Не удалось сохранить пароль');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return <SetPasswordForm onSubmit={submit} error={error} isSubmitting={isSubmitting} />;
+}
+```
+
+- [ ] **Step 7: Создать `apps/web/src/app/invite/[token]/page.tsx`**
+
+Страница — серверный компонент: она проверяет ссылку до отрисовки формы, чтобы человек с недействительной ссылкой не заполнял поля впустую.
+
+```tsx
+import { notFound } from 'next/navigation';
+
+import { apiServer } from '@/api';
+import { InviteScreen } from './InviteScreen';
+
+/** Страница установки пароля по ссылке. */
+export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+
+  try {
+    await apiServer<{ kind: string }>(`/invitations/${token}`);
+  } catch {
+    notFound();
+  }
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-sm items-center px-4">
+      <div className="w-full space-y-6">
+        <h1 className="text-xl font-semibold">Установка пароля</h1>
+        <InviteScreen token={token} />
+      </div>
+    </main>
+  );
+}
+```
+
+- [ ] **Step 8: Запустить тест**
+
+Run: `pnpm --filter @cairn/web test src/components/SetPasswordForm`
+Expected: PASS, 5 тестов.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить приём приглашения"
+```
+
+---
+
+### Task 45: Провайдер запросов и хуки данных
+
+**Files:**
+- Create: `apps/web/src/api/QueryProvider.tsx`, `apps/web/src/api/hooks/useQueryProjects.ts`, `apps/web/src/api/hooks/useQueryProject.ts`, `apps/web/src/api/hooks/useMutationUpdateProject.ts`, `apps/web/src/api/hooks/index.ts`
+- Modify: `apps/web/src/app/layout.tsx`
+- Test: `apps/web/src/api/hooks/useQueryProjects.test.tsx`
+
+- [ ] **Step 1: Создать `apps/web/src/api/QueryProvider.tsx`**
+
+```tsx
+'use client';
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState, type ReactNode } from 'react';
+
+import { ApiError } from './errors';
+
+/**
+ * Провайдер кэша запросов.
+ *
+ * Клиент создаётся в состоянии компонента, а не в модуле: общий на весь
+ * процесс клиент на сервере смешал бы данные разных пользователей.
+ */
+export function QueryProvider({ children }: { children: ReactNode }) {
+  const [client] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 30_000,
+            retry: (failureCount, error) => {
+              // Отказ в правах и отсутствие объекта повторять бессмысленно.
+              if (error instanceof ApiError && error.status < 500) {
+                return false;
+              }
+
+              return failureCount < 2;
+            },
+          },
+        },
+      }),
+  );
+
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/web/src/api/hooks/useQueryProjects.test.tsx`**
+
+```tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { renderHook, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { useQueryProjects } from './useQueryProjects';
+
+function wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+describe('useQueryProjects', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('возвращает список проектов', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => [{ id: '1', slug: 'proekt', name: 'Проект', lifecycle: 'active' }],
+      }),
+    );
+
+    const { result } = renderHook(() => useQueryProjects(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toHaveLength(1);
+  });
+
+  it('сообщает об ошибке', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }),
+    );
+
+    const { result } = renderHook(() => useQueryProjects(), { wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+
+  it('обращается к нужному адресу', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useQueryProjects(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects');
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/api/hooks`
+Expected: FAIL — «Failed to resolve import "./useQueryProjects"».
+
+- [ ] **Step 4: Создать хуки**
+
+`apps/web/src/api/hooks/useQueryProjects.ts`:
+
+```typescript
+'use client';
+
+import type { ProjectMetadata } from '@cairn/shared';
+import { useQuery } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+
+/** Ключи кэша проектов. Собраны в одном месте, чтобы не разъезжались. */
+export const PROJECT_KEYS = {
+  all: ['projects'] as const,
+  detail: (id: string) => ['projects', id] as const,
+};
+
+/** Список видимых проектов. */
+export function useQueryProjects() {
+  return useQuery({
+    queryKey: PROJECT_KEYS.all,
+    queryFn: () => apiClient<ProjectMetadata[]>('/projects'),
+  });
+}
+```
+
+`apps/web/src/api/hooks/useQueryProject.ts`:
+
+```typescript
+'use client';
+
+import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
+import { useQuery } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+import { PROJECT_KEYS } from './useQueryProjects';
+
+/** Карточка проекта. Состав полей зависит от уровня доступа (спека 5.5). */
+export function useQueryProject(projectId: string) {
+  return useQuery({
+    queryKey: PROJECT_KEYS.detail(projectId),
+    queryFn: () => apiClient<ProjectMetadata | ProjectDetail>(`/projects/${projectId}`),
+  });
+}
+```
+
+`apps/web/src/api/hooks/useMutationUpdateProject.ts`:
+
+```typescript
+'use client';
+
+import type { ProjectDetail, ProjectUpdate } from '@cairn/shared';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+import { PROJECT_KEYS } from './useQueryProjects';
+
+/** Правка полей паспорта проекта. */
+export function useMutationUpdateProject(projectId: string) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: ProjectUpdate) =>
+      apiClient<ProjectDetail>(`/projects/${projectId}`, { method: 'PATCH', body: input }),
+    onSuccess: async () => {
+      // Обновляем и карточку, и список: название видно в обоих местах.
+      await client.invalidateQueries({ queryKey: PROJECT_KEYS.detail(projectId) });
+      await client.invalidateQueries({ queryKey: PROJECT_KEYS.all });
+    },
+  });
+}
+```
+
+`apps/web/src/api/hooks/index.ts`:
+
+```typescript
+export * from './useMutationUpdateProject';
+export * from './useQueryProject';
+export * from './useQueryProjects';
+```
+
+- [ ] **Step 5: Подключить провайдер в `apps/web/src/app/layout.tsx`**
+
+```tsx
+import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
+
+import { QueryProvider } from '@/api/QueryProvider';
+
+import './globals.css';
+
+/** Заголовок вкладки и описание приложения. */
+export const metadata: Metadata = {
+  title: 'CAIRN — реестр проектов',
+  description: 'Где проект развёрнут, чем настроен и на какой стадии находится',
+};
+
+/** Корневая разметка. Язык интерфейса — русский, без локализации (спека 9). */
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="ru">
+      <body className="min-h-screen antialiased">
+        <QueryProvider>{children}</QueryProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+- [ ] **Step 6: Запустить тест**
+
+Run: `pnpm --filter @cairn/web test src/api/hooks`
+Expected: PASS, 3 теста.
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить провайдер запросов и хуки данных"
+```
+
+---
+
+### Task 46: Сводка проектов
+
+**Files:**
+- Create: `apps/web/src/components/ProjectCard/ProjectCard.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Create: `apps/web/src/components/ProjectList/ProjectList.tsx`, `types.ts`, `index.ts`
+- Modify: `apps/web/src/app/page.tsx`
+- Test: `apps/web/src/components/ProjectCard/ProjectCard.test.tsx`, `apps/web/src/components/ProjectList/ProjectList.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/ProjectCard/ProjectCard.test.tsx`**
+
+```tsx
+import { ProjectLifecycle } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+
+import { ProjectCard } from './ProjectCard';
+
+const project = {
+  id: '11111111-1111-1111-1111-111111111111',
+  slug: 'proekt',
+  name: 'Проект',
+  lifecycle: ProjectLifecycle.Active,
+};
+
+describe('ProjectCard', () => {
+  it('показывает название', () => {
+    render(<ProjectCard project={project} />);
+
+    expect(screen.getByText('Проект')).toBeInTheDocument();
+  });
+
+  it('переводит состояние жизненного цикла на русский', () => {
+    render(<ProjectCard project={project} />);
+
+    expect(screen.getByText('Работает')).toBeInTheDocument();
+  });
+
+  it('ведёт на карточку проекта', () => {
+    render(<ProjectCard project={project} />);
+
+    expect(screen.getByRole('link')).toHaveAttribute('href', `/projects/${project.id}`);
+  });
+
+  it('различает приостановленный проект', () => {
+    // Приостановленный не должен выглядеть аварийным (ТЗ 6).
+    render(<ProjectCard project={{ ...project, lifecycle: ProjectLifecycle.Paused }} />);
+
+    expect(screen.getByText('Приостановлен')).toBeInTheDocument();
+  });
+
+  it('показывает архивный проект', () => {
+    render(<ProjectCard project={{ ...project, lifecycle: ProjectLifecycle.Archived }} />);
+
+    expect(screen.getByText('Архив')).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/ProjectCard`
+Expected: FAIL — «Failed to resolve import "./ProjectCard"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/ProjectCard/constants.ts`**
+
+```typescript
+import { ProjectLifecycle } from '@cairn/shared';
+
+/** Названия состояний жизненного цикла на русском. */
+export const LIFECYCLE_LABELS: Record<ProjectLifecycle, string> = {
+  [ProjectLifecycle.Development]: 'В разработке',
+  [ProjectLifecycle.Active]: 'Работает',
+  [ProjectLifecycle.Paused]: 'Приостановлен',
+  [ProjectLifecycle.Archived]: 'Архив',
+};
+
+/** Оформление состояний. Приостановленный намеренно нейтрален, не тревожен. */
+export const LIFECYCLE_STYLES: Record<ProjectLifecycle, string> = {
+  [ProjectLifecycle.Development]: 'bg-muted text-muted-foreground',
+  [ProjectLifecycle.Active]: 'bg-primary text-primary-foreground',
+  [ProjectLifecycle.Paused]: 'bg-muted text-muted-foreground',
+  [ProjectLifecycle.Archived]: 'bg-muted text-muted-foreground',
+};
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/ProjectCard/types.ts`**
+
+```typescript
+import type { ProjectMetadata } from '@cairn/shared';
+
+/** Пропсы карточки проекта в сводке. */
+export interface IProps {
+  project: ProjectMetadata;
+}
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/ProjectCard/ProjectCard.tsx`**
+
+```tsx
+import Link from 'next/link';
+
+import { LIFECYCLE_LABELS, LIFECYCLE_STYLES } from './constants';
+import type { IProps } from './types';
+
+/**
+ * Карточка проекта в сводке.
+ *
+ * Место под индикатор технического статуса появится на этапе 6; сейчас
+ * показывается только состояние жизненного цикла, задаваемое вручную.
+ */
+export function ProjectCard({ project }: IProps) {
+  return (
+    <Link
+      href={`/projects/${project.id}`}
+      className="block rounded-md border border-border p-4 transition hover:border-primary"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="font-medium">{project.name}</h2>
+        <span className={`rounded-md px-2 py-1 text-xs ${LIFECYCLE_STYLES[project.lifecycle]}`}>
+          {LIFECYCLE_LABELS[project.lifecycle]}
+        </span>
+      </div>
+    </Link>
+  );
+}
+```
+
+- [ ] **Step 6: Создать `apps/web/src/components/ProjectCard/index.ts`**
+
+```typescript
+export { ProjectCard } from './ProjectCard';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 7: Написать падающий тест `apps/web/src/components/ProjectList/ProjectList.test.tsx`**
+
+```tsx
+import { ProjectLifecycle } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+
+import { ProjectList } from './ProjectList';
+
+const project = {
+  id: '11111111-1111-1111-1111-111111111111',
+  slug: 'proekt',
+  name: 'Проект',
+  lifecycle: ProjectLifecycle.Active,
+};
+
+describe('ProjectList', () => {
+  it('показывает карточки проектов', () => {
+    render(<ProjectList projects={[project]} />);
+
+    expect(screen.getByText('Проект')).toBeInTheDocument();
+  });
+
+  it('объясняет пустой список отсутствием выданных доступов', () => {
+    // Пустая страница без объяснения выглядит как поломка, хотя это
+    // нормальное состояние для нового пользователя (ТЗ 4.1).
+    render(<ProjectList projects={[]} />);
+
+    expect(screen.getByText(/доступ/i)).toBeInTheDocument();
+  });
+
+  it('перечисляет проекты списком для программ чтения с экрана', () => {
+    render(<ProjectList projects={[project]} />);
+
+    expect(screen.getByRole('list')).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 8: Создать `apps/web/src/components/ProjectList/types.ts` и компонент**
+
+`types.ts`:
+
+```typescript
+import type { ProjectMetadata } from '@cairn/shared';
+
+/** Пропсы списка проектов. */
+export interface IProps {
+  projects: ProjectMetadata[];
+}
+```
+
+`ProjectList.tsx`:
+
+```tsx
+import { ProjectCard } from '../ProjectCard';
+import type { IProps } from './types';
+
+/** Сводка: все доступные субъекту проекты (спека 9.1). */
+export function ProjectList({ projects }: IProps) {
+  if (projects.length === 0) {
+    return (
+      <p className="text-muted-foreground">
+        Пока нет ни одного проекта. Доступ к проектам выдаёт администратор.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {projects.map((project) => (
+        <li key={project.id}>
+          <ProjectCard project={project} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+`index.ts`:
+
+```typescript
+export { ProjectList } from './ProjectList';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 9: Переписать `apps/web/src/app/page.tsx`**
+
+Страница — серверный компонент: данные приходят готовыми, клиентский код не нужен (спека 9.2).
+
+```tsx
+import type { ProjectMetadata } from '@cairn/shared';
+import { redirect } from 'next/navigation';
+
+import { apiServer, ApiError } from '@/api';
+import { ProjectList } from '@/components/ProjectList';
+
+/** Сводка проектов. */
+export default async function HomePage() {
+  let projects: ProjectMetadata[];
+
+  try {
+    projects = await apiServer<ProjectMetadata[]>('/projects');
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 401) {
+      redirect('/login');
+    }
+
+    throw cause;
+  }
+
+  return (
+    <main className="mx-auto max-w-5xl space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Проекты</h1>
+      <ProjectList projects={projects} />
+    </main>
+  );
+}
+```
+
+- [ ] **Step 10: Запустить тесты**
+
+Run: `pnpm --filter @cairn/web test src/components`
+Expected: PASS, 20 тестов.
+
+- [ ] **Step 11: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить сводку проектов"
+```
+
+---
+
+### Task 47: Карточка проекта
+
+**Files:**
+- Create: `apps/web/src/components/ProjectSections/ProjectSections.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Create: `apps/web/src/app/projects/[id]/page.tsx`
+- Test: `apps/web/src/components/ProjectSections/ProjectSections.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/ProjectSections/ProjectSections.test.tsx`**
+
+```tsx
+import { ProjectLifecycle } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+
+import { ProjectSections } from './ProjectSections';
+
+const metadataOnly = {
+  id: '11111111-1111-1111-1111-111111111111',
+  slug: 'proekt',
+  name: 'Проект',
+  lifecycle: ProjectLifecycle.Active,
+};
+
+const detailed = {
+  ...metadataOnly,
+  purpose: 'Назначение проекта',
+  stack: 'Next.js',
+  repoUrl: 'https://example.com/repo',
+  ownerUserId: null,
+  notes: 'Заметки',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-02T00:00:00.000Z',
+};
+
+describe('ProjectSections', () => {
+  it('показывает название на любом уровне', () => {
+    render(<ProjectSections project={metadataOnly} />);
+
+    expect(screen.getByRole('heading', { name: 'Проект' })).toBeInTheDocument();
+  });
+
+  it('на уровне метаданных не показывает поля паспорта', () => {
+    render(<ProjectSections project={metadataOnly} />);
+
+    expect(screen.queryByText('Назначение')).not.toBeInTheDocument();
+  });
+
+  it('на уровне метаданных объясняет, почему полей нет', () => {
+    // Пустая карточка без объяснения читается как ошибка загрузки.
+    render(<ProjectSections project={metadataOnly} />);
+
+    expect(screen.getByText(/содержимое скрыто/i)).toBeInTheDocument();
+  });
+
+  it('на уровне чтения показывает назначение и стек', () => {
+    render(<ProjectSections project={detailed} />);
+
+    expect(screen.getByText('Назначение проекта')).toBeInTheDocument();
+    expect(screen.getByText('Next.js')).toBeInTheDocument();
+  });
+
+  it('показывает ссылку на репозиторий', () => {
+    render(<ProjectSections project={detailed} />);
+
+    expect(screen.getByRole('link', { name: /example\.com/ })).toHaveAttribute(
+      'href',
+      'https://example.com/repo',
+    );
+  });
+
+  it('не показывает пустые поля', () => {
+    render(<ProjectSections project={{ ...detailed, stack: null }} />);
+
+    expect(screen.queryByText('Стек')).not.toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/ProjectSections`
+Expected: FAIL — «Failed to resolve import "./ProjectSections"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/ProjectSections/types.ts`**
+
+```typescript
+import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
+
+/** Пропсы секций проекта. */
+export interface IProps {
+  /** Проект в той проекции, которую вернул API. */
+  project: ProjectMetadata | ProjectDetail;
+}
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/ProjectSections/constants.ts`**
+
+```typescript
+/** Подписи полей паспорта. */
+export const FIELD_LABELS = {
+  purpose: 'Назначение',
+  stack: 'Стек',
+  repoUrl: 'Репозиторий',
+  notes: 'Заметки',
+} as const;
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/ProjectSections/ProjectSections.tsx`**
+
+```tsx
+import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
+
+import { FIELD_LABELS } from './constants';
+import type { IProps } from './types';
+
+/**
+ * Секция «Инфо» карточки проекта.
+ *
+ * Различает уровень доступа по составу пришедших полей: на уровне
+ * метаданных API не присылает паспорт вовсе, и показывать нечего (спека 5.5).
+ * Недоступные секции не приходят от API и потому здесь отсутствуют,
+ * а не показываются заблокированными (ТЗ 8).
+ */
+export function ProjectSections({ project }: IProps) {
+  const detail = isDetailed(project) ? project : null;
+
+  return (
+    <section className="space-y-4">
+      <h1 className="text-2xl font-semibold">{project.name}</h1>
+
+      {detail ? (
+        <dl className="grid gap-3">
+          {detail.purpose && <Field label={FIELD_LABELS.purpose} value={detail.purpose} />}
+          {detail.stack && <Field label={FIELD_LABELS.stack} value={detail.stack} />}
+          {detail.repoUrl && (
+            <div>
+              <dt className="text-sm text-muted-foreground">{FIELD_LABELS.repoUrl}</dt>
+              <dd>
+                <a href={detail.repoUrl} className="underline">
+                  {detail.repoUrl}
+                </a>
+              </dd>
+            </div>
+          )}
+          {detail.notes && <Field label={FIELD_LABELS.notes} value={detail.notes} />}
+        </dl>
+      ) : (
+        <p className="text-muted-foreground">
+          Вам виден список проектов, но содержимое скрыто. Полный доступ выдаёт администратор.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Одно поле паспорта. */
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className="whitespace-pre-wrap">{value}</dd>
+    </div>
+  );
+}
+
+/** Отличает полную проекцию от проекции метаданных. */
+function isDetailed(project: ProjectMetadata | ProjectDetail): project is ProjectDetail {
+  return 'purpose' in project;
+}
+```
+
+- [ ] **Step 6: Создать `apps/web/src/components/ProjectSections/index.ts`**
+
+```typescript
+export { ProjectSections } from './ProjectSections';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 7: Создать `apps/web/src/app/projects/[id]/page.tsx`**
+
+```tsx
+import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
+import { notFound, redirect } from 'next/navigation';
+
+import { apiServer, ApiError } from '@/api';
+import { ProjectSections } from '@/components/ProjectSections';
+
+/** Карточка проекта. */
+export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  let project: ProjectMetadata | ProjectDetail;
+
+  try {
+    project = await apiServer<ProjectMetadata | ProjectDetail>(`/projects/${id}`);
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 401) {
+      redirect('/login');
+    }
+
+    // Закрытый проект неотличим от несуществующего — так и показываем (ТЗ 4.2).
+    if (cause instanceof ApiError && cause.status === 404) {
+      notFound();
+    }
+
+    throw cause;
+  }
+
+  return (
+    <main className="mx-auto max-w-3xl space-y-6 p-6">
+      <ProjectSections project={project} />
+    </main>
+  );
+}
+```
+
+- [ ] **Step 8: Запустить все тесты фронтенда**
+
+```bash
+pnpm --filter @cairn/web test
+pnpm --filter @cairn/web typecheck
+```
+
+Expected: PASS, 26 тестов; типы без ошибок.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить карточку проекта"
+```
+
+---
+
+**Результат чанка 13:** человек видит доступные проекты, открывает карточку и получает ровно тот состав полей, который разрешён его уровнем доступа. Следующий чанк добавляет экраны администрирования и развёртывание.
