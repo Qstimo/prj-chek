@@ -6363,3 +6363,658 @@ git commit -m "Добавить контроллер аутентификаци�
 ---
 
 **Результат чанка 7:** браузер входит в систему, получает cookie и ходит по защищённым маршрутам; тело запроса проверяется схемами контракта. Следующий чанк добавляет приглашения, сброс пароля и команды консоли.
+
+## Chunk 8: Приглашения и сброс пароля
+
+Результат чанка: пользователи появляются по приглашению, пароль сбрасывается тем же механизмом, ссылка не даёт обойти второй фактор.
+
+### Task 29: Создание приглашения
+
+Три исхода различаются по существу, поэтому вынесены в отдельную задачу (спека 4.6).
+
+**Files:**
+- Create: `apps/api/src/invitations/invitations.service.ts`, `apps/api/src/invitations/invitations.types.ts`
+- Test: `apps/api/src/invitations/invitations.service.test.ts`
+
+- [ ] **Step 1: Создать `apps/api/src/invitations/invitations.types.ts`**
+
+```typescript
+/** Выданная одноразовая ссылка. */
+export interface IssuedLink {
+  /** Токен в открытом виде. Показывается суперадмину один раз и не хранится. */
+  token: string;
+  /** Идентификатор пользователя, которому она выдана. */
+  userId: string;
+  /** Момент истечения. */
+  expiresAt: Date;
+}
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/invitations/invitations.service.test.ts`**
+
+```typescript
+import { InvitationKind, SubjectKind } from '@cairn/shared';
+import { ConflictException } from '@nestjs/common';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { PasswordService } from '../auth/password.service';
+import { SessionsRepository } from '../auth/sessions.repository';
+import { hashToken } from '../auth/token';
+import { InvitationsService } from './invitations.service';
+import { auditLog, invitations, subjects, users } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('InvitationsService.invite', () => {
+  let testDb: TestDatabase;
+  let service: InvitationsService;
+  let admin: { id: string; subjectId: string };
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    service = new InvitationsService(
+      testDb.db,
+      new PasswordService(),
+      new SessionsRepository(testDb.db),
+      new AuditService(),
+    );
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    const [user] = await testDb.db
+      .insert(users)
+      .values({ subjectId: subject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+
+    admin = { id: user!.id, subjectId: subject!.id };
+  });
+
+  const actor = () => ({ id: admin.subjectId, label: 'admin@cairn.local', userId: admin.id });
+
+  describe('неизвестный адрес', () => {
+    it('создаёт субъект, пользователя и ссылку', async () => {
+      const link = await service.invite(actor(), 'new@cairn.local');
+
+      expect(link.token).toBeTruthy();
+      expect(await testDb.db.select().from(users)).toHaveLength(2);
+    });
+
+    it('создаёт субъект сразу, чтобы доступы можно было выдать заранее', async () => {
+      // Матрица доступов должна быть полной до первого входа (спека 4.6).
+      await service.invite(actor(), 'new@cairn.local');
+
+      expect(await testDb.db.select().from(subjects)).toHaveLength(2);
+    });
+
+    it('не хранит токен открытым', async () => {
+      const link = await service.invite(actor(), 'new@cairn.local');
+
+      const [stored] = await testDb.db.select().from(invitations);
+
+      expect(stored?.tokenHash).toBe(hashToken(link.token));
+      expect(stored?.tokenHash).not.toBe(link.token);
+    });
+
+    it('помечает ссылку как приглашение', async () => {
+      await service.invite(actor(), 'new@cairn.local');
+
+      const [stored] = await testDb.db.select().from(invitations);
+
+      expect(stored?.kind).toBe(InvitationKind.Invitation);
+    });
+
+    it('пишет создание в журнал', async () => {
+      await service.invite(actor(), 'new@cairn.local');
+
+      const [entry] = await testDb.db.select().from(auditLog);
+
+      expect(entry?.action).toBe(AuditAction.InvitationCreated);
+    });
+  });
+
+  describe('адрес известен, пароль не задан', () => {
+    it('переиспользует пользователя и выдаёт новую ссылку', async () => {
+      await service.invite(actor(), 'new@cairn.local');
+      await service.invite(actor(), 'new@cairn.local');
+
+      expect(await testDb.db.select().from(users)).toHaveLength(2);
+      expect(await testDb.db.select().from(invitations)).toHaveLength(2);
+    });
+
+    it('гасит предыдущую ссылку', async () => {
+      // Иначе две живые ссылки на одну учётную запись расширяют поверхность атаки.
+      const first = await service.invite(actor(), 'new@cairn.local');
+      await service.invite(actor(), 'new@cairn.local');
+
+      expect(await service.findUsableLink(first.token)).toBeNull();
+    });
+
+    it('пишет повторную выдачу отдельным событием', async () => {
+      // Спека 7.2 требует различать создание и повторную выдачу.
+      await service.invite(actor(), 'new@cairn.local');
+      await service.invite(actor(), 'new@cairn.local');
+
+      const entries = await testDb.db.select().from(auditLog);
+
+      expect(entries.map((entry) => entry.action)).toEqual([
+        AuditAction.InvitationCreated,
+        AuditAction.InvitationReissued,
+      ]);
+    });
+  });
+
+  describe('адрес известен, пользователь активен', () => {
+    it('отклоняет приглашение', async () => {
+      // Молчаливое превращение приглашения в сброс обнулило бы пароль
+      // работающему человеку (спека 4.6).
+      const link = await service.invite(actor(), 'new@cairn.local');
+      await service.acceptLink(link.token, 'очень длинный пароль', {});
+
+      await expect(service.invite(actor(), 'new@cairn.local')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('сообщает, что нужен сброс пароля', async () => {
+      const link = await service.invite(actor(), 'new@cairn.local');
+      await service.acceptLink(link.token, 'очень длинный пароль', {});
+
+      await expect(service.invite(actor(), 'new@cairn.local')).rejects.toThrow(/сброс/i);
+    });
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/invitations`
+Expected: FAIL — «Failed to resolve import "./invitations.service"».
+
+- [ ] **Step 4: Создать `apps/api/src/invitations/invitations.service.ts`**
+
+Файл получится крупным, поэтому в нём только работа со ссылками: создание, поиск, приём. Управление пользователями живёт в отдельном модуле следующего чанка.
+
+```typescript
+import { AuditSubjectKind, InvitationKind, SubjectKind } from '@cairn/shared';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { and, eq, gt, isNull } from 'drizzle-orm';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { PasswordService } from '../auth/password.service';
+import { SessionsRepository, type SessionOrigin } from '../auth/sessions.repository';
+import { generateToken, hashToken } from '../auth/token';
+import { DATABASE } from '../db/db.module';
+import type { Database, Executor } from '../db/db.types';
+import { invitations, subjects, users, type Invitation, type User } from '../db/schema';
+import type { IssuedLink } from './invitations.types';
+
+/** Суперадмин, выдающий ссылку. */
+export interface InvitingActor {
+  /** Идентификатор его субъекта — для журнала. */
+  id: string;
+  label: string;
+  /** Идентификатор его записи пользователя — для поля «кто пригласил». */
+  userId: string;
+}
+
+/**
+ * Одноразовые ссылки на установку пароля: приглашения и сбросы (спека 4.6).
+ *
+ * Живая ссылка возможна только у пользователя без действующего пароля.
+ * Это единственный инвариант, на котором держится безопасность механизма:
+ * ссылка на смену пароля активному пользователю была бы обходом входа.
+ */
+@Injectable()
+export class InvitationsService {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly passwords: PasswordService,
+    private readonly sessions: SessionsRepository,
+    private readonly audit: AuditService,
+  ) {}
+
+  /**
+   * Приглашает пользователя.
+   *
+   * Три исхода: неизвестный адрес — создаётся всё с нуля; известный без
+   * пароля — выдаётся новая ссылка вместо прежней; активный пользователь —
+   * отказ с указанием на сброс пароля.
+   */
+  async invite(actor: InvitingActor, email: string): Promise<IssuedLink> {
+    const normalized = email.toLowerCase();
+
+    return this.db.transaction(async (tx) => {
+      const existing = await this.findUserByEmail(tx, normalized);
+
+      if (existing?.passwordHash) {
+        throw new ConflictException(
+          'Пользователь с таким адресом уже работает в системе. Для смены пароля используйте сброс.',
+        );
+      }
+
+      const user = existing ?? (await this.createUser(tx, normalized));
+      const link = await this.issueLink(tx, user.id, InvitationKind.Invitation, actor.userId);
+
+      await this.audit.record(
+        tx,
+        { kind: AuditSubjectKind.User, id: actor.id, label: actor.label },
+        {
+          action: existing ? AuditAction.InvitationReissued : AuditAction.InvitationCreated,
+          entityType: 'user',
+          entityId: user.id,
+          metadata: { email: normalized },
+        },
+      );
+
+      return link;
+    });
+  }
+
+  /**
+   * Сбрасывает пароль: обнуляет его, завершает сессии и выдаёт ссылку.
+   *
+   * Все три действия в одной транзакции — иначе при сбое посередине
+   * пользователь остался бы без пароля и без способа его задать.
+   */
+  async resetPassword(actor: InvitingActor, userId: string): Promise<IssuedLink> {
+    return this.db.transaction(async (tx) => {
+      const [user] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+
+      if (!user) {
+        throw new NotFoundException('Пользователь не найден');
+      }
+
+      await tx.update(users).set({ passwordHash: null, updatedAt: new Date() }).where(eq(users.id, userId));
+
+      const revokedSessions = await this.sessions.revokeAllForSubject(tx, user.subjectId);
+      const link = await this.issueLink(tx, userId, InvitationKind.PasswordReset, actor.userId);
+
+      await this.audit.record(
+        tx,
+        { kind: AuditSubjectKind.User, id: actor.id, label: actor.label },
+        {
+          action: AuditAction.PasswordResetRequested,
+          entityType: 'user',
+          entityId: userId,
+          metadata: { revokedSessions },
+        },
+      );
+
+      return link;
+    });
+  }
+
+  /** Находит действующую ссылку по токену. Возвращает `null`, если она непригодна. */
+  async findUsableLink(token: string): Promise<Invitation | null> {
+    const [link] = await this.db
+      .select()
+      .from(invitations)
+      .where(
+        and(
+          eq(invitations.tokenHash, hashToken(token)),
+          isNull(invitations.acceptedAt),
+          gt(invitations.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    return link ?? null;
+  }
+
+  /**
+   * Устанавливает пароль по ссылке.
+   *
+   * Возвращает токен сессии либо `null`, если у пользователя привязан второй
+   * фактор: тогда вход завершается обычным челленджем, и ссылка не даёт
+   * обойти вторую проверку (спека 4.6).
+   */
+  async acceptLink(
+    token: string,
+    password: string,
+    origin: SessionOrigin,
+  ): Promise<{ sessionToken: string | null; user: User }> {
+    const link = await this.findUsableLink(token);
+
+    if (!link) {
+      throw new NotFoundException('Ссылка недействительна или уже использована');
+    }
+
+    return this.db.transaction(async (tx) => {
+      const [user] = await tx.select().from(users).where(eq(users.id, link.userId)).limit(1);
+
+      if (!user) {
+        throw new NotFoundException('Пользователь не найден');
+      }
+
+      await tx
+        .update(users)
+        .set({ passwordHash: await this.passwords.hash(password), updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+
+      await tx
+        .update(invitations)
+        .set({ acceptedAt: new Date() })
+        .where(eq(invitations.id, link.id));
+
+      await this.audit.record(
+        tx,
+        { kind: AuditSubjectKind.User, id: user.subjectId, label: user.email },
+        {
+          action:
+            link.kind === InvitationKind.PasswordReset
+              ? AuditAction.PasswordResetCompleted
+              : AuditAction.InvitationAccepted,
+          entityType: 'user',
+          entityId: user.id,
+        },
+      );
+
+      if (user.isTotpEnabled) {
+        return { sessionToken: null, user };
+      }
+
+      return { sessionToken: await this.sessions.create(tx, user.subjectId, origin), user };
+    });
+  }
+
+  /** Создаёт субъект и пользователя без пароля. */
+  private async createUser(tx: Executor, email: string): Promise<User> {
+    const [subject] = await tx
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: email })
+      .returning();
+
+    const [user] = await tx.insert(users).values({ subjectId: subject!.id, email }).returning();
+
+    return user!;
+  }
+
+  /** Гасит прежние ссылки пользователя и выдаёт новую. */
+  private async issueLink(
+    tx: Executor,
+    userId: string,
+    kind: InvitationKind,
+    invitedBy: string,
+  ): Promise<IssuedLink> {
+    await tx
+      .update(invitations)
+      .set({ expiresAt: new Date(0) })
+      .where(and(eq(invitations.userId, userId), isNull(invitations.acceptedAt)));
+
+    const token = generateToken();
+    const expiresAt = new Date(
+      Date.now() + (kind === InvitationKind.Invitation ? INVITATION_TTL_MS : RESET_TTL_MS),
+    );
+
+    await tx.insert(invitations).values({
+      userId,
+      tokenHash: hashToken(token),
+      kind,
+      invitedBy,
+      expiresAt,
+    });
+
+    return { token, userId, expiresAt };
+  }
+
+  /** Находит пользователя по адресу. */
+  private async findUserByEmail(tx: Executor, email: string): Promise<User | null> {
+    const [user] = await tx.select().from(users).where(eq(users.email, email)).limit(1);
+
+    return user ?? null;
+  }
+}
+
+/** Срок жизни приглашения — 72 часа (спека 4.6). */
+const INVITATION_TTL_MS = 72 * 60 * 60 * 1000;
+
+/** Срок жизни ссылки сброса — 4 часа: она опаснее приглашения. */
+const RESET_TTL_MS = 4 * 60 * 60 * 1000;
+```
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/invitations`
+Expected: PASS, 10 тестов.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/invitations
+git commit -m "Добавить создание приглашений"
+```
+
+---
+
+### Task 30: Сброс пароля и приём ссылки
+
+**Files:**
+- Test: `apps/api/src/invitations/password-reset.test.ts`
+
+Реализация написана в предыдущей задаче — здесь она покрывается тестами на свойства, которые легко нарушить при последующих правках.
+
+- [ ] **Step 1: Написать тест `apps/api/src/invitations/password-reset.test.ts`**
+
+```typescript
+import { InvitationKind, SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { PasswordService } from '../auth/password.service';
+import { SessionsRepository } from '../auth/sessions.repository';
+import { InvitationsService } from './invitations.service';
+import { auditLog, invitations, sessions, subjects, users } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('сброс пароля', () => {
+  let testDb: TestDatabase;
+  let service: InvitationsService;
+  let sessionsRepository: SessionsRepository;
+  let admin: { id: string; subjectId: string };
+  let target: { id: string; subjectId: string };
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    sessionsRepository = new SessionsRepository(testDb.db);
+    service = new InvitationsService(
+      testDb.db,
+      new PasswordService(),
+      sessionsRepository,
+      new AuditService(),
+    );
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    const [adminUser] = await testDb.db
+      .insert(users)
+      .values({ subjectId: adminSubject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+    admin = { id: adminUser!.id, subjectId: adminSubject!.id };
+
+    const [targetSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+    const [targetUser] = await testDb.db
+      .insert(users)
+      .values({
+        subjectId: targetSubject!.id,
+        email: 'user@cairn.local',
+        passwordHash: await new PasswordService().hash('старый пароль'),
+      })
+      .returning();
+    target = { id: targetUser!.id, subjectId: targetSubject!.id };
+  });
+
+  const actor = () => ({ id: admin.subjectId, label: 'admin@cairn.local', userId: admin.id });
+
+  it('обнуляет пароль', async () => {
+    await service.resetPassword(actor(), target.id);
+
+    const [user] = await testDb.db.select().from(users).where(eq(users.id, target.id));
+
+    expect(user?.passwordHash).toBeNull();
+  });
+
+  it('завершает все сессии пользователя', async () => {
+    // Иначе сброс пароля не закрывал бы уже открытый доступ (спека 4.6).
+    const token = await sessionsRepository.create(testDb.db, target.subjectId, {});
+
+    await service.resetPassword(actor(), target.id);
+
+    expect(await sessionsRepository.findActive(token)).toBeNull();
+  });
+
+  it('не трогает сессии других пользователей', async () => {
+    const adminToken = await sessionsRepository.create(testDb.db, admin.subjectId, {});
+
+    await service.resetPassword(actor(), target.id);
+
+    expect(await sessionsRepository.findActive(adminToken)).not.toBeNull();
+  });
+
+  it('помечает ссылку как сброс пароля', async () => {
+    await service.resetPassword(actor(), target.id);
+
+    const [link] = await testDb.db.select().from(invitations);
+
+    expect(link?.kind).toBe(InvitationKind.PasswordReset);
+  });
+
+  it('записывает число завершённых сессий в журнал', async () => {
+    await sessionsRepository.create(testDb.db, target.subjectId, {});
+    await sessionsRepository.create(testDb.db, target.subjectId, {});
+
+    await service.resetPassword(actor(), target.id);
+
+    const [entry] = await testDb.db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, AuditAction.PasswordResetRequested));
+
+    expect(entry?.metadata).toMatchObject({ revokedSessions: 2 });
+  });
+
+  it('после сброса вход по старому паролю невозможен', async () => {
+    await service.resetPassword(actor(), target.id);
+
+    const [user] = await testDb.db.select().from(users).where(eq(users.id, target.id));
+
+    expect(user?.passwordHash).toBeNull();
+  });
+});
+
+describe('приём ссылки', () => {
+  let testDb: TestDatabase;
+  let service: InvitationsService;
+  let admin: { id: string; subjectId: string };
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    service = new InvitationsService(
+      testDb.db,
+      new PasswordService(),
+      new SessionsRepository(testDb.db),
+      new AuditService(),
+    );
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    const [user] = await testDb.db
+      .insert(users)
+      .values({ subjectId: subject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+
+    admin = { id: user!.id, subjectId: subject!.id };
+  });
+
+  const actor = () => ({ id: admin.subjectId, label: 'admin@cairn.local', userId: admin.id });
+
+  it('выдаёт сессию, если второй фактор не привязан', async () => {
+    const link = await service.invite(actor(), 'new@cairn.local');
+
+    const { sessionToken } = await service.acceptLink(link.token, 'очень длинный пароль', {});
+
+    expect(sessionToken).not.toBeNull();
+  });
+
+  it('не выдаёт сессию, если второй фактор привязан', async () => {
+    // Иначе ссылка сброса стала бы обходом второго фактора (спека 4.6).
+    const link = await service.invite(actor(), 'new@cairn.local');
+    await testDb.db.update(users).set({ isTotpEnabled: true }).where(eq(users.id, link.userId));
+
+    const { sessionToken } = await service.acceptLink(link.token, 'очень длинный пароль', {});
+
+    expect(sessionToken).toBeNull();
+  });
+
+  it('гасит ссылку после использования', async () => {
+    const link = await service.invite(actor(), 'new@cairn.local');
+    await service.acceptLink(link.token, 'очень длинный пароль', {});
+
+    await expect(service.acceptLink(link.token, 'другой пароль', {})).rejects.toThrow();
+  });
+
+  it('отвергает истёкшую ссылку', async () => {
+    const link = await service.invite(actor(), 'new@cairn.local');
+    await testDb.db.update(invitations).set({ expiresAt: new Date(0) });
+
+    await expect(service.acceptLink(link.token, 'очень длинный пароль', {})).rejects.toThrow();
+  });
+
+  it('отвергает неизвестный токен', async () => {
+    await expect(service.acceptLink('нет такого', 'очень длинный пароль', {})).rejects.toThrow();
+  });
+});
+```
+
+Импорт `eq` из `drizzle-orm` добавь в начало файла: `import { eq } from 'drizzle-orm';`.
+
+- [ ] **Step 2: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/invitations`
+Expected: PASS, 21 тест. Реализация написана в Task 29 — если тест падает, ошибка в ней, а не в отсутствии кода.
+
+- [ ] **Step 3: Коммит**
+
+```bash
+git add apps/api/src/invitations
+git commit -m "Покрыть тестами сброс пароля и приём ссылки"
+```
+
+---
+
+**Результат чанка 8:** пользователи появляются по приглашению, пароль сбрасывается атомарно вместе с завершением сессий, ссылка не обходит второй фактор. Следующий чанк добавляет управление пользователями, команды консоли и HTTP-слой приглашений.
