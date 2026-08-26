@@ -7018,3 +7018,943 @@ git commit -m "Покрыть тестами сброс пароля и приё
 ---
 
 **Результат чанка 8:** пользователи появляются по приглашению, пароль сбрасывается атомарно вместе с завершением сессий, ссылка не обходит второй фактор. Следующий чанк добавляет управление пользователями, команды консоли и HTTP-слой приглашений.
+
+## Chunk 9: Пользователи и команды консоли
+
+Результат чанка: суперадмин управляет пользователями через API, первый администратор создаётся с консоли, доступ восстанавливается без входа в систему.
+
+### Task 31: Сервис пользователей
+
+**Files:**
+- Create: `apps/api/src/users/users.service.ts`
+- Create: `packages/shared/src/schemas/user.ts`
+- Modify: `packages/shared/src/index.ts`
+- Test: `apps/api/src/users/users.service.test.ts`
+
+- [ ] **Step 1: Создать `packages/shared/src/schemas/user.ts`**
+
+```typescript
+import { z } from 'zod';
+
+import { InvitationKind, SubjectKind } from '../enums.js';
+
+/**
+ * Пользователь в списке.
+ *
+ * Состояние «нет действующего пароля» не различает приглашённого и того,
+ * кому пароль сбросили; их различает вид последней выданной ссылки (спека 4.2).
+ */
+export const userRowSchema = z.object({
+  id: z.string().uuid(),
+  subjectId: z.string().uuid(),
+  subjectKind: z.nativeEnum(SubjectKind),
+  email: z.string().email(),
+  isSuperadmin: z.boolean(),
+  isTotpEnabled: z.boolean(),
+  hasPassword: z.boolean(),
+  isRevoked: z.boolean(),
+  /** Вид последней ссылки; пусто, если ссылок не выдавалось. */
+  lastLinkKind: z.nativeEnum(InvitationKind).nullable(),
+  createdAt: z.string(),
+});
+
+/** Приглашение нового пользователя. */
+export const inviteUserSchema = z.object({
+  email: z.string().email().toLowerCase(),
+});
+
+/** Выданная ссылка. Показывается суперадмину один раз. */
+export const issuedLinkSchema = z.object({
+  url: z.string().url(),
+  expiresAt: z.string(),
+});
+
+/** Пользователь в списке. */
+export type UserRow = z.infer<typeof userRowSchema>;
+
+/** Данные приглашения. */
+export type InviteUserInput = z.infer<typeof inviteUserSchema>;
+
+/** Выданная ссылка. */
+export type IssuedLinkResponse = z.infer<typeof issuedLinkSchema>;
+```
+
+- [ ] **Step 2: Дополнить `packages/shared/src/index.ts`**
+
+```typescript
+export * from './enums';
+export * from './schemas/auth';
+export * from './schemas/grant';
+export * from './schemas/project';
+export * from './schemas/user';
+```
+
+- [ ] **Step 3: Написать падающий тест `apps/api/src/users/users.service.test.ts`**
+
+```typescript
+import { InvitationKind, SubjectKind } from '@cairn/shared';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { SessionsRepository } from '../auth/sessions.repository';
+import { UsersService } from './users.service';
+import { auditLog, invitations, subjects, users } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('UsersService', () => {
+  let testDb: TestDatabase;
+  let service: UsersService;
+  let sessions: SessionsRepository;
+  let admin: { userId: string; subjectId: string };
+  let target: { userId: string; subjectId: string };
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    sessions = new SessionsRepository(testDb.db);
+    service = new UsersService(testDb.db, sessions, new AuditService());
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    const [adminUser] = await testDb.db
+      .insert(users)
+      .values({
+        subjectId: adminSubject!.id,
+        email: 'admin@cairn.local',
+        isSuperadmin: true,
+        passwordHash: 'хэш',
+      })
+      .returning();
+    admin = { userId: adminUser!.id, subjectId: adminSubject!.id };
+
+    const [targetSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+    const [targetUser] = await testDb.db
+      .insert(users)
+      .values({ subjectId: targetSubject!.id, email: 'user@cairn.local', passwordHash: 'хэш' })
+      .returning();
+    target = { userId: targetUser!.id, subjectId: targetSubject!.id };
+  });
+
+  const actor = () => ({ id: admin.subjectId, label: 'admin@cairn.local' });
+
+  describe('list', () => {
+    it('возвращает всех пользователей', async () => {
+      expect(await service.list()).toHaveLength(2);
+    });
+
+    it('сообщает, есть ли действующий пароль', async () => {
+      await testDb.db.update(users).set({ passwordHash: null }).where(eq(users.id, target.userId));
+
+      const rows = await service.list();
+
+      expect(rows.find((row) => row.id === target.userId)?.hasPassword).toBe(false);
+    });
+
+    it('не отдаёт хэш пароля и секрет второго фактора', async () => {
+      // Секреты не попадают в списочные ответы (ТЗ 9).
+      const [row] = await service.list();
+
+      expect(JSON.stringify(row)).not.toContain('хэш');
+      expect(row).not.toHaveProperty('passwordHash');
+      expect(row).not.toHaveProperty('totpSecretEncrypted');
+    });
+
+    it('показывает вид последней ссылки', async () => {
+      await testDb.db.insert(invitations).values({
+        userId: target.userId,
+        tokenHash: 'хэш-токена',
+        kind: InvitationKind.PasswordReset,
+        expiresAt: new Date(Date.now() + 10_000),
+      });
+
+      const rows = await service.list();
+
+      expect(rows.find((row) => row.id === target.userId)?.lastLinkKind).toBe(
+        InvitationKind.PasswordReset,
+      );
+    });
+
+    it('отражает отзыв субъекта', async () => {
+      await testDb.db
+        .update(subjects)
+        .set({ revokedAt: new Date() })
+        .where(eq(subjects.id, target.subjectId));
+
+      const rows = await service.list();
+
+      expect(rows.find((row) => row.id === target.userId)?.isRevoked).toBe(true);
+    });
+  });
+
+  describe('revoke', () => {
+    it('помечает субъект отозванным', async () => {
+      await service.revoke(actor(), target.userId);
+
+      const [subject] = await testDb.db
+        .select()
+        .from(subjects)
+        .where(eq(subjects.id, target.subjectId));
+
+      expect(subject?.revokedAt).not.toBeNull();
+    });
+
+    it('завершает сессии отозванного', async () => {
+      // Отзыв должен закрывать доступ немедленно (спека 4.5).
+      const token = await sessions.create(testDb.db, target.subjectId, {});
+
+      await service.revoke(actor(), target.userId);
+
+      expect(await sessions.findActive(token)).toBeNull();
+    });
+
+    it('записывает число завершённых сессий в журнал', async () => {
+      await sessions.create(testDb.db, target.subjectId, {});
+
+      await service.revoke(actor(), target.userId);
+
+      const [entry] = await testDb.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.SubjectRevoked));
+
+      expect(entry?.metadata).toMatchObject({ revokedSessions: 1 });
+    });
+
+    it('не позволяет отозвать самого себя', async () => {
+      // Иначе единственный суперадмин способен закрыть систему навсегда.
+      await expect(service.revoke(actor(), admin.userId)).rejects.toThrow(/себя/i);
+    });
+  });
+
+  describe('restore', () => {
+    it('снимает отзыв', async () => {
+      await service.revoke(actor(), target.userId);
+      await service.restore(actor(), target.userId);
+
+      const [subject] = await testDb.db
+        .select()
+        .from(subjects)
+        .where(eq(subjects.id, target.subjectId));
+
+      expect(subject?.revokedAt).toBeNull();
+    });
+
+    it('не возвращает завершённые сессии', async () => {
+      // Восстановление даёт право войти заново, а не оживляет старый доступ.
+      const token = await sessions.create(testDb.db, target.subjectId, {});
+      await service.revoke(actor(), target.userId);
+      await service.restore(actor(), target.userId);
+
+      expect(await sessions.findActive(token)).toBeNull();
+    });
+  });
+
+  describe('resetTotp', () => {
+    it('снимает привязку второго фактора', async () => {
+      await testDb.db
+        .update(users)
+        .set({ isTotpEnabled: true, totpSecretEncrypted: 'v1:a:b:c' })
+        .where(eq(users.id, target.userId));
+
+      await service.resetTotp(actor(), target.userId);
+
+      const [user] = await testDb.db.select().from(users).where(eq(users.id, target.userId));
+
+      expect(user?.isTotpEnabled).toBe(false);
+      expect(user?.totpSecretEncrypted).toBeNull();
+    });
+
+    it('пишет сброс в журнал', async () => {
+      await service.resetTotp(actor(), target.userId);
+
+      const [entry] = await testDb.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.TotpReset));
+
+      expect(entry).toBeDefined();
+    });
+  });
+});
+```
+
+- [ ] **Step 4: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/users`
+Expected: FAIL — «Failed to resolve import "./users.service"».
+
+- [ ] **Step 5: Создать `apps/api/src/users/users.service.ts`**
+
+```typescript
+import { AuditSubjectKind, type UserRow } from '@cairn/shared';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { desc, eq, isNull } from 'drizzle-orm';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction, type AuditActor } from '../audit/audit.types';
+import { SessionsRepository } from '../auth/sessions.repository';
+import { DATABASE } from '../db/db.module';
+import type { Database } from '../db/db.types';
+import { invitations, subjects, users } from '../db/schema';
+
+/** Суперадмин, выполняющий действие. */
+export interface ManagingActor {
+  /** Идентификатор его субъекта. */
+  id: string;
+  label: string;
+}
+
+/**
+ * Управление пользователями (спека 9.1).
+ *
+ * Все методы доступны только суперадмину; это проверяет guard на контроллере,
+ * поэтому здесь проверок прав нет (спека 8).
+ */
+@Injectable()
+export class UsersService {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly sessions: SessionsRepository,
+    private readonly audit: AuditService,
+  ) {}
+
+  /**
+   * Возвращает список пользователей.
+   *
+   * Хэш пароля и секрет второго фактора не попадают в ответ: секреты
+   * не должны появляться в списочных ответах (ТЗ 9).
+   */
+  async list(): Promise<UserRow[]> {
+    const rows = await this.db
+      .select({
+        id: users.id,
+        subjectId: users.subjectId,
+        subjectKind: subjects.kind,
+        email: users.email,
+        isSuperadmin: users.isSuperadmin,
+        isTotpEnabled: users.isTotpEnabled,
+        passwordHash: users.passwordHash,
+        revokedAt: subjects.revokedAt,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .innerJoin(subjects, eq(subjects.id, users.subjectId))
+      .orderBy(users.createdAt);
+
+    const lastLinks = await this.lastLinkKinds();
+
+    return rows.map((row) => ({
+      id: row.id,
+      subjectId: row.subjectId,
+      subjectKind: row.subjectKind,
+      email: row.email,
+      isSuperadmin: row.isSuperadmin,
+      isTotpEnabled: row.isTotpEnabled,
+      hasPassword: row.passwordHash !== null,
+      isRevoked: row.revokedAt !== null,
+      lastLinkKind: lastLinks.get(row.id) ?? null,
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  /** Отзывает субъект пользователя и завершает его сессии. */
+  async revoke(actor: ManagingActor, userId: string): Promise<void> {
+    const user = await this.requireUser(userId);
+
+    if (user.subjectId === actor.id) {
+      throw new BadRequestException(
+        'Нельзя отозвать самого себя: система осталась бы без администратора.',
+      );
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(subjects)
+        .set({ revokedAt: new Date() })
+        .where(eq(subjects.id, user.subjectId));
+
+      const revokedSessions = await this.sessions.revokeAllForSubject(tx, user.subjectId);
+
+      await this.audit.record(tx, this.actorFor(actor), {
+        action: AuditAction.SubjectRevoked,
+        entityType: 'user',
+        entityId: userId,
+        metadata: { revokedSessions },
+      });
+    });
+  }
+
+  /**
+   * Снимает отзыв.
+   *
+   * Завершённые сессии не восстанавливаются: восстановление возвращает право
+   * войти заново, а не оживляет прежний доступ.
+   */
+  async restore(actor: ManagingActor, userId: string): Promise<void> {
+    const user = await this.requireUser(userId);
+
+    await this.db.transaction(async (tx) => {
+      await tx.update(subjects).set({ revokedAt: null }).where(eq(subjects.id, user.subjectId));
+
+      await this.audit.record(tx, this.actorFor(actor), {
+        action: AuditAction.SubjectRestored,
+        entityType: 'user',
+        entityId: userId,
+      });
+    });
+  }
+
+  /** Снимает привязку второго фактора. */
+  async resetTotp(actor: ManagingActor, userId: string): Promise<void> {
+    await this.requireUser(userId);
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ isTotpEnabled: false, totpSecretEncrypted: null, updatedAt: new Date() })
+        .where(eq(users.id, userId));
+
+      await this.audit.record(tx, this.actorFor(actor), {
+        action: AuditAction.TotpReset,
+        entityType: 'user',
+        entityId: userId,
+      });
+    });
+  }
+
+  /**
+   * Собирает вид последней выданной ссылки по каждому пользователю.
+   *
+   * Нужен, чтобы отличить приглашённого от того, кому сбросили пароль:
+   * в самой записи пользователя этих состояний не различить (спека 4.2).
+   */
+  private async lastLinkKinds(): Promise<Map<string, InvitationKind>> {
+    const rows = await this.db
+      .select({ userId: invitations.userId, kind: invitations.kind })
+      .from(invitations)
+      .where(isNull(invitations.acceptedAt))
+      .orderBy(desc(invitations.createdAt));
+
+    const byUser = new Map<string, InvitationKind>();
+
+    for (const row of rows) {
+      if (!byUser.has(row.userId)) {
+        byUser.set(row.userId, row.kind);
+      }
+    }
+
+    return byUser;
+  }
+
+  /** Находит пользователя либо бросает «не найдено». */
+  private async requireUser(userId: string) {
+    const [user] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+
+    if (!user) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return user;
+  }
+
+  /** Строит действующее лицо для журнала. */
+  private actorFor(actor: ManagingActor): AuditActor {
+    return { kind: AuditSubjectKind.User, id: actor.id, label: actor.label };
+  }
+}
+```
+
+Импорт из контракта дополни перечислением: `import { AuditSubjectKind, InvitationKind, type UserRow } from '@cairn/shared';`
+
+- [ ] **Step 6: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/users`
+Expected: PASS, 13 тестов.
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add apps/api/src/users packages/shared/src
+git commit -m "Добавить управление пользователями"
+```
+
+---
+
+### Task 32: Команды консоли
+
+Первый суперадмин создаётся здесь: открытый эндпоинт создания администратора, нужный ровно один раз, остался бы в системе навсегда как постоянная уязвимость (спека 6.5).
+
+**Files:**
+- Create: `apps/api/src/cli/cli.module.ts`, `apps/api/src/cli/commands.ts`, `apps/api/src/cli/main.ts`
+- Modify: `apps/api/package.json`
+- Test: `apps/api/src/cli/commands.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/cli/commands.test.ts`**
+
+```typescript
+import { AuditSubjectKind, SubjectKind } from '@cairn/shared';
+import { eq } from 'drizzle-orm';
+import { randomBytes } from 'node:crypto';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { PasswordService } from '../auth/password.service';
+import { SessionsRepository } from '../auth/sessions.repository';
+import { CryptoService } from '../crypto/crypto.service';
+import { InvitationsService } from '../invitations/invitations.service';
+import { CliCommands } from './commands';
+import { auditLog, subjects, users } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('CliCommands', () => {
+  let testDb: TestDatabase;
+  let commands: CliCommands;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+
+    const passwords = new PasswordService();
+    const sessions = new SessionsRepository(testDb.db);
+
+    commands = new CliCommands(
+      testDb.db,
+      passwords,
+      new InvitationsService(testDb.db, passwords, sessions, new AuditService()),
+      sessions,
+      new AuditService(),
+    );
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+  });
+
+  describe('createSuperadmin', () => {
+    it('создаёт субъект и пользователя с признаком суперадмина', async () => {
+      await commands.createSuperadmin('admin@cairn.local');
+
+      const [user] = await testDb.db.select().from(users);
+
+      expect(user?.isSuperadmin).toBe(true);
+      expect(user?.email).toBe('admin@cairn.local');
+    });
+
+    it('возвращает ссылку на установку пароля', async () => {
+      // Пароль не передаётся аргументом команды: он остался бы в истории оболочки.
+      const link = await commands.createSuperadmin('admin@cairn.local');
+
+      expect(link.token).toBeTruthy();
+    });
+
+    it('пишет действие в журнал как системное', async () => {
+      // У действия с консоли нет субъекта (спека 4.7).
+      await commands.createSuperadmin('admin@cairn.local');
+
+      const [entry] = await testDb.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.SuperadminCreated));
+
+      expect(entry?.subjectId).toBeNull();
+      expect(entry?.subjectKind).toBe(AuditSubjectKind.System);
+      expect(entry?.subjectLabel).toContain('cli');
+    });
+
+    it('отказывается создавать второго с тем же адресом', async () => {
+      await commands.createSuperadmin('admin@cairn.local');
+
+      await expect(commands.createSuperadmin('admin@cairn.local')).rejects.toThrow();
+    });
+  });
+
+  describe('resetTotp', () => {
+    it('снимает привязку второго фактора', async () => {
+      await commands.createSuperadmin('admin@cairn.local');
+      await testDb.db.update(users).set({ isTotpEnabled: true, totpSecretEncrypted: 'v1:a:b:c' });
+
+      await commands.resetTotp('admin@cairn.local');
+
+      const [user] = await testDb.db.select().from(users);
+
+      expect(user?.isTotpEnabled).toBe(false);
+    });
+
+    it('пишет сброс в журнал как системное действие', async () => {
+      await commands.createSuperadmin('admin@cairn.local');
+
+      await commands.resetTotp('admin@cairn.local');
+
+      const [entry] = await testDb.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.TotpReset));
+
+      expect(entry?.subjectKind).toBe(AuditSubjectKind.System);
+    });
+
+    it('сообщает о неизвестном адресе', async () => {
+      await expect(commands.resetTotp('никого@cairn.local')).rejects.toThrow(/не найден/i);
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('обнуляет пароль и выдаёт ссылку', async () => {
+      const created = await commands.createSuperadmin('admin@cairn.local');
+      await testDb.db.update(users).set({ passwordHash: 'хэш' });
+      expect(created.token).toBeTruthy();
+
+      const link = await commands.resetPassword('admin@cairn.local');
+
+      const [user] = await testDb.db.select().from(users);
+
+      expect(user?.passwordHash).toBeNull();
+      expect(link.token).toBeTruthy();
+    });
+
+    it('завершает сессии', async () => {
+      await commands.createSuperadmin('admin@cairn.local');
+      const [subject] = await testDb.db.select().from(subjects);
+      const sessions = new SessionsRepository(testDb.db);
+      const token = await sessions.create(testDb.db, subject!.id, {});
+
+      await commands.resetPassword('admin@cairn.local');
+
+      expect(await sessions.findActive(token)).toBeNull();
+    });
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/cli`
+Expected: FAIL — «Failed to resolve import "./commands"».
+
+- [ ] **Step 3: Создать `apps/api/src/cli/commands.ts`**
+
+```typescript
+import { AuditSubjectKind, InvitationKind, SubjectKind } from '@cairn/shared';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { PasswordService } from '../auth/password.service';
+import { SessionsRepository } from '../auth/sessions.repository';
+import { generateToken, hashToken } from '../auth/token';
+import { DATABASE } from '../db/db.module';
+import type { Database } from '../db/db.types';
+import { invitations, subjects, users } from '../db/schema';
+import { InvitationsService } from '../invitations/invitations.service';
+import type { IssuedLink } from '../invitations/invitations.types';
+
+/**
+ * Команды консоли (спека 6.5, 6.6).
+ *
+ * Требуют доступа к серверу, то есть уже предполагают владение машиной,
+ * и потому не ослабляют модель безопасности. Каждый вызов пишется в журнал
+ * как системное действие — у него нет субъекта.
+ */
+@Injectable()
+export class CliCommands {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly passwords: PasswordService,
+    private readonly invitationsService: InvitationsService,
+    private readonly sessions: SessionsRepository,
+    private readonly audit: AuditService,
+  ) {}
+
+  /**
+   * Создаёт первого суперадмина и возвращает ссылку на установку пароля.
+   *
+   * Пароль не принимается аргументом: он остался бы в истории оболочки
+   * и в списке процессов.
+   */
+  async createSuperadmin(email: string): Promise<IssuedLink> {
+    const normalized = email.toLowerCase();
+
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(users)
+        .where(eq(users.email, normalized))
+        .limit(1);
+
+      if (existing) {
+        throw new ConflictException(`Пользователь ${normalized} уже существует`);
+      }
+
+      const [subject] = await tx
+        .insert(subjects)
+        .values({ kind: SubjectKind.User, label: normalized })
+        .returning();
+
+      const [user] = await tx
+        .insert(users)
+        .values({ subjectId: subject!.id, email: normalized, isSuperadmin: true })
+        .returning();
+
+      const link = await this.issueLink(tx, user!.id, InvitationKind.Invitation);
+
+      await this.audit.record(tx, systemActor('cli create-superadmin'), {
+        action: AuditAction.SuperadminCreated,
+        entityType: 'user',
+        entityId: user!.id,
+        metadata: { email: normalized },
+      });
+
+      return link;
+    });
+  }
+
+  /** Снимает привязку второго фактора. */
+  async resetTotp(email: string): Promise<void> {
+    const user = await this.requireUser(email);
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ isTotpEnabled: false, totpSecretEncrypted: null, updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+
+      await this.audit.record(tx, systemActor('cli reset-totp'), {
+        action: AuditAction.TotpReset,
+        entityType: 'user',
+        entityId: user.id,
+      });
+    });
+  }
+
+  /**
+   * Обнуляет пароль, завершает сессии и выдаёт ссылку.
+   *
+   * Выполняет ту же транзакцию, что и сброс через интерфейс (спека 4.6),
+   * но не требует находиться в системе — этим и решается тупик, когда
+   * единственный суперадмин потерял пароль.
+   */
+  async resetPassword(email: string): Promise<IssuedLink> {
+    const user = await this.requireUser(email);
+
+    return this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ passwordHash: null, updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+
+      const revokedSessions = await this.sessions.revokeAllForSubject(tx, user.subjectId);
+      const link = await this.issueLink(tx, user.id, InvitationKind.PasswordReset);
+
+      await this.audit.record(tx, systemActor('cli reset-password'), {
+        action: AuditAction.PasswordResetRequested,
+        entityType: 'user',
+        entityId: user.id,
+        metadata: { revokedSessions },
+      });
+
+      return link;
+    });
+  }
+
+  /**
+   * Выдаёт одноразовую ссылку, погасив прежние.
+   *
+   * Повторяет логику одноимённого метода сервиса приглашений намеренно:
+   * тот требует пригласившего пользователя, а у действия с консоли его нет.
+   * Выносить общий код в третье место ради двух вызовов не стоит — связь
+   * между ними и так закреплена тестами на обеих сторонах.
+   */
+  private async issueLink(
+    tx: Parameters<Parameters<Database['transaction']>[0]>[0],
+    userId: string,
+    kind: InvitationKind,
+  ): Promise<IssuedLink> {
+    await tx
+      .update(invitations)
+      .set({ expiresAt: new Date(0) })
+      .where(eq(invitations.userId, userId));
+
+    const token = generateToken();
+    const expiresAt = new Date(Date.now() + LINK_TTL_MS);
+
+    await tx.insert(invitations).values({
+      userId,
+      tokenHash: hashToken(token),
+      kind,
+      expiresAt,
+    });
+
+    return { token, userId, expiresAt };
+  }
+
+  /** Находит пользователя по адресу либо сообщает, что его нет. */
+  private async requireUser(email: string) {
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.email, email.toLowerCase()))
+      .limit(1);
+
+    if (!user) {
+      throw new NotFoundException(`Пользователь ${email} не найден`);
+    }
+
+    return user;
+  }
+}
+
+/** Строит действующее лицо для действия с консоли. */
+function systemActor(command: string) {
+  return { kind: AuditSubjectKind.System as const, id: null, label: command };
+}
+
+/** Срок жизни ссылки, выданной с консоли, — сутки. */
+const LINK_TTL_MS = 24 * 60 * 60 * 1000;
+```
+
+Поле `invitedBy` у таких ссылок пустое: приглашающего пользователя нет, действие выполнено с консоли. Именно поэтому колонка объявлена обнуляемой в чанке 2.
+
+- [ ] **Step 4: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/cli`
+Expected: PASS, 9 тестов.
+
+- [ ] **Step 5: Создать `apps/api/src/cli/cli.module.ts`**
+
+```typescript
+import { Module } from '@nestjs/common';
+
+import { AuditModule } from '../audit/audit.module';
+import { AuthModule } from '../auth/auth.module';
+import { CryptoModule } from '../crypto/crypto.module';
+import { DbModule } from '../db/db.module';
+import { InvitationsModule } from '../invitations/invitations.module';
+import { CliCommands } from './commands';
+
+/** Модуль команд консоли. Контроллеров не имеет: HTTP здесь не поднимается. */
+@Module({
+  imports: [DbModule, CryptoModule, AuditModule, AuthModule, InvitationsModule],
+  providers: [CliCommands],
+  exports: [CliCommands],
+})
+export class CliModule {}
+```
+
+- [ ] **Step 6: Создать `apps/api/src/cli/main.ts`**
+
+```typescript
+import 'reflect-metadata';
+
+import { NestFactory } from '@nestjs/core';
+
+import { loadEnv } from '../env';
+import { CliModule } from './cli.module';
+import { CliCommands } from './commands';
+
+/**
+ * Точка входа команд консоли.
+ *
+ * Поднимается контекст приложения без HTTP-сервера: команды пользуются
+ * теми же сервисами, что и API, и потому пишут в журнал одинаково.
+ */
+async function main(): Promise<void> {
+  loadEnv();
+
+  const [command, email] = process.argv.slice(2);
+
+  if (!command || !email) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+
+  const context = await NestFactory.createApplicationContext(CliModule, { logger: ['error'] });
+  const commands = context.get(CliCommands);
+  const webUrl = process.env.CAIRN_WEB_URL ?? 'http://localhost:3000';
+
+  try {
+    switch (command) {
+      case 'create-superadmin': {
+        const link = await commands.createSuperadmin(email);
+        process.stdout.write(formatLink(webUrl, link.token, 'Суперадмин создан'));
+        break;
+      }
+
+      case 'reset-password': {
+        const link = await commands.resetPassword(email);
+        process.stdout.write(formatLink(webUrl, link.token, 'Пароль сброшен'));
+        break;
+      }
+
+      case 'reset-totp': {
+        await commands.resetTotp(email);
+        process.stdout.write('Второй фактор отвязан. Пользователь сможет привязать его заново.\n');
+        break;
+      }
+
+      default:
+        process.stderr.write(USAGE);
+        process.exitCode = 1;
+    }
+  } finally {
+    await context.close();
+  }
+}
+
+/** Печатает ссылку, по которой человек задаст пароль. */
+function formatLink(webUrl: string, token: string, title: string): string {
+  return `${title}.\nСсылка на установку пароля (передайте её лично):\n${webUrl}/invite/${token}\n`;
+}
+
+const USAGE = `Использование:
+  pnpm --filter @cairn/api cli create-superadmin <email>
+  pnpm --filter @cairn/api cli reset-password <email>
+  pnpm --filter @cairn/api cli reset-totp <email>
+`;
+
+void main();
+```
+
+- [ ] **Step 7: Добавить скрипт в `apps/api/package.json`**
+
+```json
+    "cli": "tsx src/cli/main.ts",
+```
+
+- [ ] **Step 8: Проверить команду вручную**
+
+```bash
+docker compose up -d --wait postgres
+pnpm --filter @cairn/api cli create-superadmin admin@example.com
+```
+
+Expected: выводится ссылка вида `http://localhost:3000/invite/<токен>`. Повторный запуск с тем же адресом завершается сообщением о существующем пользователе.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/api/src/cli apps/api/package.json
+git commit -m "Добавить команды консоли"
+```
+
+---
+
+**Результат чанка 9:** суперадмин управляет пользователями, первый администратор создаётся с консоли, потеря пароля или устройства со вторым фактором больше не запирает систему. Следующий чанк добавляет HTTP-слой проектов, выдач, пользователей и журнала.
