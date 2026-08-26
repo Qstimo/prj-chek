@@ -13239,3 +13239,870 @@ git commit -m "Добавить список пользователей"
 ---
 
 **Результат чанка 14:** суперадмин правит проекты, управляет доступами через матрицу и распоряжается пользователями. Последний чанк добавляет журнал, навигацию и развёртывание.
+
+## Chunk 15: Журнал, навигация и развёртывание
+
+Результат этапа: система работает целиком — от входа до журнала — и разворачивается одной командой.
+
+### Task 51: Экран журнала действий
+
+**Files:**
+- Create: `apps/web/src/components/AuditTable/AuditTable.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Create: `apps/web/src/app/audit/page.tsx`, `AuditScreen.tsx`
+- Create: `apps/web/src/api/hooks/useQueryAudit.ts`
+- Test: `apps/web/src/components/AuditTable/AuditTable.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/AuditTable/AuditTable.test.tsx`**
+
+```tsx
+import { AuditSubjectKind } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+
+import { AuditTable } from './AuditTable';
+
+const entry = {
+  id: '11111111-1111-1111-1111-111111111111',
+  subjectId: '22222222-2222-2222-2222-222222222222',
+  subjectKind: AuditSubjectKind.User,
+  subjectLabel: 'admin@cairn.local',
+  action: 'project.created',
+  entityType: 'project',
+  entityId: '33333333-3333-3333-3333-333333333333',
+  projectId: '33333333-3333-3333-3333-333333333333',
+  metadata: { name: 'Проект' },
+  createdAt: '2026-01-02T10:30:00.000Z',
+};
+
+describe('AuditTable', () => {
+  it('переводит действие на русский', () => {
+    render(<AuditTable entries={[entry]} />);
+
+    expect(screen.getByText('Создан проект')).toBeInTheDocument();
+  });
+
+  it('показывает, кто выполнил действие', () => {
+    render(<AuditTable entries={[entry]} />);
+
+    expect(screen.getByText('admin@cairn.local')).toBeInTheDocument();
+  });
+
+  it('помечает машинные и системные действия', () => {
+    // Пометка «человек или машина» требуется ТЗ 4.4.
+    render(
+      <AuditTable
+        entries={[
+          { ...entry, subjectId: null, subjectKind: AuditSubjectKind.System, subjectLabel: 'cli reset-totp' },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Консоль')).toBeInTheDocument();
+  });
+
+  it('показывает дату в локальном формате', () => {
+    render(<AuditTable entries={[entry]} />);
+
+    expect(screen.getByText(/02\.01\.2026/)).toBeInTheDocument();
+  });
+
+  it('показывает неизвестное действие как есть', () => {
+    // Новое событие не должно исчезать из журнала только потому,
+    // что для него не завели перевод.
+    render(<AuditTable entries={[{ ...entry, action: 'something.new' }]} />);
+
+    expect(screen.getByText('something.new')).toBeInTheDocument();
+  });
+
+  it('объясняет пустой журнал', () => {
+    render(<AuditTable entries={[]} />);
+
+    expect(screen.getByText(/нет записей/i)).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/AuditTable`
+Expected: FAIL — «Failed to resolve import "./AuditTable"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/AuditTable/constants.ts`**
+
+```typescript
+import { AuditSubjectKind } from '@cairn/shared';
+
+/**
+ * Названия действий на русском.
+ *
+ * Ключи совпадают со значениями перечисления бэкенда. Действие без перевода
+ * показывается как есть: пропущенный перевод не должен прятать событие.
+ */
+export const ACTION_LABELS: Record<string, string> = {
+  'login.succeeded': 'Вход',
+  'login.failed': 'Неудачная попытка входа',
+  'logout.performed': 'Выход',
+  'totp.failed': 'Неверный код второго фактора',
+  'totp.challenge_exhausted': 'Попытки кода исчерпаны',
+  'totp.enabled': 'Привязан второй фактор',
+  'totp.reset': 'Сброшен второй фактор',
+  'project.created': 'Создан проект',
+  'project.updated': 'Изменён проект',
+  'grant.created': 'Выдан доступ',
+  'grant.updated': 'Изменён доступ',
+  'grant.revoked': 'Отозван доступ',
+  'invitation.created': 'Создано приглашение',
+  'invitation.reissued': 'Приглашение выдано повторно',
+  'invitation.accepted': 'Приглашение принято',
+  'password_reset.requested': 'Запрошен сброс пароля',
+  'password_reset.completed': 'Пароль установлен',
+  'subject.revoked': 'Отозван доступ субъекту',
+  'subject.restored': 'Доступ субъекта восстановлен',
+  'superadmin.created': 'Создан суперадминистратор',
+};
+
+/** Названия видов действующих лиц. */
+export const SUBJECT_KIND_LABELS: Record<AuditSubjectKind, string> = {
+  [AuditSubjectKind.User]: 'Человек',
+  [AuditSubjectKind.AgentToken]: 'Агент',
+  [AuditSubjectKind.IntakeAddress]: 'Приёмный адрес',
+  [AuditSubjectKind.System]: 'Консоль',
+};
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/AuditTable/types.ts` и компонент**
+
+`types.ts`:
+
+```typescript
+import type { AuditEntry } from '@cairn/shared';
+
+/** Пропсы таблицы журнала. */
+export interface IProps {
+  entries: AuditEntry[];
+}
+```
+
+`AuditTable.tsx`:
+
+```tsx
+import { ACTION_LABELS, SUBJECT_KIND_LABELS } from './constants';
+import type { IProps } from './types';
+
+/**
+ * Журнал действий (ТЗ 4.4).
+ *
+ * Только чтение: изменить записи нельзя ни отсюда, ни из кода — роль базы
+ * не имеет таких прав (спека 4.7).
+ */
+export function AuditTable({ entries }: IProps) {
+  if (entries.length === 0) {
+    return <p className="text-muted-foreground">По выбранным условиям нет записей.</p>;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            <th scope="col" className="border-b border-border p-2 text-left">Когда</th>
+            <th scope="col" className="border-b border-border p-2 text-left">Кто</th>
+            <th scope="col" className="border-b border-border p-2 text-left">Тип</th>
+            <th scope="col" className="border-b border-border p-2 text-left">Действие</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => (
+            <tr key={entry.id}>
+              <td className="border-b border-border p-2 whitespace-nowrap">
+                {formatMoment(entry.createdAt)}
+              </td>
+              <td className="border-b border-border p-2">{entry.subjectLabel}</td>
+              <td className="border-b border-border p-2">
+                {SUBJECT_KIND_LABELS[entry.subjectKind]}
+              </td>
+              <td className="border-b border-border p-2">
+                {ACTION_LABELS[entry.action] ?? entry.action}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Форматирует момент по российской локали. */
+function formatMoment(value: string): string {
+  return new Date(value).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+```
+
+`index.ts`:
+
+```typescript
+export { AuditTable } from './AuditTable';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 5: Создать `apps/web/src/api/hooks/useQueryAudit.ts`**
+
+```typescript
+'use client';
+
+import type { AuditPage } from '@cairn/shared';
+import { useQuery } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+
+/** Фильтры журнала, задаваемые интерфейсом. */
+export interface AuditFilters {
+  subjectId?: string;
+  projectId?: string;
+  action?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Страница журнала. */
+export function useQueryAudit(filters: AuditFilters = {}) {
+  return useQuery({
+    queryKey: ['audit', filters],
+    queryFn: () => apiClient<AuditPage>(`/audit?${buildQuery(filters)}`),
+  });
+}
+
+/** Собирает строку запроса, пропуская пустые фильтры. */
+function buildQuery(filters: AuditFilters): string {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== '') {
+      params.set(key, String(value));
+    }
+  }
+
+  return params.toString();
+}
+```
+
+- [ ] **Step 6: Создать экран журнала**
+
+`apps/web/src/app/audit/AuditScreen.tsx`:
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+
+import { useQueryAudit } from '@/api/hooks/useQueryAudit';
+import { AuditTable } from '@/components/AuditTable';
+
+/** Журнал действий с фильтрами (спека 9.1). */
+export function AuditScreen() {
+  const [action, setAction] = useState('');
+  const audit = useQueryAudit({ action: action || undefined });
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <label htmlFor="action-filter" className="block text-sm font-medium">
+          Тип действия
+        </label>
+        <input
+          id="action-filter"
+          value={action}
+          onChange={(event) => setAction(event.target.value)}
+          placeholder="например, project.created"
+          className="w-full max-w-sm rounded-md border border-border px-3 py-2"
+        />
+      </div>
+
+      {audit.isPending && <p className="text-muted-foreground">Загрузка…</p>}
+
+      {audit.isError && (
+        <p role="alert" className="text-destructive">
+          Не удалось загрузить журнал.
+        </p>
+      )}
+
+      {audit.isSuccess && (
+        <>
+          <AuditTable entries={audit.data.entries} />
+          <p className="text-sm text-muted-foreground">Всего записей: {audit.data.total}</p>
+        </>
+      )}
+    </div>
+  );
+}
+```
+
+`apps/web/src/app/audit/page.tsx`:
+
+```tsx
+import { AuditScreen } from './AuditScreen';
+
+/** Страница журнала действий. */
+export default function AuditPage() {
+  return (
+    <main className="mx-auto max-w-5xl space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Журнал действий</h1>
+      <AuditScreen />
+    </main>
+  );
+}
+```
+
+- [ ] **Step 7: Запустить тест**
+
+Run: `pnpm --filter @cairn/web test src/components/AuditTable`
+Expected: PASS, 6 тестов.
+
+- [ ] **Step 8: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить экран журнала действий"
+```
+
+---
+
+### Task 52: Навигация и выход
+
+Пункты меню, ведущие на экраны суперадмина, не показываются остальным: интерфейс не должен предлагать переход, заканчивающийся отказом (спека 9.1).
+
+**Files:**
+- Create: `apps/web/src/components/AppNav/AppNav.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Modify: `apps/web/src/app/layout.tsx`
+- Test: `apps/web/src/components/AppNav/AppNav.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/AppNav/AppNav.test.tsx`**
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { AppNav } from './AppNav';
+
+const subject = {
+  id: '11111111-1111-1111-1111-111111111111',
+  label: 'user@cairn.local',
+  isSuperadmin: false,
+  isTotpEnabled: false,
+};
+
+describe('AppNav', () => {
+  it('показывает ссылку на проекты всем', () => {
+    render(<AppNav subject={subject} onLogout={vi.fn()} />);
+
+    expect(screen.getByRole('link', { name: 'Проекты' })).toBeInTheDocument();
+  });
+
+  it('не показывает разделы администрирования обычному пользователю', () => {
+    render(<AppNav subject={subject} onLogout={vi.fn()} />);
+
+    expect(screen.queryByRole('link', { name: 'Пользователи' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Журнал' })).not.toBeInTheDocument();
+  });
+
+  it('показывает разделы администрирования суперадмину', () => {
+    render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
+
+    expect(screen.getByRole('link', { name: 'Пользователи' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Журнал' })).toBeInTheDocument();
+  });
+
+  it('показывает, кто вошёл', () => {
+    render(<AppNav subject={subject} onLogout={vi.fn()} />);
+
+    expect(screen.getByText('user@cairn.local')).toBeInTheDocument();
+  });
+
+  it('вызывает выход', async () => {
+    const onLogout = vi.fn();
+    render(<AppNav subject={subject} onLogout={onLogout} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+
+    expect(onLogout).toHaveBeenCalled();
+  });
+
+  it('размечен как навигация', () => {
+    render(<AppNav subject={subject} onLogout={vi.fn()} />);
+
+    expect(screen.getByRole('navigation')).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/AppNav`
+Expected: FAIL — «Failed to resolve import "./AppNav"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/AppNav/constants.ts`**
+
+```typescript
+/** Пункты меню, доступные всем. */
+export const COMMON_LINKS = [{ href: '/', label: 'Проекты' }] as const;
+
+/** Пункты меню суперадмина. */
+export const ADMIN_LINKS = [
+  { href: '/users', label: 'Пользователи' },
+  { href: '/audit', label: 'Журнал' },
+] as const;
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/AppNav/types.ts`**
+
+```typescript
+import type { CurrentSubjectResponse } from '@cairn/shared';
+
+/** Пропсы навигации. */
+export interface IProps {
+  subject: CurrentSubjectResponse;
+  onLogout: () => void;
+}
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/AppNav/AppNav.tsx`**
+
+```tsx
+'use client';
+
+import Link from 'next/link';
+
+import { ADMIN_LINKS, COMMON_LINKS } from './constants';
+import type { IProps } from './types';
+
+/** Верхняя навигация. Разделы администрирования видны только суперадмину. */
+export function AppNav({ subject, onLogout }: IProps) {
+  const links = subject.isSuperadmin ? [...COMMON_LINKS, ...ADMIN_LINKS] : COMMON_LINKS;
+
+  return (
+    <nav className="border-b border-border">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 p-4">
+        <ul className="flex gap-4">
+          {links.map((link) => (
+            <li key={link.href}>
+              <Link href={link.href} className="text-sm hover:underline">
+                {link.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">{subject.label}</span>
+          <button type="button" onClick={onLogout} className="text-sm hover:underline">
+            Выйти
+          </button>
+        </div>
+      </div>
+    </nav>
+  );
+}
+```
+
+- [ ] **Step 6: Создать `apps/web/src/components/AppNav/index.ts` и обёртку**
+
+`index.ts`:
+
+```typescript
+export { AppNav } from './AppNav';
+export type { IProps } from './types';
+```
+
+`apps/web/src/components/AppNav/AppNavContainer.tsx` — клиентская обёртка, выполняющая выход:
+
+```tsx
+'use client';
+
+import type { CurrentSubjectResponse } from '@cairn/shared';
+import { useRouter } from 'next/navigation';
+
+import { apiClient } from '@/api';
+import { AppNav } from './AppNav';
+
+/** Навигация с обработчиком выхода. */
+export function AppNavContainer({ subject }: { subject: CurrentSubjectResponse }) {
+  const router = useRouter();
+
+  async function logout(): Promise<void> {
+    await apiClient('/auth/logout', { method: 'POST' }).catch(() => undefined);
+    router.replace('/login');
+    router.refresh();
+  }
+
+  return <AppNav subject={subject} onLogout={() => void logout()} />;
+}
+```
+
+- [ ] **Step 7: Подключить навигацию в разметку страниц**
+
+Навигация добавляется в разметку раздела, а не в корневую: страницы входа и приёма приглашения меню не нужны. Создай `apps/web/src/app/(app)/layout.tsx` и перенеси в группу `(app)` страницы сводки, проектов, пользователей и журнала.
+
+```tsx
+import type { CurrentSubjectResponse } from '@cairn/shared';
+import { redirect } from 'next/navigation';
+import type { ReactNode } from 'react';
+
+import { apiServer, ApiError } from '@/api';
+import { AppNavContainer } from '@/components/AppNav/AppNavContainer';
+
+/** Разметка раздела для вошедших пользователей. */
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  let subject: CurrentSubjectResponse;
+
+  try {
+    subject = await apiServer<CurrentSubjectResponse>('/auth/me');
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 401) {
+      redirect('/login');
+    }
+
+    throw cause;
+  }
+
+  return (
+    <>
+      <AppNavContainer subject={subject} />
+      {children}
+    </>
+  );
+}
+```
+
+- [ ] **Step 8: Запустить все тесты фронтенда**
+
+```bash
+pnpm --filter @cairn/web test
+pnpm --filter @cairn/web typecheck
+```
+
+Expected: PASS, 54 теста; типы без ошибок.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить навигацию и выход"
+```
+
+---
+
+### Task 53: Развёртывание
+
+**Files:**
+- Create: `apps/api/Dockerfile`, `apps/web/Dockerfile`, `docker/caddy/Caddyfile`
+- Modify: `docker-compose.yml`, `.env.example`, `apps/web/next.config.ts`
+
+- [ ] **Step 1: Создать `apps/api/Dockerfile`**
+
+Многоступенчатая сборка: в итоговый образ не попадают ни исходники, ни инструменты сборки.
+
+```dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY apps/api/package.json ./apps/api/
+RUN pnpm install --frozen-lockfile
+
+COPY packages/shared ./packages/shared
+COPY apps/api ./apps/api
+RUN pnpm --filter @cairn/shared build && pnpm --filter @cairn/api build
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/shared/package.json ./packages/shared/
+COPY apps/api/package.json ./apps/api/
+RUN pnpm install --frozen-lockfile --prod
+
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/apps/api/drizzle ./apps/api/drizzle
+
+WORKDIR /app/apps/api
+EXPOSE 3001
+CMD ["node", "dist/main.js"]
+```
+
+- [ ] **Step 2: Создать `apps/web/Dockerfile`**
+
+```dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY apps/web/package.json ./apps/web/
+RUN pnpm install --frozen-lockfile
+
+COPY packages/shared ./packages/shared
+COPY apps/web ./apps/web
+RUN pnpm --filter @cairn/shared build && pnpm --filter @cairn/web build
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/shared/package.json ./packages/shared/
+COPY apps/web/package.json ./apps/web/
+RUN pnpm install --frozen-lockfile --prod
+
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/apps/web/.next ./apps/web/.next
+COPY --from=builder /app/apps/web/next.config.ts ./apps/web/
+
+WORKDIR /app/apps/web
+EXPOSE 3000
+CMD ["pnpm", "start"]
+```
+
+- [ ] **Step 3: Создать `docker/caddy/Caddyfile`**
+
+Реверс-прокси сводит оба приложения на один домен: только так сессионная cookie остаётся first-party и CORS не нужен (спека 3.3).
+
+```
+{$CAIRN_DOMAIN:localhost} {
+	# API — по префиксу /api, всё остальное отдаёт веб-приложение.
+	handle /api/* {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
+```
+
+Caddy получает сертификат автоматически, если `CAIRN_DOMAIN` — настоящее доменное имя. Для локальной проверки годится `localhost`.
+
+- [ ] **Step 4: Дополнить `docker-compose.yml`**
+
+```yaml
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://cairn_app:${CAIRN_APP_PASSWORD:?}@postgres:5432/cairn
+      DATABASE_OWNER_URL: postgres://cairn_owner:${POSTGRES_PASSWORD:?}@postgres:5432/cairn
+      CAIRN_ENCRYPTION_KEY: ${CAIRN_ENCRYPTION_KEY:?CAIRN_ENCRYPTION_KEY не задан}
+      CAIRN_WEB_URL: ${CAIRN_WEB_URL:-http://localhost}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      CAIRN_INTERNAL_API_URL: http://api:3001/api
+      NODE_ENV: production
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      CAIRN_DOMAIN: ${CAIRN_DOMAIN:-localhost}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - web
+      - api
+    restart: unless-stopped
+```
+
+В раздел `volumes` добавь `caddy-data:`.
+
+- [ ] **Step 5: Дополнить `.env.example`**
+
+```bash
+# Домен, на котором работает система. Для локальной проверки — localhost.
+CAIRN_DOMAIN=localhost
+```
+
+- [ ] **Step 6: Убрать временную переадресацию из `apps/web/next.config.ts`**
+
+Переадресация из чанка 12 нужна была только для разработки без прокси. В развёрнутой системе её роль выполняет Caddy, а двойной путь до API — источник расхождений между средами.
+
+```typescript
+import type { NextConfig } from 'next';
+
+const config: NextConfig = {
+  reactStrictMode: true,
+  transpilePackages: ['@cairn/shared'],
+  // В разработке API проксируется здесь; в развёрнутой системе — реверс-прокси.
+  async rewrites() {
+    if (process.env.NODE_ENV === 'production') {
+      return [];
+    }
+
+    return [{ source: '/api/:path*', destination: 'http://localhost:3001/api/:path*' }];
+  },
+};
+
+export default config;
+```
+
+- [ ] **Step 7: Проверить развёртывание целиком**
+
+```bash
+docker compose build
+docker compose up -d --wait
+docker compose run --rm api node dist/db/migrate.js
+docker compose run --rm api node dist/cli/main.js create-superadmin admin@example.com
+```
+
+Expected: выводится ссылка на установку пароля. Открой `http://localhost` — открывается страница входа; перейди по ссылке приглашения, задай пароль, войди.
+
+- [ ] **Step 8: Проверить, что журнал защищён в развёрнутой системе**
+
+```bash
+docker compose exec postgres psql -U cairn_app -d cairn -c "DELETE FROM audit_log;"
+```
+
+Expected: `permission denied for table audit_log`. Это последняя проверка требования ТЗ 9 об аудите: даже приложение не может стереть свои следы.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/api/Dockerfile apps/web/Dockerfile docker/ docker-compose.yml .env.example apps/web/next.config.ts
+git commit -m "Добавить развёртывание в контейнерах"
+```
+
+---
+
+### Task 54: Документация по запуску
+
+**Files:**
+- Create: `README.md`
+- Modify: `CLAUDE.md`
+
+- [ ] **Step 1: Создать `README.md`**
+
+```markdown
+# CAIRN
+
+Единый реестр независимых проектов: где проект развёрнут, жив ли он, чем настроен,
+что по нему решали и на какой стадии находится.
+
+Реализован этап 1 «Фундамент»: аутентификация с двухфакторной проверкой, проекты
+с секцией «Инфо», модель выдач доступа, журнал действий.
+
+## Требования
+
+Node.js 22, pnpm 9, Docker.
+
+## Локальная разработка
+
+```bash
+cp .env.example .env
+openssl rand -base64 32   # вставить в CAIRN_ENCRYPTION_KEY
+pnpm install
+docker compose up -d --wait postgres
+pnpm --filter @cairn/api db:migrate
+pnpm --filter @cairn/api cli create-superadmin admin@example.com
+```
+
+Команда выведет ссылку на установку пароля. Затем в двух окнах:
+
+```bash
+pnpm --filter @cairn/api dev
+pnpm --filter @cairn/web dev
+```
+
+Интерфейс — http://localhost:3000
+
+## Проверки
+
+```bash
+pnpm test        # тесты; интеграционные поднимают PostgreSQL в контейнере
+pnpm typecheck   # проверка типов
+```
+
+## Развёртывание
+
+```bash
+docker compose build
+docker compose up -d --wait
+docker compose run --rm api node dist/db/migrate.js
+docker compose run --rm api node dist/cli/main.js create-superadmin admin@example.com
+```
+
+## Восстановление доступа
+
+Если единственный суперадмин потерял пароль или устройство со вторым фактором:
+
+```bash
+docker compose run --rm api node dist/cli/main.js reset-password admin@example.com
+docker compose run --rm api node dist/cli/main.js reset-totp admin@example.com
+```
+
+## Ключ шифрования
+
+`CAIRN_ENCRYPTION_KEY` хранится отдельно от базы и не попадает в резервные копии
+базы данных. При его потере зашифрованные значения восстановить невозможно —
+это свойство схемы, а не дефект. Храните копию ключа отдельно.
+
+## Документы
+
+- `project-registry-spec [eTsSSz].md` — техническое задание
+- `docs/superpowers/specs/` — дизайн этапов
+- `docs/superpowers/plans/` — планы реализации
+```
+
+- [ ] **Step 2: Обновить раздел «Состояние репозитория» в `CLAUDE.md`**
+
+Замени описание пустого репозитория на актуальное: этап 1 реализован, команды разработки и проверок перечислены в `README.md`, структура монорепо соответствует разделу «Структура файлов» плана.
+
+- [ ] **Step 3: Финальная проверка**
+
+```bash
+pnpm --filter @cairn/shared build
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+Expected: всё зелёное.
+
+- [ ] **Step 4: Коммит**
+
+```bash
+git add README.md CLAUDE.md
+git commit -m "Добавить документацию по запуску"
+```
+
+---
+
+**Результат этапа 1:** система работает целиком. Суперадмин создаётся с консоли, входит с двумя факторами, заводит проекты, приглашает людей и выдаёт им доступ к отдельным секциям; журнал фиксирует каждое действие и не поддаётся правке даже из приложения. Модель прав, машинные субъекты и прикладное шифрование заложены так, что следующие семь этапов не потребуют их переделки.
