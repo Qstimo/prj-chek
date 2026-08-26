@@ -10115,3 +10115,1057 @@ git commit -m "Добавить матрицу доступа как набор 
 ---
 
 **Результат чанка 11:** бэкенд этапа 1 готов целиком — все маршруты спеки 8 работают, приложение собирается и стартует, модель прав закреплена исполняемой таблицей. Следующий чанк начинает интерфейс.
+
+## Chunk 12: Каркас интерфейса и вход
+
+Результат чанка: приложение открывается в браузере, человек входит по паролю со вторым фактором и задаёт пароль по приглашению.
+
+### Task 40: Каркас Next.js
+
+**Files:**
+- Create: `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/next.config.ts`, `apps/web/vitest.config.ts`, `apps/web/vitest.setup.ts`
+- Create: `apps/web/postcss.config.mjs`, `apps/web/tailwind.config.ts`, `apps/web/src/app/globals.css`
+- Create: `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`
+
+- [ ] **Step 1: Создать `apps/web/package.json`**
+
+```json
+{
+  "name": "@cairn/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cairn/shared": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.4",
+    "@radix-ui/react-label": "^2.1.1",
+    "@radix-ui/react-select": "^2.1.4",
+    "@radix-ui/react-slot": "^1.1.1",
+    "@tanstack/react-query": "^5.64.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "next": "^15.1.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "jsdom": "^26.0.0",
+    "postcss": "^8.5.1",
+    "tailwindcss": "^3.4.17",
+    "vitest": "^3.0.5"
+  }
+}
+```
+
+- [ ] **Step 2: Создать `apps/web/tsconfig.json`**
+
+Фронтенд переопределяет модульную систему: Next.js собирает в ESM, в отличие от бэкенда.
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "noEmit": true,
+    "allowJs": true,
+    "incremental": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "plugins": [{ "name": "next" }],
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+```
+
+- [ ] **Step 3: Создать `apps/web/next.config.ts`**
+
+```typescript
+import type { NextConfig } from 'next';
+
+const config: NextConfig = {
+  reactStrictMode: true,
+  // Пакет контракта отдаётся исходниками и собирается вместе с приложением.
+  transpilePackages: ['@cairn/shared'],
+};
+
+export default config;
+```
+
+- [ ] **Step 4: Создать `apps/web/tailwind.config.ts`**
+
+Токены объявлены переменными CSS: так одни и те же значения доступны и Tailwind, и компонентам shadcn/ui.
+
+```typescript
+import type { Config } from 'tailwindcss';
+
+const config: Config = {
+  content: ['./src/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        muted: 'hsl(var(--muted))',
+        'muted-foreground': 'hsl(var(--muted-foreground))',
+        border: 'hsl(var(--border))',
+        primary: 'hsl(var(--primary))',
+        'primary-foreground': 'hsl(var(--primary-foreground))',
+        destructive: 'hsl(var(--destructive))',
+        'destructive-foreground': 'hsl(var(--destructive-foreground))',
+      },
+      borderRadius: {
+        md: 'var(--radius)',
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
+```
+
+- [ ] **Step 5: Создать `apps/web/src/app/globals.css`**
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --border: 214 32% 91%;
+    --primary: 222 47% 11%;
+    --primary-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --radius: 0.5rem;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+```
+
+- [ ] **Step 6: Создать `apps/web/postcss.config.mjs`**
+
+```javascript
+const config = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+
+export default config;
+```
+
+- [ ] **Step 7: Создать `apps/web/vitest.config.ts`**
+
+```typescript
+import { resolve } from 'node:path';
+
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),
+      '@cairn/shared': resolve(__dirname, '../../packages/shared/src/index.ts'),
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./vitest.setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+  },
+});
+```
+
+- [ ] **Step 8: Создать `apps/web/vitest.setup.ts`**
+
+```typescript
+import '@testing-library/jest-dom/vitest';
+```
+
+- [ ] **Step 9: Создать `apps/web/src/app/layout.tsx`**
+
+```tsx
+import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
+
+import './globals.css';
+
+/** Заголовок вкладки и описание приложения. */
+export const metadata: Metadata = {
+  title: 'CAIRN — реестр проектов',
+  description: 'Где проект развёрнут, чем настроен и на какой стадии находится',
+};
+
+/** Корневая разметка. Язык интерфейса — русский, без локализации (спека 9). */
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="ru">
+      <body className="min-h-screen antialiased">{children}</body>
+    </html>
+  );
+}
+```
+
+- [ ] **Step 10: Создать `apps/web/src/app/page.tsx`**
+
+Временная страница: сводка появится в следующем чанке.
+
+```tsx
+/** Главная страница. Заменяется сводкой проектов в чанке 13. */
+export default function HomePage() {
+  return <main className="p-8">CAIRN</main>;
+}
+```
+
+- [ ] **Step 11: Установить зависимости и проверить сборку**
+
+```bash
+pnpm install
+pnpm --filter @cairn/shared build
+pnpm --filter @cairn/web build
+```
+
+Expected: сборка проходит без ошибок.
+
+- [ ] **Step 12: Коммит**
+
+```bash
+git add apps/web pnpm-lock.yaml
+git commit -m "Добавить каркас веб-приложения"
+```
+
+---
+
+### Task 41: Клиент API
+
+Две обёртки над `fetch`: одна для серверных компонентов, другая для браузера. Разница принципиальная — серверный код обязан вручную пробрасывать cookie входящего запроса, иначе запрос уйдёт без сессии (спека 3.3).
+
+**Files:**
+- Create: `apps/web/src/api/config.ts`, `apps/web/src/api/errors.ts`, `apps/web/src/api/server.ts`, `apps/web/src/api/client.ts`, `apps/web/src/api/index.ts`
+- Test: `apps/web/src/api/client.test.ts`, `apps/web/src/api/errors.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/api/errors.test.ts`**
+
+```typescript
+import { describe, expect, it } from 'vitest';
+
+import { ApiError, messageForStatus } from './errors';
+
+describe('ApiError', () => {
+  it('хранит код ответа', () => {
+    expect(new ApiError(403, 'Нет прав').status).toBe(403);
+  });
+});
+
+describe('messageForStatus', () => {
+  it('объясняет 401 как истёкший вход', () => {
+    expect(messageForStatus(401)).toMatch(/вой/i);
+  });
+
+  it('объясняет 403 как нехватку прав', () => {
+    expect(messageForStatus(403)).toMatch(/прав/i);
+  });
+
+  it('объясняет 404 нейтрально', () => {
+    // Формулировка не должна намекать, что объект существует, но закрыт:
+    // это раскрыло бы его существование (ТЗ 4.2).
+    const message = messageForStatus(404);
+
+    expect(message).toMatch(/не найден/i);
+    expect(message).not.toMatch(/доступ|прав/i);
+  });
+
+  it('для прочих кодов даёт общее сообщение', () => {
+    expect(messageForStatus(500)).toBeTruthy();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/api/errors`
+Expected: FAIL — «Failed to resolve import "./errors"».
+
+- [ ] **Step 3: Создать `apps/web/src/api/errors.ts`**
+
+```typescript
+/** Ошибка ответа API. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/**
+ * Возвращает человеческое объяснение кода ответа.
+ *
+ * Формулировка для `404` намеренно нейтральна: сказать «нет доступа»
+ * значило бы раскрыть, что объект существует (ТЗ 4.2).
+ */
+export function messageForStatus(status: number): string {
+  return STATUS_MESSAGES[status] ?? 'Не удалось выполнить запрос. Попробуйте ещё раз.';
+}
+
+/** Сообщения по кодам ответа. */
+const STATUS_MESSAGES: Record<number, string> = {
+  400: 'Проверьте заполненные поля.',
+  401: 'Нужно войти заново.',
+  403: 'Недостаточно прав для этого действия.',
+  404: 'Не найдено.',
+  409: 'Действие невозможно в текущем состоянии.',
+};
+```
+
+- [ ] **Step 4: Создать `apps/web/src/api/config.ts`**
+
+```typescript
+/**
+ * Адрес API для браузера.
+ *
+ * Относительный путь: браузер и API живут за одним реверс-прокси на одном
+ * домене, поэтому CORS не нужен и cookie работает как first-party (спека 3.3).
+ */
+export const BROWSER_API_URL = '/api';
+
+/**
+ * Адрес API для серверных компонентов.
+ *
+ * Внутренний адрес контейнера: запрос не выходит наружу, а публичный адрес
+ * на сервере может быть недоступен вовсе.
+ */
+export function serverApiUrl(): string {
+  return process.env.CAIRN_INTERNAL_API_URL ?? 'http://localhost:3001/api';
+}
+```
+
+- [ ] **Step 5: Написать падающий тест `apps/web/src/api/client.test.ts`**
+
+```typescript
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { apiClient } from './client';
+import { ApiError } from './errors';
+
+describe('apiClient', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch(response: Partial<Response>): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+      ...response,
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    return fetchMock;
+  }
+
+  it('отправляет cookie сессии', async () => {
+    // Без этого браузер не приложит cookie к запросу, и сессия не сработает.
+    const fetchMock = stubFetch({ json: async () => ({ ok: true }) });
+
+    await apiClient('/projects');
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: 'include' });
+  });
+
+  it('возвращает разобранный ответ', async () => {
+    stubFetch({ json: async () => [{ id: '1' }] });
+
+    expect(await apiClient('/projects')).toEqual([{ id: '1' }]);
+  });
+
+  it('бросает ApiError с кодом ответа', async () => {
+    stubFetch({ ok: false, status: 403, json: async () => ({ message: 'Недостаточно прав' }) });
+
+    await expect(apiClient('/projects')).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('сохраняет код ответа в ошибке', async () => {
+    stubFetch({ ok: false, status: 404, json: async () => ({}) });
+
+    await expect(apiClient('/projects')).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('переживает ответ без тела', async () => {
+    // 204 не имеет тела, и попытка его разобрать упала бы.
+    stubFetch({
+      status: 204,
+      json: async () => {
+        throw new Error('нет тела');
+      },
+    });
+
+    expect(await apiClient('/users/1/revoke', { method: 'POST' })).toBeNull();
+  });
+
+  it('передаёт тело запроса как JSON', async () => {
+    const fetchMock = stubFetch({});
+
+    await apiClient('/projects', { method: 'POST', body: { name: 'Проект' } });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+
+    expect(init).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ name: 'Проект' }),
+    });
+  });
+});
+```
+
+- [ ] **Step 6: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/api/client`
+Expected: FAIL — «Failed to resolve import "./client"».
+
+- [ ] **Step 7: Создать `apps/web/src/api/client.ts`**
+
+```typescript
+'use client';
+
+import { BROWSER_API_URL } from './config';
+import { ApiError, messageForStatus } from './errors';
+
+/** Параметры запроса. */
+export interface ApiRequestOptions {
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  body?: unknown;
+  signal?: AbortSignal;
+}
+
+/**
+ * Запрос к API из браузера.
+ *
+ * `credentials: 'include'` обязателен: без него браузер не приложит cookie
+ * сессии, и любой защищённый маршрут ответит отказом.
+ */
+export async function apiClient<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const response = await fetch(`${BROWSER_API_URL}${path}`, {
+    method: options.method ?? 'GET',
+    credentials: 'include',
+    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
+  });
+
+  return readResponse<T>(response);
+}
+
+/** Разбирает ответ, превращая отказ в {@link ApiError}. */
+export async function readResponse<T>(response: Response): Promise<T> {
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message =
+      (payload as { message?: string } | null)?.message ?? messageForStatus(response.status);
+
+    throw new ApiError(response.status, message, payload);
+  }
+
+  return payload as T;
+}
+```
+
+- [ ] **Step 8: Создать `apps/web/src/api/server.ts`**
+
+```typescript
+import { cookies } from 'next/headers';
+
+import { readResponse } from './client';
+import { serverApiUrl } from './config';
+
+/**
+ * Запрос к API из серверного компонента.
+ *
+ * Cookie входящего запроса пробрасывается вручную: на сервере нет браузера,
+ * который сделал бы это сам, и без проброса запрос уйдёт без сессии (спека 3.3).
+ *
+ * Это единственный допустимый способ обращения к API из серверных компонентов —
+ * прямые вызовы `fetch` в них не пишем.
+ */
+export async function apiServer<T>(path: string): Promise<T> {
+  const cookieStore = await cookies();
+
+  const response = await fetch(`${serverApiUrl()}${path}`, {
+    headers: { Cookie: cookieStore.toString() },
+    // Данные о правах и проектах меняются, кэшировать их между запросами нельзя.
+    cache: 'no-store',
+  });
+
+  return readResponse<T>(response);
+}
+```
+
+- [ ] **Step 9: Создать `apps/web/src/api/index.ts`**
+
+```typescript
+export * from './client';
+export * from './config';
+export * from './errors';
+export * from './server';
+```
+
+- [ ] **Step 10: Запустить тесты**
+
+Run: `pnpm --filter @cairn/web test src/api`
+Expected: PASS, 10 тестов.
+
+- [ ] **Step 11: Коммит**
+
+```bash
+git add apps/web/src/api
+git commit -m "Добавить клиент API"
+```
+
+---
+
+### Task 42: Форма входа
+
+**Files:**
+- Create: `apps/web/src/components/LoginForm/LoginForm.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Create: `apps/web/src/app/login/page.tsx`
+- Test: `apps/web/src/components/LoginForm/LoginForm.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/LoginForm/LoginForm.test.tsx`**
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { LoginForm } from './LoginForm';
+
+describe('LoginForm', () => {
+  it('показывает поля адреса и пароля', () => {
+    render(<LoginForm onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText('Адрес электронной почты')).toBeInTheDocument();
+    expect(screen.getByLabelText('Пароль')).toBeInTheDocument();
+  });
+
+  it('передаёт введённые данные', async () => {
+    const onSubmit = vi.fn();
+    render(<LoginForm onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Адрес электронной почты'), 'user@cairn.local');
+    await userEvent.type(screen.getByLabelText('Пароль'), 'пароль');
+    await userEvent.click(screen.getByRole('button', { name: 'Войти' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ email: 'user@cairn.local', password: 'пароль' });
+  });
+
+  it('не отправляет форму с пустыми полями', async () => {
+    const onSubmit = vi.fn();
+    render(<LoginForm onSubmit={onSubmit} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Войти' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('скрывает пароль от посторонних глаз', () => {
+    render(<LoginForm onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText('Пароль')).toHaveAttribute('type', 'password');
+  });
+
+  it('показывает сообщение об ошибке', () => {
+    render(<LoginForm onSubmit={vi.fn()} error="Неверный адрес или пароль" />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Неверный адрес или пароль');
+  });
+
+  it('блокирует кнопку во время отправки', () => {
+    render(<LoginForm onSubmit={vi.fn()} isSubmitting />);
+
+    expect(screen.getByRole('button', { name: 'Вход…' })).toBeDisabled();
+  });
+
+  it('связывает ошибку с формой для программ чтения с экрана', () => {
+    render(<LoginForm onSubmit={vi.fn()} error="Неверный адрес или пароль" />);
+
+    expect(screen.getByRole('alert')).toHaveAttribute('id');
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/LoginForm`
+Expected: FAIL — «Failed to resolve import "./LoginForm"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/LoginForm/types.ts`**
+
+```typescript
+import type { LoginInput } from '@cairn/shared';
+
+/** Пропсы формы входа. */
+export interface IProps {
+  /** Вызывается с проверенными данными. */
+  onSubmit: (input: LoginInput) => void;
+  /** Сообщение об ошибке предыдущей попытки. */
+  error?: string;
+  /** Отправка в процессе. */
+  isSubmitting?: boolean;
+}
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/LoginForm/constants.ts`**
+
+```typescript
+/** Подписи полей формы. */
+export const FIELD_LABELS = {
+  email: 'Адрес электронной почты',
+  password: 'Пароль',
+} as const;
+
+/** Идентификатор блока с ошибкой: на него ссылается форма. */
+export const ERROR_ID = 'login-error';
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/LoginForm/LoginForm.tsx`**
+
+```tsx
+'use client';
+
+import { useState, type FormEvent } from 'react';
+
+import { ERROR_ID, FIELD_LABELS } from './constants';
+import type { IProps } from './types';
+
+/** Первый шаг входа: адрес и пароль (спека 6.1). */
+export function LoginForm({ onSubmit, error, isSubmitting = false }: IProps) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !isSubmitting;
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    if (!canSubmit) {
+      return;
+    }
+
+    onSubmit({ email: email.trim().toLowerCase(), password });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4" aria-describedby={error ? ERROR_ID : undefined}>
+      <div className="space-y-1">
+        <label htmlFor="email" className="block text-sm font-medium">
+          {FIELD_LABELS.email}
+        </label>
+        <input
+          id="email"
+          type="email"
+          autoComplete="username"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          className="w-full rounded-md border border-border px-3 py-2"
+        />
+      </div>
+
+      <div className="space-y-1">
+        <label htmlFor="password" className="block text-sm font-medium">
+          {FIELD_LABELS.password}
+        </label>
+        <input
+          id="password"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          className="w-full rounded-md border border-border px-3 py-2"
+        />
+      </div>
+
+      {error && (
+        <p id={ERROR_ID} role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="w-full rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+      >
+        {isSubmitting ? 'Вход…' : 'Войти'}
+      </button>
+    </form>
+  );
+}
+```
+
+- [ ] **Step 6: Создать `apps/web/src/components/LoginForm/index.ts`**
+
+```typescript
+export { LoginForm } from './LoginForm';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 7: Запустить тест**
+
+Run: `pnpm --filter @cairn/web test src/components/LoginForm`
+Expected: PASS, 7 тестов.
+
+- [ ] **Step 8: Коммит**
+
+```bash
+git add apps/web/src/components
+git commit -m "Добавить форму входа"
+```
+
+---
+
+### Task 43: Форма второго фактора и страница входа
+
+**Files:**
+- Create: `apps/web/src/components/TotpForm/TotpForm.tsx`, `types.ts`, `index.ts`
+- Create: `apps/web/src/app/login/page.tsx`, `apps/web/src/app/login/LoginScreen.tsx`
+- Test: `apps/web/src/components/TotpForm/TotpForm.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/TotpForm/TotpForm.test.tsx`**
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { TotpForm } from './TotpForm';
+
+describe('TotpForm', () => {
+  it('просит код из приложения', () => {
+    render(<TotpForm onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText('Код из приложения')).toBeInTheDocument();
+  });
+
+  it('передаёт введённый код', async () => {
+    const onSubmit = vi.fn();
+    render(<TotpForm onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Код из приложения'), '123456');
+    await userEvent.click(screen.getByRole('button', { name: 'Подтвердить' }));
+
+    expect(onSubmit).toHaveBeenCalledWith('123456');
+  });
+
+  it('не отправляет код короче шести цифр', async () => {
+    const onSubmit = vi.fn();
+    render(<TotpForm onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Код из приложения'), '12345');
+    await userEvent.click(screen.getByRole('button', { name: 'Подтвердить' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('не принимает буквы', async () => {
+    render(<TotpForm onSubmit={vi.fn()} />);
+
+    const field = screen.getByLabelText('Код из приложения');
+    await userEvent.type(field, '12ab34');
+
+    expect(field).toHaveValue('1234');
+  });
+
+  it('показывает ошибку', () => {
+    render(<TotpForm onSubmit={vi.fn()} error="Неверный код" />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Неверный код');
+  });
+
+  it('подсказывает, что делать при утере устройства', () => {
+    // Тупик «потерял телефон» должен разрешаться без обращения к разработчику.
+    render(<TotpForm onSubmit={vi.fn()} />);
+
+    expect(screen.getByText(/администратор/i)).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/TotpForm`
+Expected: FAIL — «Failed to resolve import "./TotpForm"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/TotpForm/types.ts`**
+
+```typescript
+/** Пропсы формы второго фактора. */
+export interface IProps {
+  /** Вызывается с шестизначным кодом. */
+  onSubmit: (code: string) => void;
+  /** Сообщение об ошибке предыдущей попытки. */
+  error?: string;
+  /** Отправка в процессе. */
+  isSubmitting?: boolean;
+}
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/TotpForm/TotpForm.tsx`**
+
+```tsx
+'use client';
+
+import { useState, type FormEvent } from 'react';
+
+import type { IProps } from './types';
+
+/** Второй шаг входа: код из приложения-аутентификатора (спека 6.1). */
+export function TotpForm({ onSubmit, error, isSubmitting = false }: IProps) {
+  const [code, setCode] = useState('');
+
+  const canSubmit = code.length === CODE_LENGTH && !isSubmitting;
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    if (canSubmit) {
+      onSubmit(code);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-1">
+        <label htmlFor="totp-code" className="block text-sm font-medium">
+          Код из приложения
+        </label>
+        <input
+          id="totp-code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          value={code}
+          onChange={(event) => setCode(onlyDigits(event.target.value))}
+          className="w-full rounded-md border border-border px-3 py-2 text-center text-lg tracking-widest"
+        />
+      </div>
+
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="w-full rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+      >
+        {isSubmitting ? 'Проверка…' : 'Подтвердить'}
+      </button>
+
+      <p className="text-sm text-muted-foreground">
+        Потеряли доступ к приложению? Обратитесь к администратору — он снимет привязку.
+      </p>
+    </form>
+  );
+}
+
+/** Оставляет только цифры и обрезает до нужной длины. */
+function onlyDigits(value: string): string {
+  return value.replace(/\D/g, '').slice(0, CODE_LENGTH);
+}
+
+/** Длина кода. */
+const CODE_LENGTH = 6;
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/TotpForm/index.ts`**
+
+```typescript
+export { TotpForm } from './TotpForm';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 6: Создать `apps/web/src/app/login/LoginScreen.tsx`**
+
+Экран держит состояние двухшагового входа: показывает форму пароля, затем форму кода. Логика вынесена из страницы, чтобы страница осталась серверным компонентом.
+
+```tsx
+'use client';
+
+import type { LoginInput, LoginResponse } from '@cairn/shared';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+
+import { apiClient, ApiError } from '@/api';
+import { LoginForm } from '@/components/LoginForm';
+import { TotpForm } from '@/components/TotpForm';
+
+/** Двухшаговый вход: пароль, затем при необходимости второй фактор. */
+export function LoginScreen() {
+  const router = useRouter();
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [error, setError] = useState<string>();
+  const [isSubmitting, setSubmitting] = useState(false);
+
+  async function submitPassword(input: LoginInput): Promise<void> {
+    setSubmitting(true);
+    setError(undefined);
+
+    try {
+      const response = await apiClient<LoginResponse>('/auth/login', {
+        method: 'POST',
+        body: input,
+      });
+
+      if (response.kind === 'totp_required') {
+        setChallengeToken(response.challengeToken);
+
+        return;
+      }
+
+      router.replace('/');
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Не удалось войти');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitCode(code: string): Promise<void> {
+    if (!challengeToken) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(undefined);
+
+    try {
+      await apiClient('/auth/totp', { method: 'POST', body: { challengeToken, code } });
+      router.replace('/');
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Не удалось подтвердить код');
+      // Челлендж исчерпан — возвращаем человека к вводу пароля.
+      if (cause instanceof ApiError && cause.status === 401) {
+        setChallengeToken(null);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-xl font-semibold">
+        {challengeToken ? 'Подтверждение входа' : 'Вход в CAIRN'}
+      </h1>
+
+      {challengeToken ? (
+        <TotpForm onSubmit={submitCode} error={error} isSubmitting={isSubmitting} />
+      ) : (
+        <LoginForm onSubmit={submitPassword} error={error} isSubmitting={isSubmitting} />
+      )}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 7: Создать `apps/web/src/app/login/page.tsx`**
+
+```tsx
+import { LoginScreen } from './LoginScreen';
+
+/** Страница входа. */
+export default function LoginPage() {
+  return (
+    <main className="mx-auto flex min-h-screen max-w-sm items-center px-4">
+      <div className="w-full">
+        <LoginScreen />
+      </div>
+    </main>
+  );
+}
+```
+
+- [ ] **Step 8: Запустить тесты и проверку типов**
+
+```bash
+pnpm --filter @cairn/web test
+pnpm --filter @cairn/web typecheck
+```
+
+Expected: PASS, 23 теста; типы без ошибок.
+
+- [ ] **Step 9: Проверить вход вручную**
+
+```bash
+docker compose up -d --wait postgres
+pnpm --filter @cairn/api db:migrate
+pnpm --filter @cairn/api cli create-superadmin admin@example.com
+```
+
+Запусти оба приложения (`pnpm --filter @cairn/api dev` и `pnpm --filter @cairn/web dev`), открой `http://localhost:3000/login`.
+
+Expected: форма отображается; попытка входа с неверным паролем показывает сообщение об ошибке.
+
+Заметь: пока веб-приложение обращается к API напрямую по адресу `/api`, а реверс-прокси появится в последнем чанке. Для локальной разработки добавь в `apps/web/next.config.ts` временную переадресацию:
+
+```typescript
+  async rewrites() {
+    return [{ source: '/api/:path*', destination: 'http://localhost:3001/api/:path*' }];
+  },
+```
+
+- [ ] **Step 10: Коммит**
+
+```bash
+git add apps/web
+git commit -m "Добавить страницу входа"
+```
+
+---
+
+**Результат чанка 12:** веб-приложение поднимается, клиент API пробрасывает сессию с обеих сторон, человек входит с паролем и вторым фактором. Следующий чанк добавляет сводку и карточку проекта.
