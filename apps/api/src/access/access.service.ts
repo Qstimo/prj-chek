@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import { grants, projects } from '../db/schema';
+import { InsufficientLevelError, SectionNotVisibleError } from './access.errors';
 import type { RequestSubject } from './access.types';
 
 /**
@@ -76,4 +77,36 @@ export class AccessService {
 
     return rows.map((row) => row.projectId);
   }
+
+  /**
+   * Требует уровень не ниже указанного.
+   *
+   * Бросает {@link SectionNotVisibleError} при отсутствии доступа и
+   * {@link InsufficientLevelError} при недостаточном уровне (спека 5.3).
+   */
+  async requireLevel(
+    subject: RequestSubject,
+    projectId: string,
+    section: Section,
+    minimum: AccessLevel,
+  ): Promise<AccessLevel> {
+    const level = await this.resolveLevel(subject, projectId, section);
+
+    if (level === null) {
+      throw new SectionNotVisibleError();
+    }
+
+    if (LEVEL_ORDER[level] < LEVEL_ORDER[minimum]) {
+      throw new InsufficientLevelError();
+    }
+
+    return level;
+  }
 }
+
+/** Порядок уровней для сравнения. Строки перечисления сравнивать нельзя. */
+const LEVEL_ORDER: Record<AccessLevel, number> = {
+  [AccessLevel.Metadata]: 1,
+  [AccessLevel.Read]: 2,
+  [AccessLevel.Write]: 3,
+};
