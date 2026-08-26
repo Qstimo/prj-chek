@@ -18,7 +18,11 @@
 
 Прочитай перед первой задачей.
 
-**TDD обязателен.** Каждая задача начинается с падающего теста. Запусти тест и убедись, что он падает **по ожидаемой причине**, прежде чем писать реализацию. Тест, упавший из-за опечатки в импорте, ничего не проверяет.
+**Репозиторий уже существует.** Git инициализирован, ветка `main`, в корне лежат `CLAUDE.md`, `.gitignore`, ТЗ и документы в `docs/`. Заново инициализировать ничего не нужно. `.gitignore` уже содержит `node_modules/`, `dist/`, `.next/`, `.env` — проверь это перед первым коммитом и дополни, если чего-то не хватает.
+
+**TDD обязателен.** Каждая задача начинается с падающего теста. Запусти тест и убедись, что он падает **по ожидаемой причине**, прежде чем писать реализацию. Тест, упавший из-за отсутствующей зависимости или опечатки в импорте, ничего не проверяет.
+
+**После создания любого `package.json` выполняй `pnpm install` в корне.** Иначе бинарники (`vitest`, `tsx`, `nest`) не появятся в `node_modules/.bin`, и следующий шаг упадёт не по той причине, которая указана в плане.
 
 **Коммит после каждой задачи.** Сообщения на русском, в повелительном наклонении: «Добавить сервис шифрования».
 
@@ -28,7 +32,7 @@
 
 **Порядок в файле:** экспортируемая сущность, затем вспомогательные, затем константы, затем типы.
 
-**Не изобретай.** Если в плане указан код — используй его. Если чего-то не хватает, сверься со спекой, а не с догадками.
+**Не изобретай.** Если в плане указан код — используй его дословно. Если чего-то не хватает, сверься со спекой, а не с догадками.
 
 ---
 
@@ -63,16 +67,21 @@
 
 ---
 
-## Chunk 1: Основание
+## Chunk 1: Каркас монорепо
 
-Результат чанка: монорепо собирается, база поднимается миграциями, шифрование работает и покрыто тестами.
+Результат чанка: монорепо собирается, пакет контракта и бэкенд имеют работающие тесты, база поднимается с двумя ролями.
 
-### Task 1: Каркас монорепо
+### Task 1: Корень монорепо
 
 **Files:**
-- Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `.nvmrc`, `.editorconfig`
+- Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `.nvmrc`
+- Modify: `.gitignore`
 
-- [ ] **Step 1: Создать `pnpm-workspace.yaml`**
+- [ ] **Step 1: Проверить `.gitignore`**
+
+Открой существующий `.gitignore` и убедись, что в нём есть строки `node_modules/`, `dist/`, `.next/`, `.env`. Если чего-то нет — допиши. Ключ шифрования живёт в `.env`, и его попадание в репозиторий нарушило бы требование спеки 4.9 о хранении ключа отдельно от базы.
+
+- [ ] **Step 2: Создать `pnpm-workspace.yaml`**
 
 ```yaml
 packages:
@@ -80,9 +89,9 @@ packages:
   - 'packages/*'
 ```
 
-- [ ] **Step 2: Создать корневой `package.json`**
+- [ ] **Step 3: Создать корневой `package.json`**
 
-Поле `packageManager` фиксирует версию pnpm — без него разные машины ставят разные версии и лок-файл начинает конфликтовать.
+Поле `packageManager` фиксирует версию pnpm — без него разные машины ставят разные версии и лок-файл начинает конфликтовать. Скрипта `lint` здесь нет намеренно: ESLint в объём этапа не входит, а скрипт без конфигурации молча возвращал бы успех.
 
 ```json
 {
@@ -94,7 +103,6 @@ packages:
   },
   "scripts": {
     "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm -r build"
   },
@@ -104,7 +112,7 @@ packages:
 }
 ```
 
-- [ ] **Step 3: Создать `tsconfig.base.json`**
+- [ ] **Step 4: Создать `tsconfig.base.json`**
 
 `strict` и `noUncheckedIndexedAccess` включены намеренно: система работает с секретами, и молчаливый `undefined` из массива здесь дороже, чем неудобство при написании кода.
 
@@ -113,8 +121,8 @@ packages:
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -127,21 +135,23 @@ packages:
 }
 ```
 
-- [ ] **Step 4: Создать `.nvmrc`**
+Модульная система — CommonJS: экосистема NestJS 11 рассчитана на неё, и попытка собрать бэкенд в ESM упирается в декораторы и загрузчики. Фронтенд переопределит эти настройки под себя.
+
+- [ ] **Step 5: Создать `.nvmrc`**
 
 ```
 22
 ```
 
-- [ ] **Step 5: Проверить установку**
+- [ ] **Step 6: Установить зависимости**
 
 Run: `pnpm install`
-Expected: установка проходит, появляется `pnpm-lock.yaml`, предупреждений об отсутствующих workspace нет.
+Expected: установка проходит, появляется `pnpm-lock.yaml`.
 
-- [ ] **Step 6: Коммит**
+- [ ] **Step 7: Коммит**
 
 ```bash
-git add package.json pnpm-workspace.yaml tsconfig.base.json .nvmrc pnpm-lock.yaml
+git add package.json pnpm-workspace.yaml tsconfig.base.json .nvmrc pnpm-lock.yaml .gitignore
 git commit -m "Создать каркас монорепо"
 ```
 
@@ -150,6 +160,8 @@ git commit -m "Создать каркас монорепо"
 ### Task 2: Перечисления в пакете контракта
 
 Перечисления — первое, что появляется в коде, потому что на них ссылаются и схема базы, и API, и фронтенд. Правило пользователя: значение, используемое дважды и более, оформляется перечислением, а не union-типом.
+
+Пакет собирается в `dist` и оттуда потребляется бэкендом. Отдавать исходники нельзя: бэкенд компилируется в CommonJS, и `require()` TypeScript-файла в собранном приложении не сработает. Тесты при этом ходят в исходники напрямую через alias — иначе пришлось бы пересобирать пакет после каждой правки.
 
 **Files:**
 - Create: `packages/shared/package.json`, `packages/shared/tsconfig.json`, `packages/shared/vitest.config.ts`
@@ -163,10 +175,10 @@ git commit -m "Создать каркас монорепо"
   "name": "@cairn/shared",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
+    "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -189,7 +201,8 @@ git commit -m "Создать каркас монорепо"
     "rootDir": "./src",
     "outDir": "./dist"
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -206,14 +219,19 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Написать падающий тест `packages/shared/src/enums.test.ts`**
+- [ ] **Step 4: Установить зависимости**
+
+Run: `pnpm install`
+Expected: в `packages/shared/node_modules/.bin` появляется `vitest`.
+
+- [ ] **Step 5: Написать падающий тест `packages/shared/src/enums.test.ts`**
 
 Тест закрепляет два инварианта спеки, которые легко нарушить при последующем редактировании: секций ровно шесть (закрытый список из ТЗ 3) и уровень «нет» отсутствует среди значений, потому что выражается отсутствием строки выдачи (спека 4.3).
 
 ```typescript
 import { describe, expect, it } from 'vitest';
 
-import { AccessLevel, AuditSubjectKind, Section, SubjectKind } from './enums.js';
+import { AccessLevel, AuditSubjectKind, Section, SubjectKind } from './enums';
 
 describe('Section', () => {
   it('содержит ровно шесть секций', () => {
@@ -248,12 +266,12 @@ describe('AuditSubjectKind', () => {
 });
 ```
 
-- [ ] **Step 5: Запустить тест и убедиться, что он падает**
+- [ ] **Step 6: Запустить тест и убедиться, что он падает**
 
 Run: `pnpm --filter @cairn/shared test`
-Expected: FAIL — модуль `./enums.js` не найден.
+Expected: FAIL — «Failed to resolve import "./enums"». Если вместо этого написано `vitest: command not found`, зависимости не установлены — вернись к шагу 4.
 
-- [ ] **Step 6: Создать `packages/shared/src/enums.ts`**
+- [ ] **Step 7: Создать `packages/shared/src/enums.ts`**
 
 ```typescript
 /** Секции проекта. Список закрытый: секции являются единицами выдачи доступа (ТЗ 3). */
@@ -330,21 +348,26 @@ export enum InvitationKind {
 }
 ```
 
-- [ ] **Step 7: Создать `packages/shared/src/index.ts`**
+- [ ] **Step 8: Создать `packages/shared/src/index.ts`**
 
 ```typescript
-export * from './enums.js';
+export * from './enums';
 ```
 
-- [ ] **Step 8: Запустить тест**
+- [ ] **Step 9: Запустить тест**
 
 Run: `pnpm --filter @cairn/shared test`
 Expected: PASS, 4 теста.
 
-- [ ] **Step 9: Коммит**
+- [ ] **Step 10: Проверить сборку пакета**
+
+Run: `pnpm --filter @cairn/shared build`
+Expected: появляется `packages/shared/dist/index.js` и `index.d.ts`, тестовые файлы в `dist` не попадают.
+
+- [ ] **Step 11: Коммит**
 
 ```bash
-git add packages/shared
+git add packages/shared pnpm-lock.yaml
 git commit -m "Добавить перечисления секций и уровней доступа"
 ```
 
@@ -355,11 +378,13 @@ git commit -m "Добавить перечисления секций и уро�
 Отдельная задача, потому что связка NestJS с Vitest требует нестандартной настройки: декораторы NestJS опираются на `emitDecoratorMetadata`, а esbuild, используемый Vitest по умолчанию, эту опцию не поддерживает. Без плагина SWC внедрение зависимостей молча перестаёт работать в тестах.
 
 **Files:**
-- Create: `apps/api/package.json`, `apps/api/tsconfig.json`, `apps/api/vitest.config.ts`
-- Create: `apps/api/src/app.module.ts`, `apps/api/src/main.ts`
+- Create: `apps/api/package.json`, `apps/api/tsconfig.json`, `apps/api/tsconfig.tools.json`, `apps/api/nest-cli.json`, `apps/api/vitest.config.ts`
+- Create: `apps/api/src/app.module.ts`, `apps/api/src/main.ts`, `apps/api/src/env.ts`
 - Test: `apps/api/src/app.module.test.ts`
 
 - [ ] **Step 1: Создать `apps/api/package.json`**
+
+Пакет `dotenv` нужен, потому что `.env` лежит в корне монорепо, а скрипты выполняются из `apps/api`: без явной загрузки с указанием пути переменные окружения не попадут в процесс.
 
 ```json
 {
@@ -382,6 +407,7 @@ git commit -m "Добавить перечисления секций и уро�
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5",
     "reflect-metadata": "^0.2.2",
@@ -404,28 +430,51 @@ git commit -m "Добавить перечисления секций и уро�
 
 - [ ] **Step 2: Создать `apps/api/tsconfig.json`**
 
-`experimentalDecorators` и `emitDecoratorMetadata` обязательны для NestJS. `module: CommonJS` — потому что экосистема NestJS 11 всё ещё рассчитана на него.
+`experimentalDecorators` и `emitDecoratorMetadata` обязательны для NestJS. Конфигурация Drizzle вынесена в отдельный файл: она лежит вне `src` и при включении в этот `include` ломала бы `rootDir`.
 
 ```json
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "CommonJS",
-    "moduleResolution": "Node",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "rootDir": "./src",
-    "outDir": "./dist",
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]
-    }
+    "outDir": "./dist"
   },
-  "include": ["src/**/*", "drizzle.config.ts"]
+  "include": ["src/**/*"]
 }
 ```
 
-- [ ] **Step 3: Создать `apps/api/vitest.config.ts`**
+- [ ] **Step 3: Создать `apps/api/tsconfig.tools.json`**
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["drizzle.config.ts"]
+}
+```
+
+- [ ] **Step 4: Создать `apps/api/nest-cli.json`**
+
+Без этого файла `nest build` и `nest start` завершаются ошибкой «Could not find nest-cli.json».
+
+```json
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true
+  }
+}
+```
+
+- [ ] **Step 5: Создать `apps/api/vitest.config.ts`**
+
+Alias на исходники пакета контракта позволяет тестам видеть правки в нём без пересборки. Ключ шифрования задан фиксированным значением: модуль шифрования читает его при загрузке и без него не стартует.
 
 ```typescript
 import { resolve } from 'node:path';
@@ -439,19 +488,31 @@ export default defineConfig({
     swc.vite({ module: { type: 'es6' } }),
   ],
   resolve: {
-    alias: { '@': resolve(__dirname, './src') },
+    alias: {
+      // Тесты ходят в исходники контракта, чтобы не пересобирать пакет после каждой правки.
+      '@cairn/shared': resolve(__dirname, '../../packages/shared/src/index.ts'),
+    },
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
+    env: {
+      // Фиксированный тестовый ключ: 32 нулевых байта в base64.
+      CAIRN_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+    },
     // Интеграционные тесты поднимают контейнер с базой.
     testTimeout: 60_000,
-    hookTimeout: 120_000,
+    hookTimeout: 180_000,
   },
 });
 ```
 
-- [ ] **Step 4: Написать падающий тест `apps/api/src/app.module.test.ts`**
+- [ ] **Step 6: Установить зависимости**
+
+Run: `pnpm install`
+Expected: в `apps/api/node_modules/.bin` появляются `vitest`, `tsx`, `nest`, `drizzle-kit`.
+
+- [ ] **Step 7: Написать падающий тест `apps/api/src/app.module.test.ts`**
 
 Тест проверяет, что модуль собирается и внедрение зависимостей работает — то есть что связка SWC и Vitest настроена верно. Без него поломка настройки обнаружится только в следующей задаче и будет выглядеть как ошибка в её коде.
 
@@ -459,7 +520,7 @@ export default defineConfig({
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
 
-import { AppModule } from './app.module.js';
+import { AppModule } from './app.module';
 
 describe('AppModule', () => {
   it('собирается', async () => {
@@ -473,12 +534,32 @@ describe('AppModule', () => {
 });
 ```
 
-- [ ] **Step 5: Запустить тест и убедиться, что он падает**
+- [ ] **Step 8: Запустить тест и убедиться, что он падает**
 
 Run: `pnpm --filter @cairn/api test`
-Expected: FAIL — модуль `./app.module.js` не найден.
+Expected: FAIL — «Failed to resolve import "./app.module"».
 
-- [ ] **Step 6: Создать `apps/api/src/app.module.ts`**
+- [ ] **Step 9: Создать `apps/api/src/env.ts`**
+
+Единственное место, где читается `.env`. Путь указан явно, потому что файл лежит в корне монорепо, а процесс запускается из `apps/api`.
+
+```typescript
+import { resolve } from 'node:path';
+
+import { config } from 'dotenv';
+
+/**
+ * Загружает переменные окружения из корневого `.env`.
+ *
+ * Вызывается первой строкой в точках входа: приложении, миграциях и командах
+ * консоли. Под тестами файл не читается — значения задаёт `vitest.config.ts`.
+ */
+export function loadEnv(): void {
+  config({ path: resolve(__dirname, '../../../.env') });
+}
+```
+
+- [ ] **Step 10: Создать `apps/api/src/app.module.ts`**
 
 ```typescript
 import { Module } from '@nestjs/common';
@@ -490,7 +571,7 @@ import { Module } from '@nestjs/common';
 export class AppModule {}
 ```
 
-- [ ] **Step 7: Создать `apps/api/src/main.ts`**
+- [ ] **Step 11: Создать `apps/api/src/main.ts`**
 
 ```typescript
 import 'reflect-metadata';
@@ -498,7 +579,12 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 
-import { AppModule } from './app.module.js';
+import { loadEnv } from './env';
+
+loadEnv();
+
+// Импорт после загрузки окружения: модули читают переменные при инициализации.
+const { AppModule } = await import('./app.module');
 
 /** Точка входа. CORS не настраивается: оба приложения за одним реверс-прокси (спека 3.3). */
 async function bootstrap(): Promise<void> {
@@ -514,15 +600,22 @@ async function bootstrap(): Promise<void> {
 void bootstrap();
 ```
 
-- [ ] **Step 8: Запустить тест**
+Если сборка CommonJS не примет `await import` на верхнем уровне, замени две строки на обычный `import { AppModule } from './app.module';` вверху файла и перенеси `loadEnv()` в отдельный файл `apps/api/src/bootstrap.ts`, который импортируется первым: `import './env-init';`. Проверь `pnpm --filter @cairn/api build` перед тем, как считать шаг выполненным.
+
+- [ ] **Step 12: Запустить тест**
 
 Run: `pnpm --filter @cairn/api test`
 Expected: PASS, 1 тест.
 
-- [ ] **Step 9: Коммит**
+- [ ] **Step 13: Проверить типы**
+
+Run: `pnpm --filter @cairn/api typecheck`
+Expected: без ошибок.
+
+- [ ] **Step 14: Коммит**
 
 ```bash
-git add apps/api
+git add apps/api pnpm-lock.yaml
 git commit -m "Добавить каркас бэкенда с настроенным Vitest"
 ```
 
@@ -534,23 +627,28 @@ git commit -m "Добавить каркас бэкенда с настроен�
 
 **Files:**
 - Create: `docker-compose.yml`, `.env.example`
-- Create: `docker/postgres/init/01-roles.sql`
+- Create: `docker/postgres/init/01-roles.sh`
 
-- [ ] **Step 1: Создать `docker/postgres/init/01-roles.sql`**
+- [ ] **Step 1: Создать `docker/postgres/init/01-roles.sh`**
 
-Скрипт выполняется при первой инициализации кластера. Роль `cairn_app` получит права на таблицы в следующей задаче, после того как миграции их создадут.
+Скрипт, а не SQL-файл: пароль роли приложения берётся из окружения. Захардкоженный в репозитории пароль роли, имеющей доступ к зашифрованным секретам, обесценил бы разделение ролей.
 
-```sql
--- Роль приложения. Привилегии на таблицы выдаются после миграций (см. 02-grants.sql).
-CREATE ROLE cairn_app WITH LOGIN PASSWORD 'cairn_app_password';
+```bash
+#!/bin/bash
+set -euo pipefail
 
-GRANT CONNECT ON DATABASE cairn TO cairn_app;
-GRANT USAGE ON SCHEMA public TO cairn_app;
+psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+  CREATE ROLE cairn_app WITH LOGIN PASSWORD '${CAIRN_APP_PASSWORD}';
+  GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO cairn_app;
+  GRANT USAGE ON SCHEMA public TO cairn_app;
+EOSQL
 ```
+
+Файл должен быть исполняемым: `chmod +x docker/postgres/init/01-roles.sh`.
 
 - [ ] **Step 2: Создать `docker-compose.yml`**
 
-Реверс-прокси добавляется в чанке 4, когда появится что проксировать.
+Публикация порта нужна для локальной разработки и миграций с хоста. Реверс-прокси добавляется в чанке 5, когда появится что проксировать.
 
 ```yaml
 services:
@@ -560,11 +658,14 @@ services:
       POSTGRES_DB: cairn
       POSTGRES_USER: cairn_owner
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD не задан}
+      CAIRN_APP_PASSWORD: ${CAIRN_APP_PASSWORD:?CAIRN_APP_PASSWORD не задан}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
-      - '5432:5432'
+      # Только для локальной разработки. На сервере строку следует убрать:
+      # приложение ходит в базу по внутренней сети Compose.
+      - '127.0.0.1:5432:5432'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U cairn_owner -d cairn']
       interval: 5s
@@ -577,18 +678,26 @@ volumes:
 
 - [ ] **Step 3: Создать `.env.example`**
 
-Ключ шифрования генерируется командой из комментария. Приложение откажется стартовать, если ключ не 32 байта (спека 4.9).
+Пароли встречаются дважды: как отдельная переменная для контейнера и внутри строки подключения. Расхождение между ними — самая частая причина отказа миграций, поэтому оно вынесено в комментарий.
 
 ```bash
+# --- База данных ---
 # Пароль владельца схемы. Этой ролью выполняются миграции.
-POSTGRES_PASSWORD=change_me
+POSTGRES_PASSWORD=change_me_owner
+
+# Пароль роли приложения. Задаётся при первом запуске контейнера.
+CAIRN_APP_PASSWORD=change_me_app
+
+# ВАЖНО: пароли в строках подключения должны совпадать с двумя переменными выше.
+# При их расхождении миграции падают с ошибкой аутентификации.
 
 # Строка подключения для миграций — полные права на схему.
-DATABASE_OWNER_URL=postgres://cairn_owner:change_me@localhost:5432/cairn
+DATABASE_OWNER_URL=postgres://cairn_owner:change_me_owner@localhost:5432/cairn
 
 # Строка подключения приложения — без права изменять журнал.
-DATABASE_URL=postgres://cairn_app:cairn_app_password@localhost:5432/cairn
+DATABASE_URL=postgres://cairn_app:change_me_app@localhost:5432/cairn
 
+# --- Приложение ---
 # Ключ прикладного шифрования: 32 байта в base64.
 # Сгенерировать: openssl rand -base64 32
 CAIRN_ENCRYPTION_KEY=
@@ -597,18 +706,30 @@ CAIRN_ENCRYPTION_KEY=
 CAIRN_WEB_URL=http://localhost:3000
 ```
 
-- [ ] **Step 4: Проверить, что база поднимается**
+- [ ] **Step 4: Подготовить локальное окружение**
 
 ```bash
 cp .env.example .env
-# Задать POSTGRES_PASSWORD и CAIRN_ENCRYPTION_KEY в .env
-docker compose up -d postgres
-docker compose exec postgres psql -U cairn_owner -d cairn -c "\du"
+openssl rand -base64 32
 ```
 
+Вставь полученный ключ в `CAIRN_ENCRYPTION_KEY` и замени оба пароля на собственные — не забыв поправить их и в строках подключения.
+
+- [ ] **Step 5: Поднять базу**
+
+```bash
+chmod +x docker/postgres/init/01-roles.sh
+docker compose up -d --wait postgres
+```
+
+Флаг `--wait` дожидается healthcheck: без него следующая команда с высокой вероятностью получит «the database system is starting up».
+
+- [ ] **Step 6: Проверить, что обе роли созданы**
+
+Run: `docker compose exec postgres psql -U cairn_owner -d cairn -c "\du"`
 Expected: в списке ролей присутствуют `cairn_owner` и `cairn_app`.
 
-- [ ] **Step 5: Коммит**
+- [ ] **Step 7: Коммит**
 
 ```bash
 git add docker-compose.yml .env.example docker/
@@ -617,14 +738,22 @@ git commit -m "Добавить развёртывание базы с разд�
 
 ---
 
+**Результат чанка 1:** монорепо собирается, оба пакета имеют работающие тесты, база поднимается с двумя ролями. Следующий чанк добавляет схему данных и шифрование.
+
+---
+
+## Chunk 2: Схема данных и шифрование
+
+Результат чанка: восемь таблиц созданы миграциями, неизменяемость журнала обеспечена правами роли и покрыта интеграционным тестом, шифрование работает.
+
 ### Task 5: Схема базы — субъекты и пользователи
 
 **Files:**
 - Create: `apps/api/src/db/schema/subjects.ts`, `apps/api/src/db/schema/users.ts`, `apps/api/src/db/schema/index.ts`
 - Create: `apps/api/drizzle.config.ts`
-- Test: `apps/api/src/db/schema/schema.test.ts`
+- Test: `apps/api/src/db/schema/subjects.test.ts`, `apps/api/src/db/schema/users.test.ts`
 
-- [ ] **Step 1: Написать падающий тест `apps/api/src/db/schema/schema.test.ts`**
+- [ ] **Step 1: Написать падающий тест `apps/api/src/db/schema/subjects.test.ts`**
 
 Тест проверяет соответствие схемы перечислениям из контракта. Это защита от расхождения: перечисление в `@cairn/shared` и перечисление PostgreSQL — два разных объявления одних и тех же значений, и они обязаны совпадать.
 
@@ -632,23 +761,31 @@ git commit -m "Добавить развёртывание базы с разд�
 import { AuditSubjectKind, SubjectKind } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
-import { subjectKindEnum, subjects } from './subjects.js';
-import { users } from './users.js';
+import { subjectKindEnum, subjects } from './subjects';
 
 describe('субъекты', () => {
   it('перечисление вида субъекта совпадает с контрактом', () => {
     expect(subjectKindEnum.enumValues).toEqual(Object.values(SubjectKind));
   });
 
-  it('перечисление субъектов не совпадает с перечислением журнала', () => {
-    // Разные перечисления: журнал знает про system, модель субъектов — нет (спека 4.7).
+  it('не знает про значение system', () => {
+    // Оно принадлежит перечислению журнала — это разные перечисления (спека 4.7).
     expect(subjectKindEnum.enumValues).not.toContain(AuditSubjectKind.System);
   });
 
   it('содержит признак отзыва', () => {
+    // Физического удаления нет: оно разорвало бы связи в журнале (спека 4.1).
     expect(subjects.revokedAt).toBeDefined();
   });
 });
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/db/schema/users.test.ts`**
+
+```typescript
+import { describe, expect, it } from 'vitest';
+
+import { users } from './users';
 
 describe('пользователи', () => {
   it('не содержит поля статуса', () => {
@@ -659,15 +796,20 @@ describe('пользователи', () => {
   it('хранит секрет второго фактора в зашифрованном виде', () => {
     expect(users.totpSecretEncrypted).toBeDefined();
   });
+
+  it('допускает отсутствие пароля', () => {
+    // Состояние «нет действующего пароля»: приглашён либо пароль сброшен (спека 4.2).
+    expect(users.passwordHash.notNull).toBe(false);
+  });
 });
 ```
 
-- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+- [ ] **Step 3: Запустить тесты и убедиться, что они падают**
 
 Run: `pnpm --filter @cairn/api test src/db/schema`
-Expected: FAIL — модуль `./subjects.js` не найден.
+Expected: FAIL — «Failed to resolve import "./subjects"».
 
-- [ ] **Step 3: Создать `apps/api/src/db/schema/subjects.ts`**
+- [ ] **Step 4: Создать `apps/api/src/db/schema/subjects.ts`**
 
 ```typescript
 import { SubjectKind } from '@cairn/shared';
@@ -698,12 +840,12 @@ export const subjects = pgTable('subjects', {
 export type Subject = typeof subjects.$inferSelect;
 ```
 
-- [ ] **Step 4: Создать `apps/api/src/db/schema/users.ts`**
+- [ ] **Step 5: Создать `apps/api/src/db/schema/users.ts`**
 
 ```typescript
 import { boolean, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
-import { subjects } from './subjects.js';
+import { subjects } from './subjects';
 
 /**
  * Пользователи — люди с аутентификацией.
@@ -731,19 +873,24 @@ export const users = pgTable('users', {
 export type User = typeof users.$inferSelect;
 ```
 
-- [ ] **Step 5: Создать `apps/api/src/db/schema/index.ts`**
+- [ ] **Step 6: Создать `apps/api/src/db/schema/index.ts`**
 
 ```typescript
-export * from './subjects.js';
-export * from './users.js';
+export * from './subjects';
+export * from './users';
 ```
 
-- [ ] **Step 6: Создать `apps/api/drizzle.config.ts`**
+- [ ] **Step 7: Создать `apps/api/drizzle.config.ts`**
 
 Миграции выполняются ролью-владельцем: роль приложения не имеет прав на изменение схемы.
 
 ```typescript
+import { resolve } from 'node:path';
+
+import { config } from 'dotenv';
 import { defineConfig } from 'drizzle-kit';
+
+config({ path: resolve(__dirname, '../../.env') });
 
 export default defineConfig({
   dialect: 'postgresql',
@@ -755,12 +902,12 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 7: Запустить тест**
+- [ ] **Step 8: Запустить тесты**
 
 Run: `pnpm --filter @cairn/api test src/db/schema`
-Expected: PASS, 5 тестов.
+Expected: PASS, 6 тестов.
 
-- [ ] **Step 8: Коммит**
+- [ ] **Step 9: Коммит**
 
 ```bash
 git add apps/api/src/db apps/api/drizzle.config.ts
@@ -774,7 +921,7 @@ git commit -m "Добавить таблицы субъектов и польз�
 **Files:**
 - Create: `apps/api/src/db/schema/projects.ts`, `apps/api/src/db/schema/grants.ts`
 - Modify: `apps/api/src/db/schema/index.ts`
-- Test: `apps/api/src/db/schema/grants.test.ts`
+- Test: `apps/api/src/db/schema/grants.test.ts`, `apps/api/src/db/schema/projects.test.ts`
 
 - [ ] **Step 1: Написать падающий тест `apps/api/src/db/schema/grants.test.ts`**
 
@@ -782,11 +929,16 @@ git commit -m "Добавить таблицы субъектов и польз�
 import { AccessLevel, Section } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
-import { accessLevelEnum, grants, sectionEnum } from './grants.js';
+import { accessLevelEnum, grants, sectionEnum } from './grants';
 
 describe('выдачи доступа', () => {
   it('перечисление секций совпадает с контрактом', () => {
     expect(sectionEnum.enumValues).toEqual(Object.values(Section));
+  });
+
+  it('содержит все шесть секций, включая нереализованные', () => {
+    // Выдать доступ к будущей секции можно до её реализации (спека 4.3).
+    expect(sectionEnum.enumValues).toHaveLength(6);
   });
 
   it('перечисление уровней не содержит значения «нет»', () => {
@@ -795,29 +947,48 @@ describe('выдачи доступа', () => {
     expect(accessLevelEnum.enumValues).not.toContain('none');
   });
 
-  it('содержит все шесть секций, включая нереализованные', () => {
-    // Выдать доступ к будущей секции можно до её реализации (спека 4.3).
-    expect(sectionEnum.enumValues).toHaveLength(6);
-  });
-
   it('хранит, кто выдал доступ', () => {
     expect(grants.grantedBy).toBeDefined();
   });
 });
 ```
 
-- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+- [ ] **Step 2: Написать падающий тест `apps/api/src/db/schema/projects.test.ts`**
 
-Run: `pnpm --filter @cairn/api test src/db/schema/grants`
-Expected: FAIL — модуль `./grants.js` не найден.
+```typescript
+import { ProjectLifecycle } from '@cairn/shared';
+import { describe, expect, it } from 'vitest';
 
-- [ ] **Step 3: Создать `apps/api/src/db/schema/projects.ts`**
+import { projectLifecycleEnum, projects } from './projects';
+
+describe('проекты', () => {
+  it('перечисление жизненного цикла совпадает с контрактом', () => {
+    expect(projectLifecycleEnum.enumValues).toEqual(Object.values(ProjectLifecycle));
+  });
+
+  it('слаг уникален', () => {
+    expect(projects.slug.isUnique).toBe(true);
+  });
+
+  it('допускает проект без ответственного', () => {
+    // Ответственный — справочное поле и прав не даёт (спека 4.4).
+    expect(projects.ownerUserId.notNull).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тесты и убедиться, что они падают**
+
+Run: `pnpm --filter @cairn/api test src/db/schema`
+Expected: FAIL — «Failed to resolve import "./grants"».
+
+- [ ] **Step 4: Создать `apps/api/src/db/schema/projects.ts`**
 
 ```typescript
 import { ProjectLifecycle } from '@cairn/shared';
 import { pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
-import { users } from './users.js';
+import { users } from './users';
 
 /** Состояние жизненного цикла проекта. */
 export const projectLifecycleEnum = pgEnum('project_lifecycle', [
@@ -851,15 +1022,17 @@ export const projects = pgTable('projects', {
 export type Project = typeof projects.$inferSelect;
 ```
 
-- [ ] **Step 4: Создать `apps/api/src/db/schema/grants.ts`**
+- [ ] **Step 5: Создать `apps/api/src/db/schema/grants.ts`**
+
+Индексы по субъекту и проекту заведены сразу: это горячие пути разрешения уровня доступа и списка видимых проектов, а добавлять их отдельной миграцией дороже, чем объявить здесь.
 
 ```typescript
 import { AccessLevel, Section } from '@cairn/shared';
-import { pgEnum, pgTable, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { index, pgEnum, pgTable, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
-import { projects } from './projects.js';
-import { subjects } from './subjects.js';
-import { users } from './users.js';
+import { projects } from './projects';
+import { subjects } from './subjects';
+import { users } from './users';
 
 /** Секции проекта. Все шесть заводятся сразу, включая нереализованные (спека 4.3). */
 export const sectionEnum = pgEnum('section', [
@@ -901,28 +1074,32 @@ export const grants = pgTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique('grants_subject_project_section').on(table.subjectId, table.projectId, table.section)],
+  (table) => [
+    unique('grants_subject_project_section').on(table.subjectId, table.projectId, table.section),
+    index('grants_subject_idx').on(table.subjectId),
+    index('grants_project_idx').on(table.projectId),
+  ],
 );
 
 /** Строка таблицы выдач. */
 export type Grant = typeof grants.$inferSelect;
 ```
 
-- [ ] **Step 5: Дополнить `apps/api/src/db/schema/index.ts`**
+- [ ] **Step 6: Дополнить `apps/api/src/db/schema/index.ts`**
 
 ```typescript
-export * from './grants.js';
-export * from './projects.js';
-export * from './subjects.js';
-export * from './users.js';
+export * from './grants';
+export * from './projects';
+export * from './subjects';
+export * from './users';
 ```
 
-- [ ] **Step 6: Запустить тест**
+- [ ] **Step 7: Запустить тесты**
 
 Run: `pnpm --filter @cairn/api test src/db/schema`
-Expected: PASS, 9 тестов.
+Expected: PASS, 13 тестов.
 
-- [ ] **Step 7: Коммит**
+- [ ] **Step 8: Коммит**
 
 ```bash
 git add apps/api/src/db/schema
@@ -936,7 +1113,7 @@ git commit -m "Добавить таблицы проектов и выдач д
 **Files:**
 - Create: `apps/api/src/db/schema/sessions.ts`, `apps/api/src/db/schema/invitations.ts`, `apps/api/src/db/schema/totp-challenges.ts`, `apps/api/src/db/schema/audit-log.ts`
 - Modify: `apps/api/src/db/schema/index.ts`
-- Test: `apps/api/src/db/schema/audit-log.test.ts`
+- Test: `apps/api/src/db/schema/audit-log.test.ts`, `apps/api/src/db/schema/sessions.test.ts`, `apps/api/src/db/schema/invitations.test.ts`
 
 - [ ] **Step 1: Написать падающий тест `apps/api/src/db/schema/audit-log.test.ts`**
 
@@ -944,8 +1121,7 @@ git commit -m "Добавить таблицы проектов и выдач д
 import { AuditSubjectKind } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
-import { auditLog, auditSubjectKindEnum } from './audit-log.js';
-import { invitations } from './invitations.js';
+import { auditLog, auditSubjectKindEnum } from './audit-log';
 
 describe('журнал действий', () => {
   it('перечисление действующих лиц включает system', () => {
@@ -963,8 +1139,53 @@ describe('журнал действий', () => {
     expect(auditLog.subjectLabel).toBeDefined();
   });
 });
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/db/schema/sessions.test.ts`**
+
+```typescript
+import { describe, expect, it } from 'vitest';
+
+import { sessions } from './sessions';
+import { totpChallenges } from './totp-challenges';
+
+describe('сессии', () => {
+  it('хранит только хэш токена', () => {
+    // Сам токен известен лишь браузеру: утечка базы не должна давать входа.
+    expect('token' in sessions).toBe(false);
+    expect(sessions.tokenHash).toBeDefined();
+  });
+
+  it('содержит признак отзыва для немедленного завершения', () => {
+    expect(sessions.revokedAt).toBeDefined();
+  });
+});
+
+describe('челленджи второго фактора', () => {
+  it('считает попытки', () => {
+    // Пять неудачных попыток исчерпывают челлендж (спека 6.2).
+    expect(totpChallenges.attempts).toBeDefined();
+  });
+
+  it('хранит только хэш токена', () => {
+    expect('token' in totpChallenges).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 3: Написать падающий тест `apps/api/src/db/schema/invitations.test.ts`**
+
+```typescript
+import { InvitationKind } from '@cairn/shared';
+import { describe, expect, it } from 'vitest';
+
+import { invitationKindEnum, invitations } from './invitations';
 
 describe('ссылки на установку пароля', () => {
+  it('перечисление вида ссылки совпадает с контрактом', () => {
+    expect(invitationKindEnum.enumValues).toEqual(Object.values(InvitationKind));
+  });
+
   it('не хранит адрес почты', () => {
     // Адрес живёт только в users — два места хранения разошлись бы (спека 4.6).
     expect('email' in invitations).toBe(false);
@@ -976,49 +1197,54 @@ describe('ссылки на установку пароля', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+- [ ] **Step 4: Запустить тесты и убедиться, что они падают**
 
-Run: `pnpm --filter @cairn/api test src/db/schema/audit-log`
-Expected: FAIL — модуль `./audit-log.js` не найден.
+Run: `pnpm --filter @cairn/api test src/db/schema`
+Expected: FAIL — «Failed to resolve import "./audit-log"».
 
-- [ ] **Step 3: Создать `apps/api/src/db/schema/sessions.ts`**
+- [ ] **Step 5: Создать `apps/api/src/db/schema/sessions.ts`**
 
 ```typescript
-import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
-import { subjects } from './subjects.js';
+import { subjects } from './subjects';
 
 /**
  * Сессии. Хранятся в базе ради мгновенного отзыва: для системы с секретами
  * отозвать доступ нужно немедленно, а не по истечении срока токена (спека 4.5).
  *
  * В базе лежит только хэш токена — сам токен известен лишь браузеру.
+ * Индекс по субъекту нужен для массового завершения сессий при отзыве.
  */
-export const sessions = pgTable('sessions', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  subjectId: uuid('subject_id')
-    .notNull()
-    .references(() => subjects.id, { onDelete: 'restrict' }),
-  tokenHash: text('token_hash').notNull().unique(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
-  ip: text('ip'),
-  userAgent: text('user_agent'),
-  revokedAt: timestamp('revoked_at', { withTimezone: true }),
-});
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'restrict' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [index('sessions_subject_idx').on(table.subjectId)],
+);
 
 /** Строка таблицы сессий. */
 export type Session = typeof sessions.$inferSelect;
 ```
 
-- [ ] **Step 4: Создать `apps/api/src/db/schema/invitations.ts`**
+- [ ] **Step 6: Создать `apps/api/src/db/schema/invitations.ts`**
 
 ```typescript
 import { InvitationKind } from '@cairn/shared';
 import { pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
-import { users } from './users.js';
+import { users } from './users';
 
 /** Вид одноразовой ссылки на установку пароля. */
 export const invitationKindEnum = pgEnum('invitation_kind', [
@@ -1050,12 +1276,12 @@ export const invitations = pgTable('invitations', {
 export type Invitation = typeof invitations.$inferSelect;
 ```
 
-- [ ] **Step 5: Создать `apps/api/src/db/schema/totp-challenges.ts`**
+- [ ] **Step 7: Создать `apps/api/src/db/schema/totp-challenges.ts`**
 
 ```typescript
 import { integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
-import { users } from './users.js';
+import { users } from './users';
 
 /**
  * Промежуточное состояние между проверкой пароля и проверкой второго фактора.
@@ -1079,14 +1305,14 @@ export const totpChallenges = pgTable('totp_challenges', {
 export type TotpChallenge = typeof totpChallenges.$inferSelect;
 ```
 
-- [ ] **Step 6: Создать `apps/api/src/db/schema/audit-log.ts`**
+- [ ] **Step 8: Создать `apps/api/src/db/schema/audit-log.ts`**
 
 ```typescript
 import { AuditSubjectKind } from '@cairn/shared';
 import { index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
-import { projects } from './projects.js';
-import { subjects } from './subjects.js';
+import { projects } from './projects';
+import { subjects } from './subjects';
 
 /**
  * Виды действующих лиц в журнале.
@@ -1137,25 +1363,25 @@ export const auditLog = pgTable(
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 ```
 
-- [ ] **Step 7: Дополнить `apps/api/src/db/schema/index.ts`**
+- [ ] **Step 9: Дополнить `apps/api/src/db/schema/index.ts`**
 
 ```typescript
-export * from './audit-log.js';
-export * from './grants.js';
-export * from './invitations.js';
-export * from './projects.js';
-export * from './sessions.js';
-export * from './subjects.js';
-export * from './totp-challenges.js';
-export * from './users.js';
+export * from './audit-log';
+export * from './grants';
+export * from './invitations';
+export * from './projects';
+export * from './sessions';
+export * from './subjects';
+export * from './totp-challenges';
+export * from './users';
 ```
 
-- [ ] **Step 8: Запустить тест**
+- [ ] **Step 10: Запустить тесты**
 
 Run: `pnpm --filter @cairn/api test src/db/schema`
-Expected: PASS, 14 тестов.
+Expected: PASS, 21 тест.
 
-- [ ] **Step 9: Коммит**
+- [ ] **Step 11: Коммит**
 
 ```bash
 git add apps/api/src/db/schema
@@ -1170,12 +1396,13 @@ git commit -m "Добавить таблицы сессий, ссылок, че�
 
 **Files:**
 - Create: `apps/api/src/db/migrate.ts`
-- Create: `apps/api/drizzle/0001_grant_app_privileges.sql` (после генерации)
+- Create: `apps/api/drizzle/0001_grant_app_privileges.sql`
+- Modify: `apps/api/drizzle/meta/_journal.json`
 
 - [ ] **Step 1: Сгенерировать миграцию схемы**
 
 Run: `pnpm --filter @cairn/api db:generate`
-Expected: в `apps/api/drizzle/` появляется файл `0000_*.sql` с созданием восьми таблиц и перечислений.
+Expected: в `apps/api/drizzle/` появляется файл `0000_*.sql` с созданием восьми таблиц и перечислений, а в `apps/api/drizzle/meta/_journal.json` — запись о нём.
 
 - [ ] **Step 2: Создать `apps/api/src/db/migrate.ts`**
 
@@ -1183,6 +1410,10 @@ Expected: в `apps/api/drizzle/` появляется файл `0000_*.sql` с �
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
+
+import { loadEnv } from '../env';
+
+loadEnv();
 
 /**
  * Применяет миграции ролью-владельцем схемы.
@@ -1194,7 +1425,7 @@ async function main(): Promise<void> {
   const url = process.env.DATABASE_OWNER_URL;
 
   if (!url) {
-    throw new Error('DATABASE_OWNER_URL не задан');
+    throw new Error('DATABASE_OWNER_URL не задан. Проверь .env в корне монорепо.');
   }
 
   const client = postgres(url, { max: 1 });
@@ -1206,53 +1437,55 @@ async function main(): Promise<void> {
 void main();
 ```
 
-- [ ] **Step 3: Написать миграцию прав вручную**
+- [ ] **Step 3: Создать `apps/api/drizzle/0001_grant_app_privileges.sql`**
 
-Создать `apps/api/drizzle/0001_grant_app_privileges.sql`. Права на `audit_log` намеренно урезаны: роль приложения не может ни изменить, ни удалить запись журнала.
+Разделители `--> statement-breakpoint` обязательны: мигратор выполняет операторы по одному, и файл без разделителей уйдёт в базу единой строкой, на что PostgreSQL ответит «cannot insert multiple commands into a prepared statement».
 
 ```sql
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   subjects, users, projects, grants, sessions, invitations, totp_challenges
 TO cairn_app;
-
--- Журнал только на добавление: ни UPDATE, ни DELETE (спека 4.7).
+--> statement-breakpoint
 GRANT SELECT, INSERT ON audit_log TO cairn_app;
-
--- Таблица служебных записей Drizzle: приложению нужна только на чтение.
-GRANT SELECT ON drizzle.__drizzle_migrations TO cairn_app;
-GRANT USAGE ON SCHEMA drizzle TO cairn_app;
+--> statement-breakpoint
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO cairn_app;
 ```
 
-- [ ] **Step 4: Зарегистрировать миграцию прав**
+Журнал получает только `SELECT` и `INSERT`: ни `UPDATE`, ни `DELETE` (спека 4.7).
 
-Drizzle отслеживает применённые миграции по файлу `apps/api/drizzle/meta/_journal.json`. Добавить в массив `entries` запись для `0001_grant_app_privileges`, скопировав формат соседней записи и увеличив `idx` на единицу.
+Правило на будущее, которое стоит держать в голове при добавлении таблиц на следующих этапах: **каждая новая таблица требует отдельной миграции с грантом.** Автоматической выдачи прав здесь нет намеренно — `ALTER DEFAULT PRIVILEGES` раздал бы полные права и журналу тоже.
+
+- [ ] **Step 4: Зарегистрировать миграцию в `apps/api/drizzle/meta/_journal.json`**
+
+Мигратор находит файлы по полю `tag`, поэтому оно должно точно совпадать с именем файла без расширения. Добавь в массив `entries` вторым элементом:
+
+```json
+{
+  "idx": 1,
+  "version": "7",
+  "when": 1774483200000,
+  "tag": "0001_grant_app_privileges",
+  "breakpoints": true
+}
+```
+
+Значение `when` должно быть больше, чем у записи `0000`. Если сгенерированная запись имеет большее значение — увеличь это на единицу. Поле `version` скопируй из записи `0000`, не меняя.
 
 - [ ] **Step 5: Применить миграции**
 
 ```bash
-docker compose up -d postgres
+docker compose up -d --wait postgres
 pnpm --filter @cairn/api db:migrate
 ```
 
-Expected: вывод без ошибок.
+Expected: команда завершается без вывода ошибок.
 
-- [ ] **Step 6: Проверить, что журнал защищён**
+- [ ] **Step 6: Проверить состав таблиц**
 
-```bash
-docker compose exec postgres psql -U cairn_app -d cairn \
-  -c "INSERT INTO audit_log (subject_kind, subject_label, action) VALUES ('system', 'проверка', 'test');" \
-  -c "DELETE FROM audit_log;"
-```
+Run: `docker compose exec postgres psql -U cairn_owner -d cairn -c "\dt"`
+Expected: восемь таблиц — `subjects`, `users`, `projects`, `grants`, `sessions`, `invitations`, `totp_challenges`, `audit_log`.
 
-Expected: `INSERT` проходит, `DELETE` завершается ошибкой `permission denied for table audit_log`. Это и есть проверяемое свойство: приложение может писать в журнал и не может его чистить.
-
-- [ ] **Step 7: Убрать проверочную запись**
-
-```bash
-docker compose exec postgres psql -U cairn_owner -d cairn -c "DELETE FROM audit_log;"
-```
-
-- [ ] **Step 8: Коммит**
+- [ ] **Step 7: Коммит**
 
 ```bash
 git add apps/api/drizzle apps/api/src/db/migrate.ts
@@ -1261,12 +1494,183 @@ git commit -m "Добавить миграции и права роли прил
 
 ---
 
-### Task 9: Сервис прикладного шифрования
+### Task 9: Интеграционный тест неизменяемости журнала
+
+Свойство «журнал нельзя изменить» проверяется автоматическим тестом, а не разовой командой в консоли: следующая миграция способна молча его сломать, и обнаружиться это должно на тестах, а не при расследовании инцидента.
+
+**Files:**
+- Create: `apps/api/test/db-fixture.ts`
+- Test: `apps/api/test/audit-immutability.test.ts`
+
+- [ ] **Step 1: Установить Testcontainers**
+
+Run: `pnpm --filter @cairn/api add -D @testcontainers/postgresql testcontainers`
+Expected: пакеты добавлены в `devDependencies`.
+
+- [ ] **Step 2: Создать `apps/api/test/db-fixture.ts`**
+
+Контейнер поднимается один раз на файл тестов, а между тестами таблицы очищаются: поднимать контейнер на каждый тест — минуты ожидания вместо секунд.
+
+```typescript
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { sql } from 'drizzle-orm';
+import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import postgres from 'postgres';
+
+import * as schema from '../src/db/schema';
+
+/** Поднятая на время тестов база. */
+export interface TestDatabase {
+  /** Подключение с полными правами: нужно для подготовки данных. */
+  db: PostgresJsDatabase<typeof schema>;
+  /** Подключение ролью приложения: с ним проверяются ограничения прав. */
+  appDb: PostgresJsDatabase<typeof schema>;
+  stop: () => Promise<void>;
+  truncate: () => Promise<void>;
+}
+
+/**
+ * Поднимает PostgreSQL в контейнере, применяет миграции и заводит роль приложения.
+ *
+ * Роль заводится здесь же, а не в образе, чтобы тест ограничений прав
+ * проверял ровно ту миграцию грантов, что лежит в репозитории.
+ */
+export async function startTestDatabase(): Promise<TestDatabase> {
+  const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(
+    'postgres:17-alpine',
+  ).start();
+
+  const ownerClient = postgres(container.getConnectionUri(), { max: 1 });
+  const db = drizzle(ownerClient, { schema });
+
+  await migrate(db, { migrationsFolder: './drizzle' });
+
+  await db.execute(sql`CREATE ROLE cairn_app WITH LOGIN PASSWORD 'test_app_password'`);
+  await db.execute(sql`GRANT USAGE ON SCHEMA public TO cairn_app`);
+  await db.execute(sql`
+    GRANT SELECT, INSERT, UPDATE, DELETE ON
+      subjects, users, projects, grants, sessions, invitations, totp_challenges
+    TO cairn_app
+  `);
+  await db.execute(sql`GRANT SELECT, INSERT ON audit_log TO cairn_app`);
+
+  const appClient = postgres(container.getConnectionUri(), {
+    max: 1,
+    user: 'cairn_app',
+    password: 'test_app_password',
+  });
+
+  return {
+    db,
+    appDb: drizzle(appClient, { schema }),
+    stop: async () => {
+      await appClient.end();
+      await ownerClient.end();
+      await container.stop();
+    },
+    truncate: async () => {
+      await db.execute(sql`
+        TRUNCATE TABLE audit_log, grants, sessions, invitations, totp_challenges,
+                       projects, users, subjects
+        RESTART IDENTITY CASCADE
+      `);
+    },
+  };
+}
+```
+
+- [ ] **Step 3: Написать тест `apps/api/test/audit-immutability.test.ts`**
+
+```typescript
+import { AuditSubjectKind } from '@cairn/shared';
+import { sql } from 'drizzle-orm';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { auditLog } from '../src/db/schema';
+import { startTestDatabase, type TestDatabase } from './db-fixture';
+
+describe('неизменяемость журнала', () => {
+  let testDb: TestDatabase;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+  });
+
+  it('роль приложения может добавлять записи', async () => {
+    await testDb.appDb.insert(auditLog).values({
+      subjectKind: AuditSubjectKind.System,
+      subjectLabel: 'проверка',
+      action: 'test',
+    });
+
+    expect(await testDb.appDb.select().from(auditLog)).toHaveLength(1);
+  });
+
+  it('роль приложения не может изменять записи', async () => {
+    await testDb.appDb.insert(auditLog).values({
+      subjectKind: AuditSubjectKind.System,
+      subjectLabel: 'проверка',
+      action: 'test',
+    });
+
+    await expect(
+      testDb.appDb.execute(sql`UPDATE audit_log SET action = 'подделка'`),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it('роль приложения не может удалять записи', async () => {
+    await testDb.appDb.insert(auditLog).values({
+      subjectKind: AuditSubjectKind.System,
+      subjectLabel: 'проверка',
+      action: 'test',
+    });
+
+    await expect(testDb.appDb.execute(sql`DELETE FROM audit_log`)).rejects.toThrow(
+      /permission denied/,
+    );
+  });
+
+  it('роль приложения свободно работает с обычными таблицами', async () => {
+    // Ограничение касается только журнала: если бы оно задело остальные
+    // таблицы, приложение перестало бы работать целиком.
+    await testDb.appDb.execute(sql`
+      INSERT INTO subjects (kind, label) VALUES ('user', 'проверка')
+    `);
+    await testDb.appDb.execute(sql`DELETE FROM subjects`);
+  });
+});
+```
+
+- [ ] **Step 4: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test test/audit-immutability`
+Expected: PASS, 4 теста. Первый запуск дольше — скачивается образ PostgreSQL. Требуется работающий Docker.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add apps/api/test apps/api/package.json pnpm-lock.yaml
+git commit -m "Покрыть тестом неизменяемость журнала"
+```
+
+---
+
+### Task 10: Сервис прикладного шифрования
 
 Самая ответственная единица чанка. Формат хранимого значения включает версию ключа, чтобы будущая ротация не требовала переписывать все существующие записи (спека 4.9).
 
 **Files:**
 - Create: `apps/api/src/crypto/crypto.service.ts`, `apps/api/src/crypto/crypto.module.ts`
+- Modify: `apps/api/src/app.module.ts`
 - Test: `apps/api/src/crypto/crypto.service.test.ts`
 
 - [ ] **Step 1: Написать падающий тест `apps/api/src/crypto/crypto.service.test.ts`**
@@ -1278,7 +1682,7 @@ import { randomBytes } from 'node:crypto';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { CryptoService } from './crypto.service.js';
+import { CryptoService } from './crypto.service';
 
 const validKey = randomBytes(32).toString('base64');
 
@@ -1300,8 +1704,10 @@ describe('CryptoService', () => {
       expect(() => new CryptoService(shortKey)).toThrow(/32 байт/);
     });
 
-    it('отказывается работать с ключом не в base64', () => {
-      expect(() => new CryptoService('не base64!!!')).toThrow();
+    it('отказывается работать со строкой не в base64', () => {
+      // Buffer.from молча отбрасывает недопустимые символы, поэтому проверка
+      // длины поймала бы не всякий мусор — нужна явная сверка кодировки.
+      expect(() => new CryptoService('не base64!!!')).toThrow(/base64/);
     });
   });
 
@@ -1334,9 +1740,14 @@ describe('CryptoService', () => {
 
   describe('расшифровка', () => {
     it('отвергает изменённый шифротекст', () => {
-      const [version, nonce, ciphertext, tag] = service.encrypt('значение').split(':');
-      const corrupted = Buffer.from(ciphertext!, 'base64');
-      corrupted[0] ^= 0xff;
+      const [version, nonce, ciphertext, tag] = service.encrypt('значение').split(':') as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const corrupted = Buffer.from(ciphertext, 'base64');
+      corrupted[0] = (corrupted[0] ?? 0) ^ 0xff;
 
       const payload = [version, nonce, corrupted.toString('base64'), tag].join(':');
 
@@ -1344,7 +1755,12 @@ describe('CryptoService', () => {
     });
 
     it('отвергает изменённый тег аутентификации', () => {
-      const [version, nonce, ciphertext] = service.encrypt('значение').split(':');
+      const [version, nonce, ciphertext] = service.encrypt('значение').split(':') as [
+        string,
+        string,
+        string,
+        string,
+      ];
       const payload = [version, nonce, ciphertext, randomBytes(16).toString('base64')].join(':');
 
       expect(() => service.decrypt(payload)).toThrow();
@@ -1372,7 +1788,7 @@ describe('CryptoService', () => {
 - [ ] **Step 2: Запустить тест и убедиться, что он падает**
 
 Run: `pnpm --filter @cairn/api test src/crypto`
-Expected: FAIL — модуль `./crypto.service.js` не найден.
+Expected: FAIL — «Failed to resolve import "./crypto.service"».
 
 - [ ] **Step 3: Создать `apps/api/src/crypto/crypto.service.ts`**
 
@@ -1406,6 +1822,12 @@ export class CryptoService {
     }
 
     const key = Buffer.from(rawKey, 'base64');
+
+    // Buffer.from молча отбрасывает символы вне алфавита base64, поэтому одной
+    // проверки длины недостаточно: сверяем обратное преобразование.
+    if (key.toString('base64') !== rawKey) {
+      throw new Error('CAIRN_ENCRYPTION_KEY должен быть строкой в base64.');
+    }
 
     if (key.length !== KEY_LENGTH) {
       throw new Error(
@@ -1478,7 +1900,7 @@ Expected: PASS, 13 тестов.
 ```typescript
 import { Global, Module } from '@nestjs/common';
 
-import { CryptoService, ENCRYPTION_KEY } from './crypto.service.js';
+import { CryptoService, ENCRYPTION_KEY } from './crypto.service';
 
 /**
  * Модуль шифрования. Глобальный: сервис нужен разным модулям, а состояние
@@ -1487,7 +1909,7 @@ import { CryptoService, ENCRYPTION_KEY } from './crypto.service.js';
 @Global()
 @Module({
   providers: [
-    { provide: ENCRYPTION_KEY, useValue: process.env.CAIRN_ENCRYPTION_KEY },
+    { provide: ENCRYPTION_KEY, useFactory: () => process.env.CAIRN_ENCRYPTION_KEY },
     CryptoService,
   ],
   exports: [CryptoService],
@@ -1495,12 +1917,14 @@ import { CryptoService, ENCRYPTION_KEY } from './crypto.service.js';
 export class CryptoModule {}
 ```
 
+Ключ читается фабрикой, а не значением при объявлении: значение вычислилось бы в момент импорта файла, до загрузки `.env`.
+
 - [ ] **Step 6: Подключить модуль в `apps/api/src/app.module.ts`**
 
 ```typescript
 import { Module } from '@nestjs/common';
 
-import { CryptoModule } from './crypto/crypto.module.js';
+import { CryptoModule } from './crypto/crypto.module';
 
 /** Корневой модуль приложения. Модули добавляются по мере реализации. */
 @Module({
@@ -1509,18 +1933,22 @@ import { CryptoModule } from './crypto/crypto.module.js';
 export class AppModule {}
 ```
 
-- [ ] **Step 7: Запустить все тесты**
+- [ ] **Step 7: Запустить все тесты и проверку типов**
 
-Run: `pnpm test`
-Expected: PASS во всех пакетах. Тест сборки `AppModule` требует переменной `CAIRN_ENCRYPTION_KEY` — если он падает с сообщением о ключе, значит проверка работает; добавь ключ в `.env` и в окружение тестов через `vitest.config.ts` (`test.env`).
+```bash
+pnpm test
+pnpm typecheck
+```
+
+Expected: оба без ошибок. Тест сборки `AppModule` проходит благодаря ключу из `vitest.config.ts`.
 
 - [ ] **Step 8: Коммит**
 
 ```bash
-git add apps/api/src/crypto apps/api/src/app.module.ts apps/api/vitest.config.ts
+git add apps/api/src/crypto apps/api/src/app.module.ts
 git commit -m "Добавить сервис прикладного шифрования"
 ```
 
 ---
 
-**Результат чанка 1:** монорепо собирается, восемь таблиц созданы миграциями, журнал защищён правами базы, шифрование работает и покрыто тестами. Следующий чанк добавляет модель прав.
+**Результат чанка 2:** восемь таблиц созданы миграциями, неизменяемость журнала обеспечена правами роли и проверяется тестом, шифрование работает. Следующий чанк добавляет модель прав.
