@@ -75,12 +75,12 @@
 
 ## Порядок чанков
 
-Пятнадцать чанков, каждый заканчивается работающим и проверяемым состоянием.
+Шестнадцать чанков, каждый заканчивается работающим и проверяемым состоянием.
 
 1–3 — основание: монорепо, схема данных, миграции и шифрование.
 4–5 — модель доступа: проверка прав, журнал, проекции, репозитории.
 6–11 — бэкенд: аутентификация, приглашения, команды консоли, HTTP-слой, матрица доступа в тестах.
-12–15 — интерфейс и развёртывание.
+12–16 — интерфейс, развёртывание и сквозная проверка.
 
 Несколько чанков (4, 6, 11–14) заметно превышают ориентир в тысячу строк. Разрезать их значило бы разделить связную единицу работы: например, вход по паролю бессмысленно отделять от проверки второго фактора — они образуют один сценарий и проверяются общими тестами. Границы проведены по смыслу, а не по объёму.
 
@@ -14772,7 +14772,7 @@ docker compose run --rm api node dist/cli/main.js reset-totp admin@example.com
 
 Замени описание пустого репозитория на актуальное: этап 1 реализован, команды разработки и проверок перечислены в `README.md`, структура монорепо соответствует разделу «Структура файлов» плана.
 
-- [ ] **Step 3: Финальная проверка**
+- [ ] **Step 3: Проверить всё целиком**
 
 ```bash
 pnpm --filter @cairn/shared build
@@ -14781,7 +14781,7 @@ pnpm typecheck
 pnpm build
 ```
 
-Expected: всё зелёное.
+Expected: всё зелёное. Впереди последний чанк — привязка второго фактора и создание проектов; после него README пополнится их описанием.
 
 - [ ] **Step 4: Коммит**
 
@@ -14792,4 +14792,829 @@ git commit -m "Добавить документацию по запуску"
 
 ---
 
-**Результат этапа 1:** система работает целиком. Суперадмин создаётся с консоли, входит с двумя факторами, заводит проекты, приглашает людей и выдаёт им доступ к отдельным секциям; журнал фиксирует каждое действие и не поддаётся правке даже из приложения. Модель прав, машинные субъекты и прикладное шифрование заложены так, что следующие семь этапов не потребуют их переделки.
+**Результат чанка 15:** журнал читается, навигация скрывает от обычных пользователей разделы администрирования, система разворачивается одной командой за реверс-прокси. Остался последний чанк: привязка второго фактора и создание проектов через интерфейс.
+
+## Chunk 16: Второй фактор и создание проектов
+
+Результат чанка: суперадмин, созданный с консоли, привязывает второй фактор и заводит проекты через интерфейс. Без этого чанка требование спеки 6.4 («2FA обязательна для суперадмина») выполнить невозможно: привязать её было бы нечем.
+
+### Task 55: Эндпоинты привязки второго фактора
+
+Спека 8 называет `POST /auth/totp/setup` и `POST /auth/totp/confirm`, но в предыдущих чанках они не реализованы. Без них суперадмин не может выполнить обязательное для него требование, а значение `AuditAction.TotpEnabled` остаётся мёртвым.
+
+**Files:**
+- Modify: `apps/api/src/auth/auth.service.ts`, `apps/api/src/auth/auth.controller.ts`
+- Create: `packages/shared/src/schemas/totp.ts`
+- Modify: `packages/shared/src/index.ts`
+- Test: `apps/api/src/auth/totp-setup.test.ts`
+
+- [ ] **Step 1: Создать `packages/shared/src/schemas/totp.ts`**
+
+```typescript
+import { z } from 'zod';
+
+/** Ответ на запрос привязки второго фактора. */
+export const totpSetupResponseSchema = z.object({
+  /** Ссылка для приложения-аутентификатора. */
+  keyUri: z.string(),
+  /** Секрет в текстовом виде — на случай ручного ввода. */
+  secret: z.string(),
+});
+
+/** Подтверждение привязки: код из приложения. */
+export const totpConfirmSchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'Код состоит из шести цифр'),
+});
+
+/** Ответ на запрос привязки. */
+export type TotpSetupResponse = z.infer<typeof totpSetupResponseSchema>;
+
+/** Данные подтверждения привязки. */
+export type TotpConfirmInput = z.infer<typeof totpConfirmSchema>;
+```
+
+Добавь экспорт в `packages/shared/src/index.ts`.
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/auth/totp-setup.test.ts`**
+
+```typescript
+import { SubjectKind } from '@cairn/shared';
+import { randomBytes } from 'node:crypto';
+
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import { authenticator } from 'otplib';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { CryptoService } from '../crypto/crypto.service';
+import { AuthService } from './auth.service';
+import { LoginAttemptsService } from './login-attempts.service';
+import { PasswordService } from './password.service';
+import { SessionsRepository } from './sessions.repository';
+import { TotpService } from './totp.service';
+import type { RequestSubject } from '../access/access.types';
+import { auditLog, subjects, users } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('привязка второго фактора', () => {
+  let testDb: TestDatabase;
+  let service: AuthService;
+  let subjectId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+
+    const crypto = new CryptoService(randomBytes(32).toString('base64'));
+
+    service = new AuthService(
+      testDb.db,
+      new PasswordService(),
+      new TotpService(crypto),
+      new SessionsRepository(testDb.db),
+      new LoginAttemptsService(),
+      new AuditService(),
+    );
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    subjectId = subject!.id;
+
+    await testDb.db.insert(users).values({
+      subjectId,
+      email: 'admin@cairn.local',
+      passwordHash: 'хэш',
+      isSuperadmin: true,
+    });
+  });
+
+  const subject = (): RequestSubject => ({
+    id: subjectId,
+    kind: SubjectKind.User,
+    label: 'admin@cairn.local',
+    isSuperadmin: true,
+    isRevoked: false,
+  });
+
+  it('выдаёт ссылку для приложения-аутентификатора', async () => {
+    const setup = await service.setupTotp(subject());
+
+    expect(setup.keyUri).toMatch(/^otpauth:\/\/totp\//);
+  });
+
+  it('сохраняет секрет зашифрованным до подтверждения', async () => {
+    await service.setupTotp(subject());
+
+    const [user] = await testDb.db.select().from(users).where(eq(users.subjectId, subjectId));
+
+    expect(user?.totpSecretEncrypted?.startsWith('v1:')).toBe(true);
+  });
+
+  it('не включает второй фактор до подтверждения', async () => {
+    // Иначе неудачная привязка заперла бы человека снаружи: секрет есть,
+    // а приложение он настроить не успел.
+    await service.setupTotp(subject());
+
+    const [user] = await testDb.db.select().from(users).where(eq(users.subjectId, subjectId));
+
+    expect(user?.isTotpEnabled).toBe(false);
+  });
+
+  it('включает второй фактор при верном коде', async () => {
+    const setup = await service.setupTotp(subject());
+
+    await service.confirmTotp(subject(), authenticator.generate(setup.secret));
+
+    const [user] = await testDb.db.select().from(users).where(eq(users.subjectId, subjectId));
+
+    expect(user?.isTotpEnabled).toBe(true);
+  });
+
+  it('отвергает неверный код и не включает фактор', async () => {
+    await service.setupTotp(subject());
+
+    await expect(service.confirmTotp(subject(), '000000')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+
+    const [user] = await testDb.db.select().from(users).where(eq(users.subjectId, subjectId));
+
+    expect(user?.isTotpEnabled).toBe(false);
+  });
+
+  it('пишет включение в журнал', async () => {
+    const setup = await service.setupTotp(subject());
+
+    await service.confirmTotp(subject(), authenticator.generate(setup.secret));
+
+    const [entry] = await testDb.db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, AuditAction.TotpEnabled));
+
+    expect(entry).toBeDefined();
+  });
+
+  it('отказывается подтверждать без начатой привязки', async () => {
+    await expect(service.confirmTotp(subject(), '123456')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('отказывается начинать привязку, когда фактор уже включён', async () => {
+    // Перепривязка через этот путь позволила бы владельцу сессии заменить
+    // чужой второй фактор; для замены есть сброс администратором (спека 6.6).
+    const setup = await service.setupTotp(subject());
+    await service.confirmTotp(subject(), authenticator.generate(setup.secret));
+
+    await expect(service.setupTotp(subject())).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/auth/totp-setup`
+Expected: FAIL — `service.setupTotp is not a function`.
+
+- [ ] **Step 4: Добавить методы в `apps/api/src/auth/auth.service.ts`**
+
+```typescript
+  /**
+   * Начинает привязку второго фактора.
+   *
+   * Секрет сохраняется сразу, но флаг `isTotpEnabled` не поднимается:
+   * иначе человек, не успевший настроить приложение, оказался бы заперт
+   * снаружи собственной учётной записи.
+   */
+  async setupTotp(subject: RequestSubject): Promise<TotpSetupResponse> {
+    const user = await this.findActiveUserById(await this.userIdOfSubject(subject.id));
+
+    if (!user) {
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    if (user.isTotpEnabled) {
+      throw new BadRequestException(
+        'Второй фактор уже привязан. Чтобы сменить устройство, попросите администратора снять привязку.',
+      );
+    }
+
+    const created = this.totp.createSecret(user.email);
+
+    await this.db
+      .update(users)
+      .set({ totpSecretEncrypted: created.encryptedSecret, updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+
+    return { keyUri: created.keyUri, secret: created.secret };
+  }
+
+  /** Подтверждает привязку кодом из приложения и включает второй фактор. */
+  async confirmTotp(subject: RequestSubject, code: string): Promise<void> {
+    const user = await this.findActiveUserById(await this.userIdOfSubject(subject.id));
+
+    if (!user) {
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    if (user.isTotpEnabled || !user.totpSecretEncrypted) {
+      throw new BadRequestException('Привязка не начата');
+    }
+
+    if (!this.totp.verify(user.totpSecretEncrypted, code)) {
+      throw new UnauthorizedException('Неверный код');
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ isTotpEnabled: true, updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+
+      await this.audit.record(tx, this.actorFor(user), { action: AuditAction.TotpEnabled });
+    });
+  }
+
+  /** Находит запись пользователя по его субъекту. */
+  private async userIdOfSubject(subjectId: string): Promise<string> {
+    const [user] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.subjectId, subjectId))
+      .limit(1);
+
+    if (!user) {
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    return user.id;
+  }
+```
+
+Импорты дополни: `BadRequestException` из `@nestjs/common`, `type TotpSetupResponse` из `@cairn/shared`.
+
+- [ ] **Step 5: Добавить маршруты в `apps/api/src/auth/auth.controller.ts`**
+
+```typescript
+  /** Начинает привязку второго фактора. */
+  @Post('totp/setup')
+  @HttpCode(200)
+  @UseGuards(SessionGuard)
+  async setupTotp(@CurrentSubject() subject: RequestSubject): Promise<TotpSetupResponse> {
+    return this.auth.setupTotp(subject);
+  }
+
+  /** Подтверждает привязку второго фактора. */
+  @Post('totp/confirm')
+  @HttpCode(204)
+  @UseGuards(SessionGuard)
+  async confirmTotp(
+    @CurrentSubject() subject: RequestSubject,
+    @Body(new ZodValidationPipe(totpConfirmSchema)) body: TotpConfirmInput,
+  ): Promise<void> {
+    await this.auth.confirmTotp(subject, body.code);
+  }
+```
+
+Импорты дополни: `totpConfirmSchema`, `type TotpConfirmInput`, `type TotpSetupResponse` из `@cairn/shared`.
+
+- [ ] **Step 6: Запустить тесты**
+
+```bash
+pnpm --filter @cairn/shared build
+pnpm --filter @cairn/api test src/auth
+```
+
+Expected: PASS. Восемь новых тестов привязки проходят.
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add apps/api/src/auth packages/shared/src
+git commit -m "Добавить привязку второго фактора"
+```
+
+---
+
+### Task 56: Экран привязки второго фактора
+
+Спека 6.4: пока суперадмин не привязал второй фактор, ему доступен единственный экран — настройка. Это единственное место в системе, где интерфейс намеренно ограничивает вошедшего пользователя.
+
+**Files:**
+- Create: `apps/web/src/components/TotpSetup/TotpSetup.tsx`, `types.ts`, `index.ts`
+- Create: `apps/web/src/app/(app)/security/page.tsx`, `SecurityScreen.tsx`
+- Create: `apps/web/src/api/hooks/useMutationTotpSetup.ts`
+- Modify: `apps/web/src/app/(app)/layout.tsx`
+- Test: `apps/web/src/components/TotpSetup/TotpSetup.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/TotpSetup/TotpSetup.test.tsx`**
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { TotpSetup } from './TotpSetup';
+
+const setup = { keyUri: 'otpauth://totp/CAIRN:admin', secret: 'JBSWY3DPEHPK3PXP' };
+
+describe('TotpSetup', () => {
+  it('показывает секрет для ручного ввода', () => {
+    render(<TotpSetup setup={setup} onConfirm={vi.fn()} />);
+
+    expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument();
+  });
+
+  it('объясняет, что делать', () => {
+    render(<TotpSetup setup={setup} onConfirm={vi.fn()} />);
+
+    expect(screen.getByText(/приложени/i)).toBeInTheDocument();
+  });
+
+  it('передаёт код подтверждения', async () => {
+    const onConfirm = vi.fn();
+    render(<TotpSetup setup={setup} onConfirm={onConfirm} />);
+
+    await userEvent.type(screen.getByLabelText('Код из приложения'), '123456');
+    await userEvent.click(screen.getByRole('button', { name: 'Подтвердить' }));
+
+    expect(onConfirm).toHaveBeenCalledWith('123456');
+  });
+
+  it('не отправляет неполный код', async () => {
+    const onConfirm = vi.fn();
+    render(<TotpSetup setup={setup} onConfirm={onConfirm} />);
+
+    await userEvent.type(screen.getByLabelText('Код из приложения'), '123');
+    await userEvent.click(screen.getByRole('button', { name: 'Подтвердить' }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('показывает ошибку подтверждения', () => {
+    render(<TotpSetup setup={setup} onConfirm={vi.fn()} error="Неверный код" />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Неверный код');
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/TotpSetup`
+Expected: FAIL — «Failed to resolve import "./TotpSetup"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/TotpSetup/types.ts`**
+
+```typescript
+import type { TotpSetupResponse } from '@cairn/shared';
+
+/** Пропсы экрана привязки второго фактора. */
+export interface IProps {
+  setup: TotpSetupResponse;
+  onConfirm: (code: string) => void;
+  error?: string;
+  isSubmitting?: boolean;
+}
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/TotpSetup/TotpSetup.tsx`**
+
+Секрет показывается текстом, а не изображением кода: рисовать QR-код значило бы тянуть зависимость ради одного экрана, а ввести шестнадцать символов вручную — дело минуты.
+
+```tsx
+'use client';
+
+import { TotpForm } from '../TotpForm';
+import type { IProps } from './types';
+
+/** Привязка второго фактора (спека 6.4). */
+export function TotpSetup({ setup, onConfirm, error, isSubmitting }: IProps) {
+  return (
+    <div className="space-y-4">
+      <p>
+        Откройте приложение-аутентификатор и добавьте учётную запись вручную, введя ключ ниже.
+        Затем подтвердите привязку кодом из приложения.
+      </p>
+
+      <p className="break-all rounded-md bg-muted p-3 font-mono">{setup.secret}</p>
+
+      <TotpForm onSubmit={onConfirm} error={error} isSubmitting={isSubmitting} />
+    </div>
+  );
+}
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/TotpSetup/index.ts`**
+
+```typescript
+export { TotpSetup } from './TotpSetup';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 6: Создать хук привязки**
+
+`apps/web/src/api/hooks/useMutationTotpSetup.ts`:
+
+```typescript
+'use client';
+
+import type { TotpSetupResponse } from '@cairn/shared';
+import { useMutation } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+
+/** Начало привязки второго фактора. */
+export function useMutationTotpSetup() {
+  return useMutation({
+    mutationFn: () => apiClient<TotpSetupResponse>('/auth/totp/setup', { method: 'POST' }),
+  });
+}
+
+/** Подтверждение привязки второго фактора. */
+export function useMutationTotpConfirm() {
+  return useMutation({
+    mutationFn: (code: string) =>
+      apiClient('/auth/totp/confirm', { method: 'POST', body: { code } }),
+  });
+}
+```
+
+- [ ] **Step 7: Создать экран безопасности**
+
+`apps/web/src/app/(app)/security/SecurityScreen.tsx`:
+
+```tsx
+'use client';
+
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+
+import { useMutationTotpConfirm, useMutationTotpSetup } from '@/api/hooks';
+import { TotpSetup } from '@/components/TotpSetup';
+
+/** Привязка второго фактора для текущего пользователя. */
+export function SecurityScreen() {
+  const router = useRouter();
+  const setup = useMutationTotpSetup();
+  const confirm = useMutationTotpConfirm();
+
+  // Привязка начинается сразу при открытии: отдельная кнопка «начать»
+  // ничего не добавляет — человек пришёл сюда именно за этим.
+  useEffect(() => {
+    setup.mutate();
+    // Запускается один раз на открытие экрана.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (setup.isPending || !setup.data) {
+    return <p className="text-muted-foreground">Подготовка…</p>;
+  }
+
+  if (setup.isError) {
+    return (
+      <p role="alert" className="text-destructive">
+        {setup.error.message}
+      </p>
+    );
+  }
+
+  return (
+    <TotpSetup
+      setup={setup.data}
+      isSubmitting={confirm.isPending}
+      error={confirm.error?.message}
+      onConfirm={(code) =>
+        confirm.mutate(code, {
+          onSuccess: () => {
+            router.replace('/');
+            router.refresh();
+          },
+        })
+      }
+    />
+  );
+}
+```
+
+`apps/web/src/app/(app)/security/page.tsx`:
+
+```tsx
+import { SecurityScreen } from './SecurityScreen';
+
+/** Страница привязки второго фактора. */
+export default function SecurityPage() {
+  return (
+    <main className="mx-auto max-w-md space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Второй фактор</h1>
+      <SecurityScreen />
+    </main>
+  );
+}
+```
+
+- [ ] **Step 8: Ограничить суперадмина без второго фактора**
+
+Дополни `apps/web/src/app/(app)/layout.tsx`: пока у суперадмина не привязан второй фактор, все страницы раздела ведут на настройку.
+
+```tsx
+  // Спека 6.4: до привязки второго фактора суперадмину доступен
+  // единственный экран. Проверка на сервере, а не в навигации:
+  // прямой переход по адресу должен упираться в то же ограничение.
+  if (subject.isSuperadmin && !subject.isTotpEnabled) {
+    const path = (await headers()).get('x-pathname') ?? '';
+
+    if (!path.startsWith('/security')) {
+      redirect('/security');
+    }
+  }
+```
+
+Заголовок `x-pathname` проставляется посредником — создай `apps/web/src/middleware.ts`:
+
+```typescript
+import { NextResponse, type NextRequest } from 'next/server';
+
+/**
+ * Прокидывает путь запроса в заголовок.
+ *
+ * Серверные разметки не знают текущего адреса, а он нужен, чтобы
+ * не зациклить переадресацию на страницу привязки второго фактора.
+ */
+export function middleware(request: NextRequest): NextResponse {
+  const headers = new Headers(request.headers);
+  headers.set('x-pathname', request.nextUrl.pathname);
+
+  return NextResponse.next({ request: { headers } });
+}
+
+/** Посредник не нужен на статике и служебных путях Next.js. */
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};
+```
+
+Импорт `headers` добавь из `next/headers`.
+
+- [ ] **Step 9: Запустить тесты**
+
+Run: `pnpm --filter @cairn/web test src/components/TotpSetup`
+Expected: PASS, 5 тестов.
+
+- [ ] **Step 10: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить привязку второго фактора в интерфейсе"
+```
+
+---
+
+### Task 57: Создание проекта
+
+**Files:**
+- Create: `apps/web/src/app/(app)/projects/new/page.tsx`, `NewProjectScreen.tsx`
+- Create: `apps/web/src/api/hooks/useMutationCreateProject.ts`
+- Modify: `apps/web/src/components/ProjectForm/types.ts`, `apps/web/src/components/ProjectList/ProjectList.tsx`
+- Test: `apps/web/src/api/hooks/useMutationCreateProject.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/api/hooks/useMutationCreateProject.test.tsx`**
+
+```tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { renderHook, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { useMutationCreateProject } from './useMutationCreateProject';
+
+function wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+describe('useMutationCreateProject', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('отправляет название на создание', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: '1', name: 'Проект' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useMutationCreateProject(), { wrapper });
+
+    result.current.mutate({ name: 'Проект' });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' });
+  });
+
+  it('сообщает об отказе в правах', async () => {
+    // Создавать проекты вправе только суперадмин (спека 4.4).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({}) }),
+    );
+
+    const { result } = renderHook(() => useMutationCreateProject(), { wrapper });
+
+    result.current.mutate({ name: 'Проект' });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/api/hooks/useMutationCreateProject`
+Expected: FAIL — «Failed to resolve import "./useMutationCreateProject"».
+
+- [ ] **Step 3: Создать `apps/web/src/api/hooks/useMutationCreateProject.ts`**
+
+```typescript
+'use client';
+
+import type { ProjectCreate, ProjectDetail } from '@cairn/shared';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+import { PROJECT_KEYS } from './useQueryProjects';
+
+/** Создание проекта. Доступно только суперадмину (спека 4.4). */
+export function useMutationCreateProject() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: ProjectCreate) =>
+      apiClient<ProjectDetail>('/projects', { method: 'POST', body: input }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: PROJECT_KEYS.all });
+    },
+  });
+}
+```
+
+- [ ] **Step 4: Разрешить форме работать в режиме создания**
+
+В `apps/web/src/components/ProjectForm/types.ts` замени тип обработчика на общий для создания и правки: `onSubmit: (input: ProjectUpdate & { name: string }) => void`. Поля совпадают, различается только обязательность названия, а форма и так не отправляет пустое.
+
+- [ ] **Step 5: Создать экран создания**
+
+`apps/web/src/app/(app)/projects/new/NewProjectScreen.tsx`:
+
+```tsx
+'use client';
+
+import { ProjectLifecycle, type ProjectCreate } from '@cairn/shared';
+import { useRouter } from 'next/navigation';
+
+import { useMutationCreateProject } from '@/api/hooks';
+import { ProjectForm } from '@/components/ProjectForm';
+
+/** Создание проекта. */
+export function NewProjectScreen() {
+  const router = useRouter();
+  const mutation = useMutationCreateProject();
+
+  return (
+    <ProjectForm
+      initial={{
+        name: '',
+        purpose: null,
+        stack: null,
+        repoUrl: null,
+        notes: null,
+        lifecycle: ProjectLifecycle.Development,
+      }}
+      isSubmitting={mutation.isPending}
+      error={mutation.error?.message}
+      onSubmit={(input) =>
+        mutation.mutate(input as ProjectCreate, {
+          onSuccess: (created) => {
+            router.push(`/projects/${created.id}`);
+            router.refresh();
+          },
+        })
+      }
+    />
+  );
+}
+```
+
+`apps/web/src/app/(app)/projects/new/page.tsx`:
+
+```tsx
+import { NewProjectScreen } from './NewProjectScreen';
+
+/** Страница создания проекта. */
+export default function NewProjectPage() {
+  return (
+    <main className="mx-auto max-w-3xl space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Новый проект</h1>
+      <NewProjectScreen />
+    </main>
+  );
+}
+```
+
+- [ ] **Step 6: Добавить ссылку на создание в сводку**
+
+В `apps/web/src/components/ProjectList/ProjectList.tsx` добавь необязательный пропс `canCreate?: boolean` и, когда он истинен, ссылку «Создать проект» на `/projects/new`. Пустое состояние для суперадмина при этом должно предлагать создать первый проект, а не сообщать об отсутствии доступа — иначе администратор в пустой системе решит, что что-то сломано.
+
+Дополни `ProjectList.test.tsx` двумя случаями: ссылка есть при `canCreate`, ссылки нет без него.
+
+- [ ] **Step 7: Передать признак в сводку**
+
+В `apps/web/src/app/(app)/page.tsx` получи текущего пользователя тем же серверным запросом, что и разметка раздела, и передай `canCreate={subject.isSuperadmin}`.
+
+- [ ] **Step 8: Запустить тесты и проверку типов**
+
+```bash
+pnpm --filter @cairn/web test
+pnpm --filter @cairn/web typecheck
+```
+
+Expected: без ошибок.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить создание проекта"
+```
+
+---
+
+### Task 58: Сквозная проверка сценария
+
+Последняя задача этапа: пройти путь целиком и убедиться, что части соединяются. Тесты проверяют единицы кода; здесь проверяется продукт.
+
+- [ ] **Step 1: Поднять систему с нуля**
+
+```bash
+docker compose down -v
+docker compose up -d --wait
+docker compose run --rm api node dist/db/migrate.js
+docker compose run --rm api node dist/cli/main.js create-superadmin admin@example.com
+```
+
+- [ ] **Step 2: Пройти сценарий суперадмина**
+
+1. Перейти по выданной ссылке, задать пароль.
+2. Убедиться, что система требует привязать второй фактор и не пускает на другие страницы.
+3. Привязать второй фактор, подтвердить кодом.
+4. Создать проект, заполнить паспорт.
+5. Пригласить пользователя, скопировать ссылку.
+6. Выдать приглашённому уровень «метаданные» на секцию «Инфо».
+7. Открыть журнал и увидеть все перечисленные действия.
+
+- [ ] **Step 3: Пройти сценарий приглашённого**
+
+В другом браузере (или окне инкогнито):
+
+1. Перейти по ссылке приглашения, задать пароль.
+2. Убедиться, что виден один проект и только название с состоянием.
+3. Убедиться, что назначение и заметки не отображаются.
+4. Убедиться, что пунктов «Пользователи» и «Журнал» в меню нет.
+5. Открыть `/users` напрямую — получить отказ.
+6. Открыть `/projects/<id несуществующего проекта>` — получить «не найдено».
+
+- [ ] **Step 4: Проверить отзыв**
+
+Отозвать доступ приглашённому у суперадмина; убедиться, что в его окне следующий переход ведёт на страницу входа.
+
+- [ ] **Step 5: Зафиксировать результат**
+
+Если что-то из перечисленного не работает, это ошибка реализации, а не плана: вернись к соответствующей задаче и проверь её тесты. Все шаги сценария покрыты тестами на своих уровнях, и расхождение означает пробел в покрытии — его стоит закрыть тестом, прежде чем чинить код.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git commit --allow-empty -m "Завершить этап 1: сквозной сценарий пройден"
+```
+
+---
+
+**Результат этапа 1:** система работает целиком. Суперадмин создаётся с консоли, привязывает второй фактор, заводит проекты, приглашает людей и выдаёт им доступ к отдельным секциям; журнал фиксирует каждое действие и не поддаётся правке даже из приложения. Модель прав, машинные субъекты и прикладное шифрование заложены так, что следующие семь этапов не потребуют их переделки.
+
+Не забудь дописать в `README.md` разделы про привязку второго фактора и создание проектов — на момент Task 54 их ещё не существовало.
