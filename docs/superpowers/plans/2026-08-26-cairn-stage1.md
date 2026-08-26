@@ -5308,3 +5308,898 @@ git commit -m "Добавить вход по паролю со вторым ф�
 ---
 
 **Результат чанка 6:** вход с двумя факторами работает, сессии отзываются мгновенно, перебор ограничен составным ключом, все отказы неразличимы. Следующий чанк добавляет HTTP-слой аутентификации, приглашения и команды консоли.
+## Chunk 7: HTTP-слой аутентификации
+
+Результат чанка: браузер входит в систему по-настоящему — с cookie, guard'ом и валидацией тела запроса.
+
+### Task 25: Валидация тела запроса
+
+Одна общая труба валидации на всё приложение: zod-схемы контракта проверяются на границе, а контроллеры получают уже разобранные данные. Без этого каждый контроллер разбирал бы тело по-своему, и часть проверок неминуемо разошлась бы с контрактом.
+
+**Files:**
+- Create: `apps/api/src/common/zod-validation.pipe.ts`
+- Test: `apps/api/src/common/zod-validation.pipe.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/common/zod-validation.pipe.test.ts`**
+
+```typescript
+import { BadRequestException } from '@nestjs/common';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+
+import { ZodValidationPipe } from './zod-validation.pipe';
+
+const schema = z.object({
+  email: z.string().email(),
+  age: z.number().int().positive(),
+});
+
+describe('ZodValidationPipe', () => {
+  const pipe = new ZodValidationPipe(schema);
+
+  it('пропускает корректные данные', () => {
+    expect(pipe.transform({ email: 'user@cairn.local', age: 30 })).toEqual({
+      email: 'user@cairn.local',
+      age: 30,
+    });
+  });
+
+  it('отвергает данные, не прошедшие схему', () => {
+    expect(() => pipe.transform({ email: 'не адрес', age: 30 })).toThrow(BadRequestException);
+  });
+
+  it('отбрасывает лишние поля', () => {
+    // Иначе неизвестное поле дошло бы до слоя данных и могло попасть в базу.
+    expect(pipe.transform({ email: 'user@cairn.local', age: 30, isSuperadmin: true })).toEqual({
+      email: 'user@cairn.local',
+      age: 30,
+    });
+  });
+
+  it('сообщает, какое поле не прошло', () => {
+    try {
+      pipe.transform({ email: 'не адрес', age: 30 });
+      expect.unreachable('ожидалось исключение');
+    } catch (error) {
+      expect(JSON.stringify(error)).toContain('email');
+    }
+  });
+
+  it('отвергает значение, не являющееся объектом', () => {
+    expect(() => pipe.transform('строка')).toThrow(BadRequestException);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/common`
+Expected: FAIL — «Failed to resolve import "./zod-validation.pipe"».
+
+- [ ] **Step 3: Создать `apps/api/src/common/zod-validation.pipe.ts`**
+
+```typescript
+import { BadRequestException, Injectable, type PipeTransform } from '@nestjs/common';
+import type { ZodSchema } from 'zod';
+
+/**
+ * Проверяет тело запроса схемой из пакета контракта.
+ *
+ * Схема одна и та же на бэкенде и во фронтенде, поэтому расхождение
+ * проверок между ними невозможно по построению.
+ */
+@Injectable()
+export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
+  constructor(private readonly schema: ZodSchema<T>) {}
+
+  transform(value: unknown): T {
+    const result = this.schema.safeParse(value);
+
+    if (!result.success) {
+      throw new BadRequestException({
+        message: 'Неверные данные запроса',
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    return result.data;
+  }
+}
+```
+
+Схемы объектов в zod по умолчанию отбрасывают неизвестные поля, поэтому отдельной настройки для этого не требуется.
+
+- [ ] **Step 4: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/common`
+Expected: PASS, 5 тестов.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add apps/api/src/common
+git commit -m "Добавить валидацию тела запроса схемами контракта"
+```
+
+---
+
+### Task 26: Guard аутентификации
+
+**Files:**
+- Create: `apps/api/src/auth/current-subject.decorator.ts`, `apps/api/src/auth/session.guard.ts`
+- Test: `apps/api/src/auth/session.guard.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/auth/session.guard.test.ts`**
+
+```typescript
+import { SubjectKind } from '@cairn/shared';
+import { UnauthorizedException, type ExecutionContext } from '@nestjs/common';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { SessionGuard } from './session.guard';
+import { SessionsRepository } from './sessions.repository';
+import { SESSION_COOKIE } from './session.cookie';
+import { subjects, users } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+interface FakeRequest {
+  cookies: Record<string, string>;
+  subject?: unknown;
+}
+
+function contextWith(request: FakeRequest): ExecutionContext {
+  return {
+    switchToHttp: () => ({ getRequest: () => request }),
+  } as unknown as ExecutionContext;
+}
+
+describe('SessionGuard', () => {
+  let testDb: TestDatabase;
+  let guard: SessionGuard;
+  let sessionsRepository: SessionsRepository;
+  let subjectId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    sessionsRepository = new SessionsRepository(testDb.db);
+    guard = new SessionGuard(testDb.db, sessionsRepository);
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+    subjectId = subject!.id;
+
+    await testDb.db
+      .insert(users)
+      .values({ subjectId, email: 'user@cairn.local', isSuperadmin: false });
+  });
+
+  it('отклоняет запрос без cookie', async () => {
+    await expect(guard.canActivate(contextWith({ cookies: {} }))).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('отклоняет неизвестный токен', async () => {
+    await expect(
+      guard.canActivate(contextWith({ cookies: { [SESSION_COOKIE]: 'нет такого' } })),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('пропускает живую сессию и кладёт субъект в запрос', async () => {
+    const token = await sessionsRepository.create(testDb.db, subjectId, {});
+    const request: FakeRequest = { cookies: { [SESSION_COOKIE]: token } };
+
+    expect(await guard.canActivate(contextWith(request))).toBe(true);
+    expect(request.subject).toMatchObject({ id: subjectId, isSuperadmin: false });
+  });
+
+  it('отражает признак суперадмина', async () => {
+    await testDb.db.update(users).set({ isSuperadmin: true });
+    const token = await sessionsRepository.create(testDb.db, subjectId, {});
+    const request: FakeRequest = { cookies: { [SESSION_COOKIE]: token } };
+
+    await guard.canActivate(contextWith(request));
+
+    expect(request.subject).toMatchObject({ isSuperadmin: true });
+  });
+
+  it('отклоняет сессию отозванного субъекта', async () => {
+    // Отзыв завершает сессии, но проверка нужна и здесь: она защищает
+    // от сессии, созданной в тот же момент другим путём.
+    const token = await sessionsRepository.create(testDb.db, subjectId, {});
+    await testDb.db.update(subjects).set({ revokedAt: new Date() });
+
+    await expect(
+      guard.canActivate(contextWith({ cookies: { [SESSION_COOKIE]: token } })),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('отклоняет отозванную сессию', async () => {
+    const token = await sessionsRepository.create(testDb.db, subjectId, {});
+    await sessionsRepository.revoke(testDb.db, token);
+
+    await expect(
+      guard.canActivate(contextWith({ cookies: { [SESSION_COOKIE]: token } })),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/auth/session.guard`
+Expected: FAIL — «Failed to resolve import "./session.guard"».
+
+- [ ] **Step 3: Создать `apps/api/src/auth/session.cookie.ts`**
+
+```typescript
+import type { CookieOptions } from 'express';
+
+/** Имя cookie с токеном сессии. */
+export const SESSION_COOKIE = 'cairn_session';
+
+/**
+ * Настройки cookie сессии (спека 6.3).
+ *
+ * `httpOnly` закрывает токен от скриптов страницы, `sameSite: lax` защищает
+ * от межсайтовых запросов, `secure` включается вне разработки — по HTTP
+ * такая cookie просто не установится, и локальная разработка сломалась бы.
+ */
+export const SESSION_COOKIE_OPTIONS: CookieOptions = {
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',
+  path: '/',
+  maxAge: 30 * 24 * 60 * 60 * 1000,
+};
+```
+
+- [ ] **Step 4: Создать `apps/api/src/auth/session.guard.ts`**
+
+```typescript
+import { SubjectKind } from '@cairn/shared';
+import {
+  CanActivate,
+  type ExecutionContext,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+
+import type { RequestSubject } from '../access/access.types';
+import { DATABASE } from '../db/db.module';
+import type { Database } from '../db/db.types';
+import { subjects, users } from '../db/schema';
+import { SESSION_COOKIE } from './session.cookie';
+import { SessionsRepository } from './sessions.repository';
+
+/**
+ * Превращает cookie сессии в субъект запроса.
+ *
+ * Субъект кладётся в запрос и дальше попадает во все репозитории первым
+ * аргументом — на этом держится вся проверка прав (спека 5.4).
+ */
+@Injectable()
+export class SessionGuard implements CanActivate {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly sessions: SessionsRepository,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context
+      .switchToHttp()
+      .getRequest<{ cookies?: Record<string, string>; subject?: RequestSubject }>();
+
+    const token = request.cookies?.[SESSION_COOKIE];
+
+    if (!token) {
+      throw new UnauthorizedException('Требуется вход');
+    }
+
+    const session = await this.sessions.findActive(token);
+
+    if (!session) {
+      throw new UnauthorizedException('Требуется вход');
+    }
+
+    const [found] = await this.db
+      .select({ subject: subjects, user: users })
+      .from(subjects)
+      .leftJoin(users, eq(users.subjectId, subjects.id))
+      .where(eq(subjects.id, session.subjectId))
+      .limit(1);
+
+    if (!found || found.subject.revokedAt !== null) {
+      throw new UnauthorizedException('Требуется вход');
+    }
+
+    request.subject = {
+      id: found.subject.id,
+      kind: found.subject.kind as SubjectKind,
+      label: found.subject.label,
+      isSuperadmin: found.user?.isSuperadmin ?? false,
+      isRevoked: false,
+    };
+
+    void this.sessions.touch(session.id);
+
+    return true;
+  }
+}
+```
+
+- [ ] **Step 5: Создать `apps/api/src/auth/current-subject.decorator.ts`**
+
+```typescript
+import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
+
+import type { RequestSubject } from '../access/access.types';
+
+/**
+ * Достаёт субъект запроса, положенный {@link SessionGuard}.
+ *
+ * Использовать только на маршрутах под этим guard'ом: без него значение
+ * будет пустым.
+ */
+export const CurrentSubject = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): RequestSubject => {
+    const request = context.switchToHttp().getRequest<{ subject?: RequestSubject }>();
+
+    if (!request.subject) {
+      throw new Error('Субъект запроса не найден: маршрут не защищён SessionGuard');
+    }
+
+    return request.subject;
+  },
+);
+```
+
+- [ ] **Step 6: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/auth/session.guard`
+Expected: PASS, 6 тестов.
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add apps/api/src/auth
+git commit -m "Добавить guard аутентификации"
+```
+
+---
+
+### Task 27: Схемы контракта для аутентификации
+
+**Files:**
+- Create: `packages/shared/src/schemas/auth.ts`
+- Modify: `packages/shared/src/index.ts`
+- Test: `packages/shared/src/schemas/auth.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `packages/shared/src/schemas/auth.test.ts`**
+
+```typescript
+import { describe, expect, it } from 'vitest';
+
+import { loginSchema, totpSchema, totpVerifySchema } from './auth';
+
+describe('loginSchema', () => {
+  it('принимает корректные данные', () => {
+    expect(loginSchema.safeParse({ email: 'user@cairn.local', password: 'пароль' }).success).toBe(
+      true,
+    );
+  });
+
+  it('приводит адрес к нижнему регистру', () => {
+    // Иначе один и тот же человек считался бы разными пользователями.
+    const result = loginSchema.parse({ email: 'User@Cairn.Local', password: 'пароль' });
+
+    expect(result.email).toBe('user@cairn.local');
+  });
+
+  it('отвергает пустой пароль', () => {
+    expect(loginSchema.safeParse({ email: 'user@cairn.local', password: '' }).success).toBe(false);
+  });
+
+  it('отвергает адрес без домена', () => {
+    expect(loginSchema.safeParse({ email: 'не адрес', password: 'пароль' }).success).toBe(false);
+  });
+});
+
+describe('totpSchema', () => {
+  it('принимает шестизначный код', () => {
+    expect(totpSchema.safeParse({ code: '123456' }).success).toBe(true);
+  });
+
+  it('отвергает код другой длины', () => {
+    expect(totpSchema.safeParse({ code: '12345' }).success).toBe(false);
+  });
+
+  it('отвергает код с буквами', () => {
+    expect(totpSchema.safeParse({ code: '12345a' }).success).toBe(false);
+  });
+});
+
+describe('totpVerifySchema', () => {
+  it('требует челлендж вместе с кодом', () => {
+    expect(totpVerifySchema.safeParse({ code: '123456' }).success).toBe(false);
+  });
+
+  it('принимает челлендж и код вместе', () => {
+    expect(
+      totpVerifySchema.safeParse({ code: '123456', challengeToken: 'токен' }).success,
+    ).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/shared test`
+Expected: FAIL — «Failed to resolve import "./auth"».
+
+- [ ] **Step 3: Создать `packages/shared/src/schemas/auth.ts`**
+
+```typescript
+import { z } from 'zod';
+
+/** Первый шаг входа: адрес и пароль (спека 6.1). */
+export const loginSchema = z.object({
+  email: z.string().email().toLowerCase(),
+  password: z.string().min(1),
+});
+
+/** Второй шаг входа: код из приложения-аутентификатора. */
+export const totpSchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'Код состоит из шести цифр'),
+});
+
+/** Тело запроса второго шага: челлендж из первого шага и код. */
+export const totpVerifySchema = totpSchema.extend({
+  challengeToken: z.string().min(1),
+});
+
+/** Установка пароля по одноразовой ссылке. */
+export const acceptInvitationSchema = z.object({
+  password: z.string().min(12, 'Пароль должен быть не короче 12 символов'),
+});
+
+/**
+ * Ответ на первый шаг входа.
+ *
+ * Размеченное объединение, а не необязательные поля: клиент обязан
+ * различить готовую сессию и требование второго фактора (спека 8).
+ */
+export const loginResponseSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('session') }),
+  z.object({ kind: z.literal('totp_required'), challengeToken: z.string() }),
+]);
+
+/** Текущий пользователь. */
+export const currentSubjectSchema = z.object({
+  id: z.string().uuid(),
+  label: z.string(),
+  isSuperadmin: z.boolean(),
+  isTotpEnabled: z.boolean(),
+});
+
+/** Данные первого шага входа. */
+export type LoginInput = z.infer<typeof loginSchema>;
+
+/** Данные второго шага входа. */
+export type TotpInput = z.infer<typeof totpSchema>;
+
+/** Данные установки пароля. */
+export type AcceptInvitationInput = z.infer<typeof acceptInvitationSchema>;
+
+/** Ответ на первый шаг входа. */
+export type LoginResponse = z.infer<typeof loginResponseSchema>;
+
+/** Текущий пользователь. */
+export type CurrentSubjectResponse = z.infer<typeof currentSubjectSchema>;
+```
+
+- [ ] **Step 4: Дополнить `packages/shared/src/index.ts`**
+
+```typescript
+export * from './enums';
+export * from './schemas/auth';
+export * from './schemas/grant';
+export * from './schemas/project';
+```
+
+- [ ] **Step 5: Запустить тест и пересобрать пакет**
+
+```bash
+pnpm --filter @cairn/shared test
+pnpm --filter @cairn/shared build
+```
+
+Expected: PASS, 13 тестов; сборка без ошибок.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add packages/shared/src
+git commit -m "Добавить схемы контракта для аутентификации"
+```
+
+---
+
+### Task 28: Контроллер аутентификации
+
+**Files:**
+- Create: `apps/api/src/auth/auth.controller.ts`, `apps/api/src/auth/auth.module.ts`
+- Modify: `apps/api/src/app.module.ts`
+- Test: `apps/api/test/auth.e2e.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/test/auth.e2e.test.ts`**
+
+Первый сквозной тест: проверяет не сервис, а поведение по HTTP — коды ответов и cookie. Именно они видны браузеру, и именно в них проявляются ошибки склейки контроллера с сервисом.
+
+```typescript
+import { SubjectKind } from '@cairn/shared';
+import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import cookieParser from 'cookie-parser';
+import request from 'supertest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuthModule } from '../src/auth/auth.module';
+import { PasswordService } from '../src/auth/password.service';
+import { SESSION_COOKIE } from '../src/auth/session.cookie';
+import { DATABASE } from '../src/db/db.module';
+import { subjects, users } from '../src/db/schema';
+import { startTestDatabase, type TestDatabase } from './db-fixture';
+
+describe('аутентификация по HTTP', () => {
+  let testDb: TestDatabase;
+  let app: INestApplication;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+
+    const moduleRef = await Test.createTestingModule({ imports: [AuthModule] })
+      .overrideProvider(DATABASE)
+      .useValue(testDb.db)
+      .compile();
+
+    app = moduleRef.createNestApplication();
+    app.use(cookieParser());
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+
+    await testDb.db.insert(users).values({
+      subjectId: subject!.id,
+      email: 'user@cairn.local',
+      passwordHash: await new PasswordService().hash('очень длинный пароль'),
+    });
+  });
+
+  it('ставит cookie при успешном входе', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'user@cairn.local', password: 'очень длинный пароль' })
+      .expect(200);
+
+    const cookies = response.headers['set-cookie'] as unknown as string[];
+
+    expect(cookies.some((cookie) => cookie.startsWith(`${SESSION_COOKIE}=`))).toBe(true);
+  });
+
+  it('делает cookie недоступной скриптам', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'user@cairn.local', password: 'очень длинный пароль' })
+      .expect(200);
+
+    const cookies = response.headers['set-cookie'] as unknown as string[];
+    const session = cookies.find((cookie) => cookie.startsWith(`${SESSION_COOKIE}=`));
+
+    expect(session).toContain('HttpOnly');
+    expect(session).toContain('SameSite=Lax');
+  });
+
+  it('отвечает 401 при неверном пароле', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'user@cairn.local', password: 'не тот' })
+      .expect(401);
+  });
+
+  it('отвечает 400 при некорректном теле запроса', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'не адрес', password: '' })
+      .expect(400);
+  });
+
+  it('не пускает на защищённый маршрут без cookie', async () => {
+    await request(app.getHttpServer()).get('/auth/me').expect(401);
+  });
+
+  it('пускает на защищённый маршрут с cookie', async () => {
+    const agent = request.agent(app.getHttpServer());
+
+    await agent
+      .post('/auth/login')
+      .send({ email: 'user@cairn.local', password: 'очень длинный пароль' })
+      .expect(200);
+
+    const response = await agent.get('/auth/me').expect(200);
+
+    expect(response.body).toMatchObject({ label: 'user@cairn.local', isSuperadmin: false });
+  });
+
+  it('закрывает доступ после выхода', async () => {
+    const agent = request.agent(app.getHttpServer());
+
+    await agent
+      .post('/auth/login')
+      .send({ email: 'user@cairn.local', password: 'очень длинный пароль' })
+      .expect(200);
+    await agent.post('/auth/logout').expect(204);
+
+    await agent.get('/auth/me').expect(401);
+  });
+});
+```
+
+- [ ] **Step 2: Установить supertest**
+
+Run: `pnpm --filter @cairn/api add -D supertest @types/supertest`
+Expected: пакеты добавлены в `devDependencies`.
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test test/auth.e2e`
+Expected: FAIL — «Failed to resolve import "../src/auth/auth.module"».
+
+- [ ] **Step 4: Создать `apps/api/src/auth/auth.controller.ts`**
+
+```typescript
+import {
+  loginSchema,
+  totpVerifySchema,
+  type CurrentSubjectResponse,
+  type LoginResponse,
+} from '@cairn/shared';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+  UsePipes,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
+
+import type { RequestSubject } from '../access/access.types';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { AuthService } from './auth.service';
+import { CurrentSubject } from './current-subject.decorator';
+import { SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from './session.cookie';
+import { SessionGuard } from './session.guard';
+import { SessionsRepository } from './sessions.repository';
+
+/** Вход, выход и второй фактор (спека 8). */
+@Controller('auth')
+export class AuthController {
+  constructor(
+    private readonly auth: AuthService,
+    private readonly sessions: SessionsRepository,
+  ) {}
+
+  /**
+   * Первый шаг входа.
+   *
+   * Возвращает либо признак выданной сессии, либо челлендж второго фактора.
+   * Сама сессия уходит в cookie, а не в тело ответа: токен не должен быть
+   * доступен скриптам страницы.
+   */
+  @Post('login')
+  @HttpCode(200)
+  @UsePipes(new ZodValidationPipe(loginSchema))
+  async login(
+    @Body() body: { email: string; password: string },
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<LoginResponse> {
+    const outcome = await this.auth.login(body.email, body.password, originOf(request));
+
+    if (outcome.kind === 'session') {
+      response.cookie(SESSION_COOKIE, outcome.token, SESSION_COOKIE_OPTIONS);
+
+      return { kind: 'session' };
+    }
+
+    return { kind: 'totp_required', challengeToken: outcome.challengeToken };
+  }
+
+  /** Второй шаг входа: обмен челленджа и кода на сессию. */
+  @Post('totp')
+  @HttpCode(200)
+  @UsePipes(new ZodValidationPipe(totpVerifySchema))
+  async verifyTotp(
+    @Body() body: { challengeToken: string; code: string },
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ kind: 'session' }> {
+    const token = await this.auth.verifyTotp(body.challengeToken, body.code, originOf(request));
+
+    response.cookie(SESSION_COOKIE, token, SESSION_COOKIE_OPTIONS);
+
+    return { kind: 'session' };
+  }
+
+  /** Выход: отзыв сессии и удаление cookie. */
+  @Post('logout')
+  @HttpCode(204)
+  @UseGuards(SessionGuard)
+  async logout(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<void> {
+    const token = request.cookies?.[SESSION_COOKIE];
+
+    if (token) {
+      await this.sessions.revoke(this.sessions.connection, token);
+    }
+
+    response.clearCookie(SESSION_COOKIE, SESSION_COOKIE_OPTIONS);
+  }
+
+  /** Текущий пользователь. */
+  @Get('me')
+  @UseGuards(SessionGuard)
+  async me(@CurrentSubject() subject: RequestSubject): Promise<CurrentSubjectResponse> {
+    return this.auth.describeSubject(subject);
+  }
+}
+
+/** Достаёт источник запроса для записи в сессию. */
+function originOf(request: Request): { ip?: string; userAgent?: string } {
+  return { ip: request.ip, userAgent: request.get('user-agent') ?? undefined };
+}
+```
+
+Токен сессии уходит только в cookie и никогда в тело ответа: значение, доступное скриптам страницы, перестало бы защищать `httpOnly`.
+
+- [ ] **Step 5: Дополнить `apps/api/src/auth/sessions.repository.ts` и `auth.service.ts`**
+
+В `SessionsRepository` добавь геттер, чтобы контроллер мог отозвать сессию без отдельной транзакции:
+
+```typescript
+  /** Подключение для операций, не требующих транзакции. */
+  get connection(): Database {
+    return this.db;
+  }
+```
+
+В `AuthService` добавь метод описания субъекта:
+
+```typescript
+  /** Описывает текущего пользователя для интерфейса. */
+  async describeSubject(subject: RequestSubject): Promise<CurrentSubjectResponse> {
+    const [user] = await this.db
+      .select({ isTotpEnabled: users.isTotpEnabled })
+      .from(users)
+      .where(eq(users.subjectId, subject.id))
+      .limit(1);
+
+    return {
+      id: subject.id,
+      label: subject.label,
+      isSuperadmin: subject.isSuperadmin,
+      isTotpEnabled: user?.isTotpEnabled ?? false,
+    };
+  }
+```
+
+Импорты в `auth.service.ts` дополни: `import type { CurrentSubjectResponse } from '@cairn/shared';` и `import type { RequestSubject } from '../access/access.types';`.
+
+- [ ] **Step 6: Создать `apps/api/src/auth/auth.module.ts`**
+
+```typescript
+import { Module } from '@nestjs/common';
+
+import { AuditModule } from '../audit/audit.module';
+import { CryptoModule } from '../crypto/crypto.module';
+import { DbModule } from '../db/db.module';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { LoginAttemptsService } from './login-attempts.service';
+import { PasswordService } from './password.service';
+import { SessionGuard } from './session.guard';
+import { SessionsRepository } from './sessions.repository';
+import { TotpService } from './totp.service';
+
+/** Модуль аутентификации. */
+@Module({
+  imports: [DbModule, CryptoModule, AuditModule],
+  controllers: [AuthController],
+  providers: [
+    AuthService,
+    PasswordService,
+    TotpService,
+    SessionsRepository,
+    LoginAttemptsService,
+    SessionGuard,
+  ],
+  exports: [SessionGuard, SessionsRepository, PasswordService, TotpService],
+})
+export class AuthModule {}
+```
+
+- [ ] **Step 7: Подключить модуль в `apps/api/src/app.module.ts`**
+
+```typescript
+import { Module } from '@nestjs/common';
+
+import { AccessModule } from './access/access.module';
+import { AuditModule } from './audit/audit.module';
+import { AuthModule } from './auth/auth.module';
+import { CryptoModule } from './crypto/crypto.module';
+import { DbModule } from './db/db.module';
+
+/** Корневой модуль приложения. */
+@Module({
+  imports: [DbModule, CryptoModule, AuditModule, AccessModule, AuthModule],
+})
+export class AppModule {}
+```
+
+- [ ] **Step 8: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test test/auth.e2e`
+Expected: PASS, 7 тестов.
+
+- [ ] **Step 9: Запустить все тесты и проверку типов**
+
+```bash
+pnpm test
+pnpm typecheck
+```
+
+Expected: без ошибок. Нужен работающий Docker.
+
+- [ ] **Step 10: Коммит**
+
+```bash
+git add apps/api/src pnpm-lock.yaml apps/api/package.json
+git commit -m "Добавить контроллер аутентификации"
+```
+
+---
+
+**Результат чанка 7:** браузер входит в систему, получает cookie и ходит по защищённым маршрутам; тело запроса проверяется схемами контракта. Следующий чанк добавляет приглашения, сброс пароля и команды консоли.
