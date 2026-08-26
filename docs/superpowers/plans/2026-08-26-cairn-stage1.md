@@ -8957,3 +8957,1161 @@ git commit -m "Добавить контроллер выдач доступа"
 ---
 
 **Результат чанка 10:** проекты и доступы управляются по HTTP, коды ответов соответствуют модели прав, каждое изменение попадает в журнал вместе с самим изменением. Следующий чанк добавляет оставшиеся маршруты и сводит матрицу доступа в единый набор тестов.
+
+## Chunk 11: Завершение бэкенда
+
+Результат чанка: все маршруты этапа 1 работают, приложение собирается целиком, матрица доступа из ТЗ превращена в исполняемый набор тестов.
+
+### Task 36: Журнал действий по HTTP
+
+**Files:**
+- Create: `apps/api/src/audit/audit-query.service.ts`, `apps/api/src/audit/audit.controller.ts`
+- Create: `packages/shared/src/schemas/audit.ts`
+- Modify: `packages/shared/src/index.ts`, `apps/api/src/audit/audit.module.ts`
+- Test: `apps/api/src/audit/audit-query.service.test.ts`
+
+- [ ] **Step 1: Создать `packages/shared/src/schemas/audit.ts`**
+
+```typescript
+import { z } from 'zod';
+
+import { AuditSubjectKind } from '../enums.js';
+
+/** Фильтры журнала (спека 9.1). */
+export const auditQuerySchema = z.object({
+  subjectId: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
+  action: z.string().max(100).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+/** Запись журнала. */
+export const auditEntrySchema = z.object({
+  id: z.string().uuid(),
+  subjectId: z.string().uuid().nullable(),
+  subjectKind: z.nativeEnum(AuditSubjectKind),
+  subjectLabel: z.string(),
+  action: z.string(),
+  entityType: z.string().nullable(),
+  entityId: z.string().uuid().nullable(),
+  projectId: z.string().uuid().nullable(),
+  metadata: z.unknown().nullable(),
+  createdAt: z.string(),
+});
+
+/** Страница журнала. */
+export const auditPageSchema = z.object({
+  entries: z.array(auditEntrySchema),
+  total: z.number().int(),
+});
+
+/** Фильтры журнала. */
+export type AuditQuery = z.infer<typeof auditQuerySchema>;
+
+/** Запись журнала. */
+export type AuditEntry = z.infer<typeof auditEntrySchema>;
+
+/** Страница журнала. */
+export type AuditPage = z.infer<typeof auditPageSchema>;
+```
+
+- [ ] **Step 2: Дополнить `packages/shared/src/index.ts`**
+
+```typescript
+export * from './enums';
+export * from './schemas/audit';
+export * from './schemas/auth';
+export * from './schemas/grant';
+export * from './schemas/project';
+export * from './schemas/user';
+```
+
+- [ ] **Step 3: Написать падающий тест `apps/api/src/audit/audit-query.service.test.ts`**
+
+```typescript
+import { AuditSubjectKind, SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuditQueryService } from './audit-query.service';
+import { AuditAction } from './audit.types';
+import { auditLog, projects, subjects } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('AuditQueryService', () => {
+  let testDb: TestDatabase;
+  let service: AuditQueryService;
+  let subjectId: string;
+  let projectId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    service = new AuditQueryService(testDb.db);
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'админ' })
+      .returning();
+    subjectId = subject!.id;
+
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'proekt', name: 'Проект' })
+      .returning();
+    projectId = project!.id;
+
+    await testDb.db.insert(auditLog).values([
+      {
+        subjectId,
+        subjectKind: AuditSubjectKind.User,
+        subjectLabel: 'админ',
+        action: AuditAction.ProjectCreated,
+        projectId,
+        createdAt: new Date('2026-01-01T10:00:00Z'),
+      },
+      {
+        subjectId,
+        subjectKind: AuditSubjectKind.User,
+        subjectLabel: 'админ',
+        action: AuditAction.LoginSucceeded,
+        createdAt: new Date('2026-01-02T10:00:00Z'),
+      },
+      {
+        subjectId: null,
+        subjectKind: AuditSubjectKind.System,
+        subjectLabel: 'cli create-superadmin',
+        action: AuditAction.SuperadminCreated,
+        createdAt: new Date('2026-01-03T10:00:00Z'),
+      },
+    ]);
+  });
+
+  it('возвращает записи от новых к старым', async () => {
+    // Расследование начинают с последнего события, а не с первого.
+    const page = await service.query({ limit: 50, offset: 0 });
+
+    expect(page.entries.map((entry) => entry.action)).toEqual([
+      AuditAction.SuperadminCreated,
+      AuditAction.LoginSucceeded,
+      AuditAction.ProjectCreated,
+    ]);
+  });
+
+  it('сообщает общее число записей', async () => {
+    const page = await service.query({ limit: 1, offset: 0 });
+
+    expect(page.entries).toHaveLength(1);
+    expect(page.total).toBe(3);
+  });
+
+  it('фильтрует по субъекту', async () => {
+    const page = await service.query({ subjectId, limit: 50, offset: 0 });
+
+    expect(page.total).toBe(2);
+  });
+
+  it('фильтрует по проекту', async () => {
+    const page = await service.query({ projectId, limit: 50, offset: 0 });
+
+    expect(page.total).toBe(1);
+  });
+
+  it('фильтрует по типу действия', async () => {
+    const page = await service.query({
+      action: AuditAction.LoginSucceeded,
+      limit: 50,
+      offset: 0,
+    });
+
+    expect(page.total).toBe(1);
+  });
+
+  it('фильтрует по диапазону дат', async () => {
+    const page = await service.query({
+      from: '2026-01-02T00:00:00.000Z',
+      to: '2026-01-02T23:59:59.000Z',
+      limit: 50,
+      offset: 0,
+    });
+
+    expect(page.total).toBe(1);
+  });
+
+  it('отдаёт записи без субъекта', async () => {
+    // Действия с консоли субъекта не имеют (спека 4.7).
+    const page = await service.query({ limit: 50, offset: 0 });
+
+    expect(page.entries[0]).toMatchObject({
+      subjectId: null,
+      subjectKind: AuditSubjectKind.System,
+    });
+  });
+
+  it('листает страницами', async () => {
+    const page = await service.query({ limit: 1, offset: 2 });
+
+    expect(page.entries[0]?.action).toBe(AuditAction.ProjectCreated);
+  });
+});
+```
+
+- [ ] **Step 4: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/audit/audit-query`
+Expected: FAIL — «Failed to resolve import "./audit-query.service"».
+
+- [ ] **Step 5: Создать `apps/api/src/audit/audit-query.service.ts`**
+
+```typescript
+import type { AuditPage, AuditQuery } from '@cairn/shared';
+import { Inject, Injectable } from '@nestjs/common';
+import { and, count, desc, eq, gte, lte, type SQL } from 'drizzle-orm';
+
+import { DATABASE } from '../db/db.module';
+import type { Database } from '../db/db.types';
+import { auditLog } from '../db/schema';
+
+/**
+ * Чтение журнала (спека 9.1).
+ *
+ * Только выборка: изменять и удалять записи нельзя ни из интерфейса,
+ * ни из кода — роль базы таких прав не имеет (спека 4.7).
+ */
+@Injectable()
+export class AuditQueryService {
+  constructor(@Inject(DATABASE) private readonly db: Database) {}
+
+  /** Возвращает страницу журнала от новых записей к старым. */
+  async query(filters: AuditQuery): Promise<AuditPage> {
+    const conditions = buildConditions(filters);
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const rows = await this.db
+      .select()
+      .from(auditLog)
+      .where(where)
+      .orderBy(desc(auditLog.createdAt))
+      .limit(filters.limit)
+      .offset(filters.offset);
+
+    const [totals] = await this.db.select({ value: count() }).from(auditLog).where(where);
+
+    return {
+      entries: rows.map((row) => ({
+        id: row.id,
+        subjectId: row.subjectId,
+        subjectKind: row.subjectKind,
+        subjectLabel: row.subjectLabel,
+        action: row.action,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        projectId: row.projectId,
+        metadata: row.metadata ?? null,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      total: totals?.value ?? 0,
+    };
+  }
+}
+
+/** Собирает условия выборки из фильтров. */
+function buildConditions(filters: AuditQuery): SQL[] {
+  const conditions: SQL[] = [];
+
+  if (filters.subjectId) {
+    conditions.push(eq(auditLog.subjectId, filters.subjectId));
+  }
+
+  if (filters.projectId) {
+    conditions.push(eq(auditLog.projectId, filters.projectId));
+  }
+
+  if (filters.action) {
+    conditions.push(eq(auditLog.action, filters.action));
+  }
+
+  if (filters.from) {
+    conditions.push(gte(auditLog.createdAt, new Date(filters.from)));
+  }
+
+  if (filters.to) {
+    conditions.push(lte(auditLog.createdAt, new Date(filters.to)));
+  }
+
+  return conditions;
+}
+```
+
+- [ ] **Step 6: Создать `apps/api/src/audit/audit.controller.ts`**
+
+```typescript
+import { auditQuerySchema, type AuditPage, type AuditQuery } from '@cairn/shared';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+
+import { SuperadminGuard } from '../access/superadmin.guard';
+import { SessionGuard } from '../auth/session.guard';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { AuditQueryService } from './audit-query.service';
+
+/** Журнал действий. Доступен только суперадмину (спека 8). */
+@Controller('audit')
+@UseGuards(SessionGuard, SuperadminGuard)
+export class AuditController {
+  constructor(private readonly audit: AuditQueryService) {}
+
+  /** Страница журнала с фильтрами. */
+  @Get()
+  async query(
+    @Query(new ZodValidationPipe(auditQuerySchema)) filters: AuditQuery,
+  ): Promise<AuditPage> {
+    return this.audit.query(filters);
+  }
+}
+```
+
+- [ ] **Step 7: Дополнить `apps/api/src/audit/audit.module.ts`**
+
+```typescript
+import { Global, Module } from '@nestjs/common';
+
+import { AccessModule } from '../access/access.module';
+import { AuthModule } from '../auth/auth.module';
+import { DbModule } from '../db/db.module';
+import { AuditController } from './audit.controller';
+import { AuditQueryService } from './audit-query.service';
+import { AuditService } from './audit.service';
+
+/**
+ * Модуль журналирования.
+ *
+ * Глобальный: запись в журнал нужна почти всем модулям. Чтение вынесено
+ * в отдельный сервис — оно требует подключения к базе, а запись работает
+ * с транзакцией вызывающего.
+ */
+@Global()
+@Module({
+  imports: [DbModule, AccessModule, AuthModule],
+  controllers: [AuditController],
+  providers: [AuditService, AuditQueryService],
+  exports: [AuditService],
+})
+export class AuditModule {}
+```
+
+- [ ] **Step 8: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/audit`
+Expected: PASS, 12 тестов.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/api/src/audit packages/shared/src
+git commit -m "Добавить чтение журнала действий"
+```
+
+---
+
+### Task 37: Контроллеры пользователей и приглашений
+
+**Files:**
+- Create: `apps/api/src/users/users.controller.ts`, `apps/api/src/users/users.module.ts`
+- Create: `apps/api/src/invitations/invitations.controller.ts`, `apps/api/src/invitations/invitations.module.ts`
+- Test: `apps/api/test/users.e2e.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/test/users.e2e.test.ts`**
+
+```typescript
+import { SubjectKind } from '@cairn/shared';
+import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import cookieParser from 'cookie-parser';
+import request from 'supertest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuthModule } from '../src/auth/auth.module';
+import { PasswordService } from '../src/auth/password.service';
+import { DATABASE } from '../src/db/db.module';
+import { InvitationsModule } from '../src/invitations/invitations.module';
+import { UsersModule } from '../src/users/users.module';
+import { subjects, users } from '../src/db/schema';
+import { startTestDatabase, type TestDatabase } from './db-fixture';
+
+describe('пользователи по HTTP', () => {
+  let testDb: TestDatabase;
+  let app: INestApplication;
+  let targetUserId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AuthModule, UsersModule, InvitationsModule],
+    })
+      .overrideProvider(DATABASE)
+      .useValue(testDb.db)
+      .compile();
+
+    app = moduleRef.createNestApplication();
+    app.use(cookieParser());
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const passwordHash = await new PasswordService().hash('очень длинный пароль');
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    await testDb.db.insert(users).values({
+      subjectId: adminSubject!.id,
+      email: 'admin@cairn.local',
+      passwordHash,
+      isSuperadmin: true,
+    });
+
+    const [targetSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+    const [target] = await testDb.db
+      .insert(users)
+      .values({ subjectId: targetSubject!.id, email: 'user@cairn.local', passwordHash })
+      .returning();
+    targetUserId = target!.id;
+  });
+
+  async function signIn(email: string) {
+    const agent = request.agent(app.getHttpServer());
+
+    await agent.post('/auth/login').send({ email, password: 'очень длинный пароль' }).expect(200);
+
+    return agent;
+  }
+
+  it('суперадмин видит список пользователей', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    const response = await admin.get('/users').expect(200);
+
+    expect(response.body).toHaveLength(2);
+  });
+
+  it('в списке нет секретов', async () => {
+    // Секреты не попадают в общие ответы списков (ТЗ 9).
+    const admin = await signIn('admin@cairn.local');
+
+    const response = await admin.get('/users').expect(200);
+
+    expect(JSON.stringify(response.body)).not.toContain('argon2');
+    expect(response.body[0]).not.toHaveProperty('passwordHash');
+  });
+
+  it('обычному пользователю отказывает с кодом 403', async () => {
+    const user = await signIn('user@cairn.local');
+
+    await user.get('/users').expect(403);
+  });
+
+  it('суперадмин приглашает и получает ссылку', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    const response = await admin
+      .post('/invitations')
+      .send({ email: 'new@cairn.local' })
+      .expect(201);
+
+    expect(response.body.url).toContain('/invite/');
+  });
+
+  it('отклоняет приглашение действующего пользователя', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin.post('/invitations').send({ email: 'user@cairn.local' }).expect(409);
+  });
+
+  it('сброс пароля закрывает доступ пользователю', async () => {
+    const admin = await signIn('admin@cairn.local');
+    const user = await signIn('user@cairn.local');
+
+    await admin.post(`/users/${targetUserId}/reset-password`).expect(201);
+
+    await user.get('/auth/me').expect(401);
+  });
+
+  it('отзыв закрывает доступ пользователю', async () => {
+    const admin = await signIn('admin@cairn.local');
+    const user = await signIn('user@cairn.local');
+
+    await admin.post(`/users/${targetUserId}/revoke`).expect(204);
+
+    await user.get('/auth/me').expect(401);
+  });
+
+  it('приём ссылки без второго фактора выдаёт сессию', async () => {
+    const admin = await signIn('admin@cairn.local');
+    const invitation = await admin
+      .post('/invitations')
+      .send({ email: 'new@cairn.local' })
+      .expect(201);
+
+    const token = String(invitation.body.url).split('/invite/')[1];
+    const guest = request.agent(app.getHttpServer());
+
+    const response = await guest
+      .post(`/invitations/${token}/accept`)
+      .send({ password: 'очень длинный пароль' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ kind: 'session' });
+    await guest.get('/auth/me').expect(200);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test test/users.e2e`
+Expected: FAIL — «Failed to resolve import "../src/users/users.module"».
+
+- [ ] **Step 3: Создать `apps/api/src/users/users.controller.ts`**
+
+```typescript
+import type { UserRow } from '@cairn/shared';
+import { Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+
+import { SuperadminGuard } from '../access/superadmin.guard';
+import type { RequestSubject } from '../access/access.types';
+import { CurrentSubject } from '../auth/current-subject.decorator';
+import { SessionGuard } from '../auth/session.guard';
+import { InvitationsService } from '../invitations/invitations.service';
+import { UsersService } from './users.service';
+import { buildInviteUrl, type IssuedLinkResponse } from './invite-url';
+
+/** Управление пользователями. Доступно только суперадмину (спека 8). */
+@Controller('users')
+@UseGuards(SessionGuard, SuperadminGuard)
+export class UsersController {
+  constructor(
+    private readonly users: UsersService,
+    private readonly invitations: InvitationsService,
+  ) {}
+
+  /** Список пользователей. */
+  @Get()
+  async list(): Promise<UserRow[]> {
+    return this.users.list();
+  }
+
+  /** Отзывает доступ пользователю и завершает его сессии. */
+  @Post(':id/revoke')
+  @HttpCode(204)
+  async revoke(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.users.revoke({ id: subject.id, label: subject.label }, id);
+  }
+
+  /** Снимает отзыв. */
+  @Post(':id/restore')
+  @HttpCode(204)
+  async restore(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.users.restore({ id: subject.id, label: subject.label }, id);
+  }
+
+  /** Снимает привязку второго фактора. */
+  @Post(':id/reset-totp')
+  @HttpCode(204)
+  async resetTotp(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.users.resetTotp({ id: subject.id, label: subject.label }, id);
+  }
+
+  /**
+   * Сбрасывает пароль и возвращает одноразовую ссылку.
+   *
+   * Ссылка показывается суперадмину один раз: почты на этапе 1 нет,
+   * передача ссылки — его забота (спека 6.7).
+   */
+  @Post(':id/reset-password')
+  async resetPassword(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<IssuedLinkResponse> {
+    const link = await this.invitations.resetPassword(
+      { id: subject.id, label: subject.label, userId: await this.users.userIdOfSubject(subject.id) },
+      id,
+    );
+
+    return buildInviteUrl(link);
+  }
+}
+```
+
+- [ ] **Step 4: Создать `apps/api/src/users/invite-url.ts`**
+
+```typescript
+import type { IssuedLinkResponse } from '@cairn/shared';
+
+import type { IssuedLink } from '../invitations/invitations.types';
+
+/**
+ * Строит адрес, по которому человек задаст пароль.
+ *
+ * Адрес веб-приложения берётся из окружения: бэкенд не знает его сам,
+ * а зашитый в код адрес сломался бы при первом же переносе.
+ */
+export function buildInviteUrl(link: IssuedLink): IssuedLinkResponse {
+  const base = process.env.CAIRN_WEB_URL ?? 'http://localhost:3000';
+
+  return {
+    url: `${base}/invite/${link.token}`,
+    expiresAt: link.expiresAt.toISOString(),
+  };
+}
+
+export type { IssuedLinkResponse };
+```
+
+- [ ] **Step 5: Добавить метод в `apps/api/src/users/users.service.ts`**
+
+```typescript
+  /** Находит запись пользователя по его субъекту. */
+  async userIdOfSubject(subjectId: string): Promise<string> {
+    const [user] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.subjectId, subjectId))
+      .limit(1);
+
+    if (!user) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return user.id;
+  }
+```
+
+- [ ] **Step 6: Создать `apps/api/src/invitations/invitations.controller.ts`**
+
+```typescript
+import {
+  acceptInvitationSchema,
+  inviteUserSchema,
+  type AcceptInvitationInput,
+  type InviteUserInput,
+} from '@cairn/shared';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  NotFoundException,
+  Param,
+  Post,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import type { Response } from 'express';
+
+import { SuperadminGuard } from '../access/superadmin.guard';
+import type { RequestSubject } from '../access/access.types';
+import { CurrentSubject } from '../auth/current-subject.decorator';
+import { SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from '../auth/session.cookie';
+import { SessionGuard } from '../auth/session.guard';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { buildInviteUrl, type IssuedLinkResponse } from '../users/invite-url';
+import { UsersService } from '../users/users.service';
+import { InvitationsService } from './invitations.service';
+
+/** Приглашения и установка пароля по ссылке (спека 8). */
+@Controller('invitations')
+export class InvitationsController {
+  constructor(
+    private readonly invitations: InvitationsService,
+    private readonly users: UsersService,
+  ) {}
+
+  /** Приглашает пользователя. Доступно только суперадмину. */
+  @Post()
+  @UseGuards(SessionGuard, SuperadminGuard)
+  async invite(
+    @CurrentSubject() subject: RequestSubject,
+    @Body(new ZodValidationPipe(inviteUserSchema)) body: InviteUserInput,
+  ): Promise<IssuedLinkResponse> {
+    const userId = await this.users.userIdOfSubject(subject.id);
+    const link = await this.invitations.invite(
+      { id: subject.id, label: subject.label, userId },
+      body.email,
+    );
+
+    return buildInviteUrl(link);
+  }
+
+  /**
+   * Проверяет действительность ссылки.
+   *
+   * Доступен без сессии: человек по ссылке ещё не вошёл. Ответ не содержит
+   * ничего, кроме признака пригодности и вида ссылки, — иначе перебор
+   * токенов раскрывал бы состав пользователей.
+   */
+  @Get(':token')
+  async check(@Param('token') token: string): Promise<{ kind: string }> {
+    const link = await this.invitations.findUsableLink(token);
+
+    if (!link) {
+      throw new NotFoundException('Ссылка недействительна или уже использована');
+    }
+
+    return { kind: link.kind };
+  }
+
+  /**
+   * Устанавливает пароль по ссылке.
+   *
+   * Если у пользователя привязан второй фактор, сессия не выдаётся:
+   * вход завершается обычным челленджем, и ссылка не даёт его обойти (спека 4.6).
+   */
+  @Post(':token/accept')
+  @HttpCode(200)
+  async accept(
+    @Param('token') token: string,
+    @Body(new ZodValidationPipe(acceptInvitationSchema)) body: AcceptInvitationInput,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ kind: 'session' } | { kind: 'totp_required' }> {
+    const { sessionToken } = await this.invitations.acceptLink(token, body.password, {});
+
+    if (!sessionToken) {
+      return { kind: 'totp_required' };
+    }
+
+    response.cookie(SESSION_COOKIE, sessionToken, SESSION_COOKIE_OPTIONS);
+
+    return { kind: 'session' };
+  }
+}
+```
+
+- [ ] **Step 7: Создать модули**
+
+`apps/api/src/users/users.module.ts`:
+
+```typescript
+import { Module } from '@nestjs/common';
+
+import { AccessModule } from '../access/access.module';
+import { AuthModule } from '../auth/auth.module';
+import { DbModule } from '../db/db.module';
+import { InvitationsModule } from '../invitations/invitations.module';
+import { UsersController } from './users.controller';
+import { UsersService } from './users.service';
+
+/** Модуль управления пользователями. */
+@Module({
+  imports: [DbModule, AccessModule, AuthModule, InvitationsModule],
+  controllers: [UsersController],
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+```
+
+`apps/api/src/invitations/invitations.module.ts`:
+
+```typescript
+import { forwardRef, Module } from '@nestjs/common';
+
+import { AccessModule } from '../access/access.module';
+import { AuthModule } from '../auth/auth.module';
+import { DbModule } from '../db/db.module';
+import { UsersModule } from '../users/users.module';
+import { InvitationsController } from './invitations.controller';
+import { InvitationsService } from './invitations.service';
+
+/**
+ * Модуль приглашений.
+ *
+ * Связь с модулем пользователей взаимная: контроллер приглашений находит
+ * запись приглашающего, а контроллер пользователей выдаёт ссылку сброса.
+ * Разрывается `forwardRef`.
+ */
+@Module({
+  imports: [DbModule, AccessModule, AuthModule, forwardRef(() => UsersModule)],
+  controllers: [InvitationsController],
+  providers: [InvitationsService],
+  exports: [InvitationsService],
+})
+export class InvitationsModule {}
+```
+
+В `users.module.ts` импорт модуля приглашений тоже оберни: `forwardRef(() => InvitationsModule)`.
+
+- [ ] **Step 8: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test test/users.e2e`
+Expected: PASS, 8 тестов.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/api/src apps/api/test
+git commit -m "Добавить контроллеры пользователей и приглашений"
+```
+
+---
+
+### Task 38: Сборка приложения целиком
+
+**Files:**
+- Modify: `apps/api/src/app.module.ts`, `apps/api/src/main.ts`, `apps/api/vitest.config.ts`
+- Test: `apps/api/src/app.module.test.ts`
+
+- [ ] **Step 1: Дополнить тест `apps/api/src/app.module.test.ts`**
+
+```typescript
+import { Test } from '@nestjs/testing';
+import { describe, expect, it } from 'vitest';
+
+import { AppModule } from './app.module';
+import { AccessService } from './access/access.service';
+import { AuthService } from './auth/auth.service';
+import { ProjectsService } from './projects/projects.service';
+
+describe('AppModule', () => {
+  it('собирается со всеми модулями', async () => {
+    // Проверяет, что зависимости разрешаются: пропущенный импорт модуля
+    // проявился бы здесь, а не при первом запросе в бою.
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+
+    expect(moduleRef.get(AccessService)).toBeDefined();
+    expect(moduleRef.get(AuthService)).toBeDefined();
+    expect(moduleRef.get(ProjectsService)).toBeDefined();
+
+    await moduleRef.close();
+  });
+});
+```
+
+- [ ] **Step 2: Добавить строку подключения в `apps/api/vitest.config.ts`**
+
+Сборка `AppModule` создаёт подключение к базе, поэтому переменная нужна. Настоящая база при этом не открывается: драйвер подключается лениво, при первом запросе.
+
+```typescript
+    env: {
+      // Фиксированный тестовый ключ: 32 нулевых байта в base64.
+      CAIRN_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      // Подключение не открывается: драйвер соединяется при первом запросе.
+      DATABASE_URL: 'postgres://cairn_app:test@127.0.0.1:1/cairn_test',
+    },
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/app.module`
+Expected: FAIL — «Nest can't resolve dependencies» либо ошибка отсутствующего экспорта.
+
+- [ ] **Step 4: Собрать `apps/api/src/app.module.ts`**
+
+```typescript
+import { Module } from '@nestjs/common';
+
+import { AccessModule } from './access/access.module';
+import { AuditModule } from './audit/audit.module';
+import { AuthModule } from './auth/auth.module';
+import { CryptoModule } from './crypto/crypto.module';
+import { DbModule } from './db/db.module';
+import { GrantsModule } from './grants/grants.module';
+import { InvitationsModule } from './invitations/invitations.module';
+import { ProjectsModule } from './projects/projects.module';
+import { UsersModule } from './users/users.module';
+
+/** Корневой модуль приложения. */
+@Module({
+  imports: [
+    DbModule,
+    CryptoModule,
+    AuditModule,
+    AccessModule,
+    AuthModule,
+    ProjectsModule,
+    GrantsModule,
+    InvitationsModule,
+    UsersModule,
+  ],
+})
+export class AppModule {}
+```
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/app.module`
+Expected: PASS, 1 тест.
+
+- [ ] **Step 6: Проверить сборку и запуск**
+
+```bash
+pnpm --filter @cairn/shared build
+pnpm --filter @cairn/api build
+docker compose up -d --wait postgres
+pnpm --filter @cairn/api db:migrate
+pnpm --filter @cairn/api start
+```
+
+Expected: приложение стартует и слушает порт 3001. Проверь: `curl -i http://localhost:3001/api/auth/me` отвечает `401` — маршрут есть, сессии нет. Останови приложение.
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add apps/api
+git commit -m "Собрать приложение целиком"
+```
+
+---
+
+### Task 39: Матрица доступа как исполняемый набор тестов
+
+Требование спеки 10.3: для каждой пары «уровень доступа × эндпоинт» существует тест, фиксирующий ожидаемый ответ. Этот набор — исполняемая версия таблицы из раздела 4.3 ТЗ, и он растёт вместе с каждой новой секцией на следующих этапах.
+
+**Files:**
+- Create: `apps/api/test/access-matrix.e2e.test.ts`
+
+- [ ] **Step 1: Написать тест `apps/api/test/access-matrix.e2e.test.ts`**
+
+```typescript
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import cookieParser from 'cookie-parser';
+import request from 'supertest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AppModule } from '../src/app.module';
+import { PasswordService } from '../src/auth/password.service';
+import { DATABASE } from '../src/db/db.module';
+import { grants, projects, subjects, users } from '../src/db/schema';
+import { startTestDatabase, type TestDatabase } from './db-fixture';
+
+/** Ожидаемый ответ для уровня доступа. */
+interface Expectation {
+  /** Уровень доступа к секции «Инфо»; `null` — выдачи нет. */
+  level: AccessLevel | null;
+  /** Ожидаемый код при чтении карточки. */
+  read: number;
+  /** Ожидаемый код при правке. */
+  write: number;
+  /** Видно ли проект в списке. */
+  listed: boolean;
+}
+
+/**
+ * Таблица из раздела 4.3 ТЗ в исполняемом виде.
+ *
+ * Каждая строка — сочетание уровня доступа и ожидаемого поведения.
+ * Добавление секции на следующих этапах добавляет сюда столбцы,
+ * а не переписывает логику.
+ */
+const MATRIX: Expectation[] = [
+  { level: null, read: 404, write: 404, listed: false },
+  { level: AccessLevel.Metadata, read: 200, write: 403, listed: true },
+  { level: AccessLevel.Read, read: 200, write: 403, listed: true },
+  { level: AccessLevel.Write, read: 200, write: 200, listed: true },
+];
+
+describe('матрица доступа', () => {
+  let testDb: TestDatabase;
+  let app: INestApplication;
+  let projectId: string;
+  let contractorSubjectId: string;
+  let adminUserId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(DATABASE)
+      .useValue(testDb.db)
+      .compile();
+
+    app = moduleRef.createNestApplication();
+    app.use(cookieParser());
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const passwordHash = await new PasswordService().hash('очень длинный пароль');
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({
+        subjectId: adminSubject!.id,
+        email: 'admin@cairn.local',
+        passwordHash,
+        isSuperadmin: true,
+      })
+      .returning();
+    adminUserId = admin!.id;
+
+    const [contractorSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+    contractorSubjectId = contractorSubject!.id;
+    await testDb.db
+      .insert(users)
+      .values({ subjectId: contractorSubjectId, email: 'user@cairn.local', passwordHash });
+
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'proekt', name: 'Проект', purpose: 'Назначение' })
+      .returning();
+    projectId = project!.id;
+  });
+
+  async function signInAs(level: AccessLevel | null) {
+    if (level) {
+      await testDb.db.insert(grants).values({
+        subjectId: contractorSubjectId,
+        projectId,
+        section: Section.Info,
+        level,
+        grantedBy: adminUserId,
+      });
+    }
+
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .post('/auth/login')
+      .send({ email: 'user@cairn.local', password: 'очень длинный пароль' })
+      .expect(200);
+
+    return agent;
+  }
+
+  for (const expectation of MATRIX) {
+    const title = expectation.level ?? 'нет доступа';
+
+    describe(`уровень «${title}»`, () => {
+      it(`чтение карточки отвечает ${expectation.read}`, async () => {
+        const agent = await signInAs(expectation.level);
+
+        await agent.get(`/projects/${projectId}`).expect(expectation.read);
+      });
+
+      it(`правка отвечает ${expectation.write}`, async () => {
+        const agent = await signInAs(expectation.level);
+
+        await agent
+          .patch(`/projects/${projectId}`)
+          .send({ name: 'Новое имя' })
+          .expect(expectation.write);
+      });
+
+      it(`проект ${expectation.listed ? 'виден' : 'не виден'} в списке`, async () => {
+        const agent = await signInAs(expectation.level);
+
+        const response = await agent.get('/projects').expect(200);
+
+        expect(response.body).toHaveLength(expectation.listed ? 1 : 0);
+      });
+
+      it('управление доступами закрыто', async () => {
+        // Уровень доступа к проекту не даёт права управлять выдачами (спека 4.3).
+        const agent = await signInAs(expectation.level);
+
+        await agent.get(`/projects/${projectId}/grants`).expect(403);
+      });
+
+      it('журнал закрыт', async () => {
+        const agent = await signInAs(expectation.level);
+
+        await agent.get('/audit').expect(403);
+      });
+
+      it('список пользователей закрыт', async () => {
+        const agent = await signInAs(expectation.level);
+
+        await agent.get('/users').expect(403);
+      });
+    });
+  }
+
+  describe('проекция полей', () => {
+    it('на уровне метаданных назначение скрыто', async () => {
+      const agent = await signInAs(AccessLevel.Metadata);
+
+      const response = await agent.get(`/projects/${projectId}`).expect(200);
+
+      expect(response.body).not.toHaveProperty('purpose');
+    });
+
+    it('на уровне чтения назначение видно', async () => {
+      const agent = await signInAs(AccessLevel.Read);
+
+      const response = await agent.get(`/projects/${projectId}`).expect(200);
+
+      expect(response.body).toMatchObject({ purpose: 'Назначение' });
+    });
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test test/access-matrix`
+Expected: PASS, 26 тестов — 24 из матрицы (4 уровня × 6 проверок) и 2 на проекции.
+
+- [ ] **Step 3: Запустить всё**
+
+```bash
+pnpm --filter @cairn/shared build
+pnpm test
+pnpm typecheck
+```
+
+Expected: без ошибок. Прогон занимает минуты и требует работающего Docker.
+
+- [ ] **Step 4: Коммит**
+
+```bash
+git add apps/api/test
+git commit -m "Добавить матрицу доступа как набор тестов"
+```
+
+---
+
+**Результат чанка 11:** бэкенд этапа 1 готов целиком — все маршруты спеки 8 работают, приложение собирается и стартует, модель прав закреплена исполняемой таблицей. Следующий чанк начинает интерфейс.
