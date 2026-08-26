@@ -7958,3 +7958,1002 @@ git commit -m "Добавить команды консоли"
 ---
 
 **Результат чанка 9:** суперадмин управляет пользователями, первый администратор создаётся с консоли, потеря пароля или устройства со вторым фактором больше не запирает систему. Следующий чанк добавляет HTTP-слой проектов, выдач, пользователей и журнала.
+
+## Chunk 10: HTTP-слой проектов и выдач
+
+Результат чанка: проекты и доступы управляются по HTTP, каждое изменение попадает в журнал в одной транзакции с ним.
+
+### Task 33: Сервис проектов
+
+Репозиторий отвечает за данные и права, сервис — за журналирование. Разделение нужно, чтобы репозиторий оставался вызываемым из тестов и будущего MCP-сервера без обязательной записи в журнал.
+
+**Files:**
+- Create: `apps/api/src/projects/projects.service.ts`
+- Test: `apps/api/src/projects/projects.service.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/projects/projects.service.test.ts`**
+
+```typescript
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AccessService } from '../access/access.service';
+import { InsufficientLevelError } from '../access/access.errors';
+import type { RequestSubject } from '../access/access.types';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { ProjectsRepository } from './projects.repository';
+import { ProjectsService } from './projects.service';
+import { auditLog, grants, projects, subjects, users } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('ProjectsService', () => {
+  let testDb: TestDatabase;
+  let service: ProjectsService;
+  let subjectId: string;
+  let adminSubjectId: string;
+  let adminUserId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+
+    const access = new AccessService(testDb.db);
+    service = new ProjectsService(
+      testDb.db,
+      new ProjectsRepository(testDb.db, access),
+      new AuditService(),
+    );
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'подрядчик' })
+      .returning();
+    subjectId = subject!.id;
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'админ' })
+      .returning();
+    adminSubjectId = adminSubject!.id;
+
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({ subjectId: adminSubjectId, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+    adminUserId = admin!.id;
+  });
+
+  const contractor = (): RequestSubject => ({
+    id: subjectId,
+    kind: SubjectKind.User,
+    label: 'подрядчик',
+    isSuperadmin: false,
+    isRevoked: false,
+  });
+
+  const admin = (): RequestSubject => ({
+    id: adminSubjectId,
+    kind: SubjectKind.User,
+    label: 'админ',
+    isSuperadmin: true,
+    isRevoked: false,
+  });
+
+  describe('create', () => {
+    it('создаёт проект и пишет действие в журнал', async () => {
+      const created = await service.create(admin(), { name: 'Новый проект' });
+
+      const [entry] = await testDb.db.select().from(auditLog);
+
+      expect(created.name).toBe('Новый проект');
+      expect(entry?.action).toBe(AuditAction.ProjectCreated);
+      expect(entry?.projectId).toBe(created.id);
+    });
+
+    it('не создаёт проект без записи в журнал', async () => {
+      // Транзакция общая: либо есть и проект, и след, либо нет ничего (спека 7.3).
+      await service.create(admin(), { name: 'Новый проект' });
+
+      expect(await testDb.db.select().from(projects)).toHaveLength(1);
+      expect(await testDb.db.select().from(auditLog)).toHaveLength(1);
+    });
+
+    it('отказывает не-суперадмину и ничего не пишет в журнал', async () => {
+      await expect(service.create(contractor(), { name: 'Чужой' })).rejects.toBeInstanceOf(
+        InsufficientLevelError,
+      );
+
+      expect(await testDb.db.select().from(auditLog)).toHaveLength(0);
+    });
+  });
+
+  describe('update', () => {
+    it('изменяет проект и пишет действие в журнал', async () => {
+      const created = await service.create(admin(), { name: 'Проект' });
+      await testDb.db.insert(grants).values({
+        subjectId,
+        projectId: created.id,
+        section: Section.Info,
+        level: AccessLevel.Write,
+        grantedBy: adminUserId,
+      });
+
+      await service.update(contractor(), created.id, { name: 'Переименован' });
+
+      const [entry] = await testDb.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.ProjectUpdated));
+
+      expect(entry?.projectId).toBe(created.id);
+    });
+
+    it('записывает, какие поля изменились', async () => {
+      // Журнал должен отвечать на вопрос «что именно поменяли», иначе
+      // расследование инцидента упирается в пустую запись.
+      const created = await service.create(admin(), { name: 'Проект' });
+
+      await service.update(admin(), created.id, { name: 'Переименован', notes: 'заметка' });
+
+      const [entry] = await testDb.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.ProjectUpdated));
+
+      expect(entry?.metadata).toMatchObject({ fields: ['name', 'notes'] });
+    });
+
+    it('не записывает значения изменённых полей', async () => {
+      // В журнал попадают имена полей, но не содержимое: на будущих этапах
+      // тем же путём пойдут секреты (ТЗ 9).
+      const created = await service.create(admin(), { name: 'Проект' });
+
+      await service.update(admin(), created.id, { notes: 'секретная заметка' });
+
+      const [entry] = await testDb.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.ProjectUpdated));
+
+      expect(JSON.stringify(entry?.metadata)).not.toContain('секретная заметка');
+    });
+
+    it('при отказе в правах ничего не пишет в журнал', async () => {
+      const created = await service.create(admin(), { name: 'Проект' });
+      await testDb.db.delete(auditLog);
+
+      await expect(service.update(contractor(), created.id, { name: 'Чужое' })).rejects.toThrow();
+
+      expect(await testDb.db.select().from(auditLog)).toHaveLength(0);
+    });
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/projects/projects.service`
+Expected: FAIL — «Failed to resolve import "./projects.service"».
+
+- [ ] **Step 3: Создать `apps/api/src/projects/projects.service.ts`**
+
+```typescript
+import {
+  AuditSubjectKind,
+  type ProjectCreate,
+  type ProjectDetail,
+  type ProjectMetadata,
+  type ProjectUpdate,
+} from '@cairn/shared';
+import { Inject, Injectable } from '@nestjs/common';
+
+import type { RequestSubject } from '../access/access.types';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction, type AuditActor } from '../audit/audit.types';
+import { DATABASE } from '../db/db.module';
+import type { Database } from '../db/db.types';
+import type { Project } from '../db/schema';
+import { ProjectsRepository } from './projects.repository';
+
+/**
+ * Проекты: изменения вместе с журналированием.
+ *
+ * Права проверяет репозиторий — он единственный путь к данным (спека 5.4).
+ * Сервис добавляет к этому запись в журнал в той же транзакции (спека 7.3).
+ */
+@Injectable()
+export class ProjectsService {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly repository: ProjectsRepository,
+    private readonly audit: AuditService,
+  ) {}
+
+  /** Возвращает список видимых субъекту проектов. */
+  async list(subject: RequestSubject): Promise<ProjectMetadata[]> {
+    return this.repository.findVisible(subject);
+  }
+
+  /** Возвращает проект в проекции, соответствующей уровню доступа. */
+  async findById(
+    subject: RequestSubject,
+    projectId: string,
+  ): Promise<ProjectMetadata | ProjectDetail> {
+    return this.repository.findById(subject, projectId);
+  }
+
+  /** Создаёт проект. Право проверяет репозиторий. */
+  async create(subject: RequestSubject, input: ProjectCreate): Promise<Project> {
+    return this.db.transaction(async (tx) => {
+      const created = await this.repository.create(subject, tx, input);
+
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.ProjectCreated,
+        entityType: 'project',
+        entityId: created.id,
+        projectId: created.id,
+        metadata: { name: created.name },
+      });
+
+      return created;
+    });
+  }
+
+  /**
+   * Изменяет проект.
+   *
+   * В журнал попадают имена изменённых полей, но не их значения: на этапе 4
+   * тем же путём пойдут переменные окружения, и запись значений в журнал
+   * свела бы на нет их шифрование (ТЗ 9).
+   */
+  async update(
+    subject: RequestSubject,
+    projectId: string,
+    input: ProjectUpdate,
+  ): Promise<Project> {
+    return this.db.transaction(async (tx) => {
+      const updated = await this.repository.update(subject, tx, projectId, input);
+
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.ProjectUpdated,
+        entityType: 'project',
+        entityId: projectId,
+        projectId,
+        metadata: { fields: Object.keys(input) },
+      });
+
+      return updated;
+    });
+  }
+}
+
+/** Строит действующее лицо журнала из субъекта запроса. */
+function actorOf(subject: RequestSubject): AuditActor {
+  return {
+    kind: subject.kind as unknown as Exclude<AuditSubjectKind, AuditSubjectKind.System>,
+    id: subject.id,
+    label: subject.label,
+  };
+}
+```
+
+Приведение типа в `actorOf` нужно потому, что `SubjectKind` и `AuditSubjectKind` — намеренно разные перечисления (спека 4.7). Значения первых трёх вариантов совпадают, а `system` в субъекте запроса появиться не может: у действий с консоли запроса нет.
+
+- [ ] **Step 4: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/projects/projects.service`
+Expected: PASS, 7 тестов.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add apps/api/src/projects
+git commit -m "Добавить сервис проектов с журналированием"
+```
+
+---
+
+### Task 34: Контроллер проектов
+
+**Files:**
+- Create: `apps/api/src/projects/projects.controller.ts`, `apps/api/src/projects/projects.module.ts`
+- Test: `apps/api/test/projects.e2e.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/test/projects.e2e.test.ts`**
+
+Сквозной тест проверяет то, ради чего вся модель прав и существует: субъект без доступа не должен отличать закрытый проект от несуществующего.
+
+```typescript
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import cookieParser from 'cookie-parser';
+import { eq } from 'drizzle-orm';
+import request from 'supertest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuthModule } from '../src/auth/auth.module';
+import { PasswordService } from '../src/auth/password.service';
+import { DATABASE } from '../src/db/db.module';
+import { ProjectsModule } from '../src/projects/projects.module';
+import { grants, projects, subjects, users } from '../src/db/schema';
+import { startTestDatabase, type TestDatabase } from './db-fixture';
+
+describe('проекты по HTTP', () => {
+  let testDb: TestDatabase;
+  let app: INestApplication;
+  let projectId: string;
+  let contractorSubjectId: string;
+  let adminUserId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+
+    const moduleRef = await Test.createTestingModule({ imports: [AuthModule, ProjectsModule] })
+      .overrideProvider(DATABASE)
+      .useValue(testDb.db)
+      .compile();
+
+    app = moduleRef.createNestApplication();
+    app.use(cookieParser());
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const passwords = new PasswordService();
+    const passwordHash = await passwords.hash('очень длинный пароль');
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({
+        subjectId: adminSubject!.id,
+        email: 'admin@cairn.local',
+        passwordHash,
+        isSuperadmin: true,
+      })
+      .returning();
+    adminUserId = admin!.id;
+
+    const [contractorSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+    contractorSubjectId = contractorSubject!.id;
+    await testDb.db
+      .insert(users)
+      .values({ subjectId: contractorSubjectId, email: 'user@cairn.local', passwordHash });
+
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'proekt', name: 'Проект', purpose: 'Назначение' })
+      .returning();
+    projectId = project!.id;
+  });
+
+  async function signIn(email: string) {
+    const agent = request.agent(app.getHttpServer());
+
+    await agent.post('/auth/login').send({ email, password: 'очень длинный пароль' }).expect(200);
+
+    return agent;
+  }
+
+  async function grant(level: AccessLevel): Promise<void> {
+    await testDb.db.insert(grants).values({
+      subjectId: contractorSubjectId,
+      projectId,
+      section: Section.Info,
+      level,
+      grantedBy: adminUserId,
+    });
+  }
+
+  it('без доступа отвечает 404, а не 403', async () => {
+    // Существование проекта не раскрывается (ТЗ 4.2).
+    const agent = await signIn('user@cairn.local');
+
+    await agent.get(`/projects/${projectId}`).expect(404);
+  });
+
+  it('отвечает одинаково для закрытого и несуществующего проекта', async () => {
+    const agent = await signIn('user@cairn.local');
+
+    const closed = await agent.get(`/projects/${projectId}`);
+    const missing = await agent.get('/projects/00000000-0000-0000-0000-000000000000');
+
+    expect(closed.status).toBe(missing.status);
+  });
+
+  it('не показывает закрытый проект в списке', async () => {
+    const agent = await signIn('user@cairn.local');
+
+    const response = await agent.get('/projects').expect(200);
+
+    expect(response.body).toEqual([]);
+  });
+
+  it('на уровне метаданных не отдаёт назначение', async () => {
+    await grant(AccessLevel.Metadata);
+    const agent = await signIn('user@cairn.local');
+
+    const response = await agent.get(`/projects/${projectId}`).expect(200);
+
+    expect(response.body).not.toHaveProperty('purpose');
+  });
+
+  it('на уровне чтения отдаёт назначение', async () => {
+    await grant(AccessLevel.Read);
+    const agent = await signIn('user@cairn.local');
+
+    const response = await agent.get(`/projects/${projectId}`).expect(200);
+
+    expect(response.body).toMatchObject({ purpose: 'Назначение' });
+  });
+
+  it('на уровне чтения запрещает правку с кодом 403', async () => {
+    // Доступ есть, но уровень ниже нужного — отрицать существование нечего.
+    await grant(AccessLevel.Read);
+    const agent = await signIn('user@cairn.local');
+
+    await agent.patch(`/projects/${projectId}`).send({ name: 'Новое имя' }).expect(403);
+  });
+
+  it('на уровне записи разрешает правку', async () => {
+    await grant(AccessLevel.Write);
+    const agent = await signIn('user@cairn.local');
+
+    await agent.patch(`/projects/${projectId}`).send({ name: 'Новое имя' }).expect(200);
+
+    const [updated] = await testDb.db.select().from(projects).where(eq(projects.id, projectId));
+
+    expect(updated?.name).toBe('Новое имя');
+  });
+
+  it('создавать проект разрешает только суперадмину', async () => {
+    await grant(AccessLevel.Write);
+    const contractor = await signIn('user@cairn.local');
+
+    await contractor.post('/projects').send({ name: 'Чужой' }).expect(403);
+  });
+
+  it('суперадмину разрешает создание', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin.post('/projects').send({ name: 'Новый проект' }).expect(201);
+  });
+
+  it('суперадмин видит все проекты без выдач', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    const response = await admin.get('/projects').expect(200);
+
+    expect(response.body).toHaveLength(1);
+  });
+
+  it('без входа отвечает 401', async () => {
+    await request(app.getHttpServer()).get('/projects').expect(401);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test test/projects.e2e`
+Expected: FAIL — «Failed to resolve import "../src/projects/projects.module"».
+
+- [ ] **Step 3: Создать `apps/api/src/projects/projects.controller.ts`**
+
+```typescript
+import {
+  projectCreateSchema,
+  projectUpdateSchema,
+  type ProjectCreate,
+  type ProjectDetail,
+  type ProjectMetadata,
+  type ProjectUpdate,
+} from '@cairn/shared';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+
+import type { RequestSubject } from '../access/access.types';
+import { CurrentSubject } from '../auth/current-subject.decorator';
+import { SessionGuard } from '../auth/session.guard';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { ProjectsService } from './projects.service';
+
+/** Проекты и секция «Инфо» (спека 8). */
+@Controller('projects')
+@UseGuards(SessionGuard)
+export class ProjectsController {
+  constructor(private readonly projects: ProjectsService) {}
+
+  /** Список видимых проектов в проекции метаданных. */
+  @Get()
+  async list(@CurrentSubject() subject: RequestSubject): Promise<ProjectMetadata[]> {
+    return this.projects.list(subject);
+  }
+
+  /** Карточка проекта в проекции, соответствующей уровню доступа. */
+  @Get(':id')
+  async findById(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ProjectMetadata | ProjectDetail> {
+    return this.projects.findById(subject, id);
+  }
+
+  /**
+   * Создаёт проект.
+   *
+   * Право проверяет репозиторий: guard суперадмина здесь неприменим, потому
+   * что тот же контроллер обслуживает маршруты, доступные не только
+   * администратору (спека 4.4).
+   */
+  @Post()
+  async create(
+    @CurrentSubject() subject: RequestSubject,
+    @Body(new ZodValidationPipe(projectCreateSchema)) body: ProjectCreate,
+  ): Promise<ProjectMetadata | ProjectDetail> {
+    const created = await this.projects.create(subject, body);
+
+    return this.projects.findById(subject, created.id);
+  }
+
+  /** Правит поля паспорта. Требует уровень записи. */
+  @Patch(':id')
+  async update(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(projectUpdateSchema)) body: ProjectUpdate,
+  ): Promise<ProjectMetadata | ProjectDetail> {
+    await this.projects.update(subject, id, body);
+
+    return this.projects.findById(subject, id);
+  }
+}
+```
+
+`ParseUUIDPipe` отсекает некорректные идентификаторы до обращения к базе: без него запрос с произвольной строкой дошёл бы до PostgreSQL и вернул ошибку типа вместо `400`.
+
+- [ ] **Step 4: Создать `apps/api/src/projects/projects.module.ts`**
+
+```typescript
+import { Module } from '@nestjs/common';
+
+import { AccessModule } from '../access/access.module';
+import { AuditModule } from '../audit/audit.module';
+import { AuthModule } from '../auth/auth.module';
+import { DbModule } from '../db/db.module';
+import { ProjectsController } from './projects.controller';
+import { ProjectsRepository } from './projects.repository';
+import { ProjectsService } from './projects.service';
+
+/** Модуль проектов. */
+@Module({
+  imports: [DbModule, AccessModule, AuditModule, AuthModule],
+  controllers: [ProjectsController],
+  providers: [ProjectsRepository, ProjectsService],
+  exports: [ProjectsRepository, ProjectsService],
+})
+export class ProjectsModule {}
+```
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test test/projects.e2e`
+Expected: PASS, 11 тестов.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/projects apps/api/test
+git commit -m "Добавить контроллер проектов"
+```
+
+---
+
+### Task 35: Сервис и контроллер выдач доступа
+
+**Files:**
+- Create: `apps/api/src/grants/grants.service.ts`, `apps/api/src/grants/grants.controller.ts`, `apps/api/src/grants/grants.module.ts`
+- Test: `apps/api/test/grants.e2e.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/test/grants.e2e.test.ts`**
+
+```typescript
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import cookieParser from 'cookie-parser';
+import request from 'supertest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuthModule } from '../src/auth/auth.module';
+import { PasswordService } from '../src/auth/password.service';
+import { DATABASE } from '../src/db/db.module';
+import { GrantsModule } from '../src/grants/grants.module';
+import { grants, projects, subjects, users } from '../src/db/schema';
+import { startTestDatabase, type TestDatabase } from './db-fixture';
+
+describe('выдачи доступа по HTTP', () => {
+  let testDb: TestDatabase;
+  let app: INestApplication;
+  let projectId: string;
+  let contractorSubjectId: string;
+  let adminUserId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+
+    const moduleRef = await Test.createTestingModule({ imports: [AuthModule, GrantsModule] })
+      .overrideProvider(DATABASE)
+      .useValue(testDb.db)
+      .compile();
+
+    app = moduleRef.createNestApplication();
+    app.use(cookieParser());
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const passwordHash = await new PasswordService().hash('очень длинный пароль');
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'admin@cairn.local' })
+      .returning();
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({
+        subjectId: adminSubject!.id,
+        email: 'admin@cairn.local',
+        passwordHash,
+        isSuperadmin: true,
+      })
+      .returning();
+    adminUserId = admin!.id;
+
+    const [contractorSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+    contractorSubjectId = contractorSubject!.id;
+    await testDb.db
+      .insert(users)
+      .values({ subjectId: contractorSubjectId, email: 'user@cairn.local', passwordHash });
+
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'proekt', name: 'Проект' })
+      .returning();
+    projectId = project!.id;
+  });
+
+  async function signIn(email: string) {
+    const agent = request.agent(app.getHttpServer());
+
+    await agent.post('/auth/login').send({ email, password: 'очень длинный пароль' }).expect(200);
+
+    return agent;
+  }
+
+  it('суперадмин выдаёт доступ', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin
+      .put(`/projects/${projectId}/grants`)
+      .send({ subjectId: contractorSubjectId, section: Section.Info, level: AccessLevel.Read })
+      .expect(200);
+
+    expect(await testDb.db.select().from(grants)).toHaveLength(1);
+    expect(adminUserId).toBeDefined();
+  });
+
+  it('суперадмин отзывает доступ', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin
+      .put(`/projects/${projectId}/grants`)
+      .send({ subjectId: contractorSubjectId, section: Section.Info, level: AccessLevel.Read })
+      .expect(200);
+
+    await admin
+      .delete(`/projects/${projectId}/grants`)
+      .send({ subjectId: contractorSubjectId, section: Section.Info })
+      .expect(204);
+
+    expect(await testDb.db.select().from(grants)).toHaveLength(0);
+  });
+
+  it('не-суперадмину отказывает с кодом 403', async () => {
+    // Существование раздела администрирования секретом не является (спека 8).
+    const contractor = await signIn('user@cairn.local');
+
+    await contractor.get(`/projects/${projectId}/grants`).expect(403);
+  });
+
+  it('не позволяет субъекту с уровнем записи управлять выдачами', async () => {
+    // Иначе владелец доступа расширил бы его себе сам (спека 4.3).
+    await testDb.db.insert(grants).values({
+      subjectId: contractorSubjectId,
+      projectId,
+      section: Section.Info,
+      level: AccessLevel.Write,
+      grantedBy: adminUserId,
+    });
+    const contractor = await signIn('user@cairn.local');
+
+    await contractor
+      .put(`/projects/${projectId}/grants`)
+      .send({ subjectId: contractorSubjectId, section: Section.Docs, level: AccessLevel.Write })
+      .expect(403);
+  });
+
+  it('возвращает матрицу доступов', async () => {
+    const admin = await signIn('admin@cairn.local');
+    await admin
+      .put(`/projects/${projectId}/grants`)
+      .send({ subjectId: contractorSubjectId, section: Section.Info, level: AccessLevel.Read })
+      .expect(200);
+
+    const response = await admin.get(`/projects/${projectId}/grants`).expect(200);
+
+    expect(response.body).toHaveLength(1);
+    expect(response.body[0].levels[Section.Info]).toBe(AccessLevel.Read);
+  });
+
+  it('отвергает неизвестную секцию', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin
+      .put(`/projects/${projectId}/grants`)
+      .send({ subjectId: contractorSubjectId, section: 'выдумка', level: AccessLevel.Read })
+      .expect(400);
+  });
+
+  it('без входа отвечает 401', async () => {
+    await request(app.getHttpServer()).get(`/projects/${projectId}/grants`).expect(401);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test test/grants.e2e`
+Expected: FAIL — «Failed to resolve import "../src/grants/grants.module"».
+
+- [ ] **Step 3: Создать `apps/api/src/grants/grants.service.ts`**
+
+```typescript
+import { AuditSubjectKind, type GrantMatrixRow, type GrantRevoke, type GrantSet } from '@cairn/shared';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+
+import type { RequestSubject } from '../access/access.types';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction, type AuditActor } from '../audit/audit.types';
+import { DATABASE } from '../db/db.module';
+import type { Database } from '../db/db.types';
+import { users } from '../db/schema';
+import { GrantsRepository } from './grants.repository';
+
+/**
+ * Выдачи доступа вместе с журналированием.
+ *
+ * Право управлять выдачами принадлежит только суперадмину и проверяется
+ * guard'ом на контроллере (спека 4.3).
+ */
+@Injectable()
+export class GrantsService {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly repository: GrantsRepository,
+    private readonly audit: AuditService,
+  ) {}
+
+  /** Возвращает матрицу «субъект × секция» для проекта. */
+  async matrix(projectId: string): Promise<GrantMatrixRow[]> {
+    return this.repository.matrixForProject(projectId);
+  }
+
+  /** Устанавливает уровень доступа. */
+  async set(actor: RequestSubject, projectId: string, input: GrantSet): Promise<void> {
+    const grantedBy = await this.userIdOf(actor);
+
+    await this.db.transaction(async (tx) => {
+      await this.repository.set(tx, projectId, grantedBy, input);
+
+      await this.audit.record(tx, actorOf(actor), {
+        action: AuditAction.GrantCreated,
+        entityType: 'grant',
+        projectId,
+        metadata: { subjectId: input.subjectId, section: input.section, level: input.level },
+      });
+    });
+  }
+
+  /**
+   * Отзывает выдачу.
+   *
+   * Пишет в журнал только состоявшийся отзыв: запись о снятии права,
+   * которого не было, засоряет журнал и мешает расследованию.
+   */
+  async revoke(actor: RequestSubject, projectId: string, input: GrantRevoke): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const removed = await this.repository.revoke(tx, projectId, input);
+
+      if (!removed) {
+        return;
+      }
+
+      await this.audit.record(tx, actorOf(actor), {
+        action: AuditAction.GrantRevoked,
+        entityType: 'grant',
+        projectId,
+        metadata: { subjectId: input.subjectId, section: input.section },
+      });
+    });
+  }
+
+  /** Находит запись пользователя по субъекту: поле «кто выдал» ссылается на неё. */
+  private async userIdOf(subject: RequestSubject): Promise<string> {
+    const [user] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.subjectId, subject.id))
+      .limit(1);
+
+    if (!user) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return user.id;
+  }
+}
+
+/** Строит действующее лицо журнала из субъекта запроса. */
+function actorOf(subject: RequestSubject): AuditActor {
+  return {
+    kind: subject.kind as unknown as Exclude<AuditSubjectKind, AuditSubjectKind.System>,
+    id: subject.id,
+    label: subject.label,
+  };
+}
+```
+
+- [ ] **Step 4: Создать `apps/api/src/grants/grants.controller.ts`**
+
+```typescript
+import {
+  grantRevokeSchema,
+  grantSetSchema,
+  type GrantMatrixRow,
+  type GrantRevoke,
+  type GrantSet,
+} from '@cairn/shared';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
+
+import { SuperadminGuard } from '../access/superadmin.guard';
+import type { RequestSubject } from '../access/access.types';
+import { CurrentSubject } from '../auth/current-subject.decorator';
+import { SessionGuard } from '../auth/session.guard';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { GrantsService } from './grants.service';
+
+/**
+ * Управление доступами (спека 8).
+ *
+ * Весь контроллер закрыт guard'ом суперадмина: уровень доступа к самому
+ * проекту здесь роли не играет.
+ */
+@Controller('projects/:projectId/grants')
+@UseGuards(SessionGuard, SuperadminGuard)
+export class GrantsController {
+  constructor(private readonly grants: GrantsService) {}
+
+  /** Матрица «субъект × секция» по проекту. */
+  @Get()
+  async matrix(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ): Promise<GrantMatrixRow[]> {
+    return this.grants.matrix(projectId);
+  }
+
+  /** Устанавливает уровень доступа для пары «субъект × секция». */
+  @Put()
+  @HttpCode(200)
+  async set(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body(new ZodValidationPipe(grantSetSchema)) body: GrantSet,
+  ): Promise<void> {
+    await this.grants.set(subject, projectId, body);
+  }
+
+  /** Отзывает выдачу по паре «субъект × секция». */
+  @Delete()
+  @HttpCode(204)
+  async revoke(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body(new ZodValidationPipe(grantRevokeSchema)) body: GrantRevoke,
+  ): Promise<void> {
+    await this.grants.revoke(subject, projectId, body);
+  }
+}
+```
+
+- [ ] **Step 5: Создать `apps/api/src/grants/grants.module.ts`**
+
+```typescript
+import { Module } from '@nestjs/common';
+
+import { AccessModule } from '../access/access.module';
+import { AuditModule } from '../audit/audit.module';
+import { AuthModule } from '../auth/auth.module';
+import { DbModule } from '../db/db.module';
+import { GrantsController } from './grants.controller';
+import { GrantsRepository } from './grants.repository';
+import { GrantsService } from './grants.service';
+
+/** Модуль выдач доступа. */
+@Module({
+  imports: [DbModule, AccessModule, AuditModule, AuthModule],
+  controllers: [GrantsController],
+  providers: [GrantsRepository, GrantsService],
+  exports: [GrantsRepository, GrantsService],
+})
+export class GrantsModule {}
+```
+
+- [ ] **Step 6: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test test/grants.e2e`
+Expected: PASS, 7 тестов.
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add apps/api/src/grants apps/api/test
+git commit -m "Добавить контроллер выдач доступа"
+```
+
+---
+
+**Результат чанка 10:** проекты и доступы управляются по HTTP, коды ответов соответствуют модели прав, каждое изменение попадает в журнал вместе с самим изменением. Следующий чанк добавляет оставшиеся маршруты и сводит матрицу доступа в единый набор тестов.
