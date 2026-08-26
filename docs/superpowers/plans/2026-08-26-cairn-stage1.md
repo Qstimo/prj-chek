@@ -3989,3 +3989,1322 @@ git commit -m "Добавить репозиторий выдач доступа
 ---
 
 **Результат чанка 4:** модель доступа работает и покрыта тестами, журнал пишется в одной транзакции с действием, репозитории не отдают данные без субъекта. Следующий чанк добавляет аутентификацию и HTTP-слой.
+## Chunk 6: Аутентификация
+
+Результат чанка: вход по паролю со вторым фактором работает, сессии отзываются мгновенно, перебор ограничен.
+
+### Task 20: Хэширование паролей
+
+**Files:**
+- Create: `apps/api/src/auth/password.service.ts`
+- Test: `apps/api/src/auth/password.service.test.ts`
+
+- [ ] **Step 1: Установить argon2**
+
+Run: `pnpm --filter @cairn/api add argon2`
+Expected: пакет добавлен в `dependencies`.
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/auth/password.service.test.ts`**
+
+```typescript
+import { describe, expect, it } from 'vitest';
+
+import { PasswordService } from './password.service';
+
+describe('PasswordService', () => {
+  const service = new PasswordService();
+
+  it('проверяет верный пароль', async () => {
+    const hash = await service.hash('верный-пароль');
+
+    expect(await service.verify(hash, 'верный-пароль')).toBe(true);
+  });
+
+  it('отвергает неверный пароль', async () => {
+    const hash = await service.hash('верный-пароль');
+
+    expect(await service.verify(hash, 'неверный-пароль')).toBe(false);
+  });
+
+  it('даёт разные хэши для одного пароля', async () => {
+    // Соль генерируется на каждый вызов: одинаковые хэши выдали бы
+    // совпадающие пароли разных пользователей.
+    expect(await service.hash('пароль')).not.toBe(await service.hash('пароль'));
+  });
+
+  it('использует argon2id', async () => {
+    expect(await service.hash('пароль')).toMatch(/^\$argon2id\$/);
+  });
+
+  it('работает с кириллицей и длинными паролями', async () => {
+    const password = 'очень длинный пароль с пробелами и символами №1!';
+    const hash = await service.hash(password);
+
+    expect(await service.verify(hash, password)).toBe(true);
+  });
+
+  it('возвращает false на испорченном хэше вместо исключения', async () => {
+    // Испорченный хэш в базе не должен ронять вход пятисотой ошибкой.
+    expect(await service.verify('не хэш', 'пароль')).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/auth/password`
+Expected: FAIL — «Failed to resolve import "./password.service"».
+
+- [ ] **Step 4: Создать `apps/api/src/auth/password.service.ts`**
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import argon2 from 'argon2';
+
+/** Хэширование и проверка паролей (спека 4.2). */
+@Injectable()
+export class PasswordService {
+  /** Хэширует пароль. Соль генерируется на каждый вызов самим argon2. */
+  async hash(password: string): Promise<string> {
+    return argon2.hash(password, { type: argon2.argon2id });
+  }
+
+  /**
+   * Проверяет пароль.
+   *
+   * Возвращает `false` при испорченном хэше, а не бросает исключение:
+   * повреждённая запись в базе не должна превращать неудачный вход
+   * в ошибку сервера, по которой отличают существующего пользователя.
+   */
+  async verify(hash: string, password: string): Promise<boolean> {
+    try {
+      return await argon2.verify(hash, password);
+    } catch {
+      return false;
+    }
+  }
+}
+```
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/auth/password`
+Expected: PASS, 6 тестов.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/auth apps/api/package.json pnpm-lock.yaml
+git commit -m "Добавить хэширование паролей"
+```
+
+---
+
+### Task 21: Второй фактор
+
+Секрет TOTP шифруется тем же сервисом, что и будущие значения переменных: механизм отрабатывается здесь, до появления настоящих секретов (спека 4.9).
+
+**Files:**
+- Create: `apps/api/src/auth/totp.service.ts`
+- Test: `apps/api/src/auth/totp.service.test.ts`
+
+- [ ] **Step 1: Установить otplib**
+
+Run: `pnpm --filter @cairn/api add otplib`
+Expected: пакет добавлен в `dependencies`.
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/auth/totp.service.test.ts`**
+
+```typescript
+import { randomBytes } from 'node:crypto';
+
+import { authenticator } from 'otplib';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { CryptoService } from '../crypto/crypto.service';
+import { TotpService } from './totp.service';
+
+describe('TotpService', () => {
+  let crypto: CryptoService;
+  let service: TotpService;
+
+  beforeEach(() => {
+    crypto = new CryptoService(randomBytes(32).toString('base64'));
+    service = new TotpService(crypto);
+  });
+
+  describe('создание секрета', () => {
+    it('возвращает зашифрованный секрет', () => {
+      const { encryptedSecret } = service.createSecret('user@cairn.local');
+
+      // Секрет не должен храниться открытым: утечка базы не даёт второго фактора.
+      expect(encryptedSecret.startsWith('v1:')).toBe(true);
+    });
+
+    it('возвращает ссылку для приложения-аутентификатора', () => {
+      const { keyUri } = service.createSecret('user@cairn.local');
+
+      expect(keyUri).toMatch(/^otpauth:\/\/totp\//);
+      expect(keyUri).toContain('CAIRN');
+    });
+
+    it('даёт разные секреты при каждом вызове', () => {
+      const first = service.createSecret('user@cairn.local');
+      const second = service.createSecret('user@cairn.local');
+
+      expect(first.encryptedSecret).not.toBe(second.encryptedSecret);
+    });
+  });
+
+  describe('проверка кода', () => {
+    it('принимает верный код', () => {
+      const { encryptedSecret, secret } = service.createSecret('user@cairn.local');
+      const code = authenticator.generate(secret);
+
+      expect(service.verify(encryptedSecret, code)).toBe(true);
+    });
+
+    it('отвергает неверный код', () => {
+      const { encryptedSecret } = service.createSecret('user@cairn.local');
+
+      expect(service.verify(encryptedSecret, '000000')).toBe(false);
+    });
+
+    it('отвергает код от другого секрета', () => {
+      const first = service.createSecret('user@cairn.local');
+      const second = service.createSecret('other@cairn.local');
+      const code = authenticator.generate(second.secret);
+
+      expect(service.verify(first.encryptedSecret, code)).toBe(false);
+    });
+
+    it('возвращает false, если секрет не расшифровывается', () => {
+      // Смена ключа шифрования не должна ронять вход пятисотой ошибкой.
+      expect(service.verify('v1:aaaa:bbbb:cccc', '123456')).toBe(false);
+    });
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/auth/totp`
+Expected: FAIL — «Failed to resolve import "./totp.service"».
+
+- [ ] **Step 4: Создать `apps/api/src/auth/totp.service.ts`**
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { authenticator } from 'otplib';
+
+import { CryptoService } from '../crypto/crypto.service';
+
+/** Новый секрет второго фактора. */
+export interface CreatedTotpSecret {
+  /** Секрет в открытом виде. Показывается пользователю один раз и не хранится. */
+  secret: string;
+  /** Секрет для хранения в базе. */
+  encryptedSecret: string;
+  /** Ссылка для приложения-аутентификатора. */
+  keyUri: string;
+}
+
+/**
+ * Второй фактор аутентификации (спека 6.4).
+ *
+ * Секрет хранится только зашифрованным: при утечке базы одного пароля
+ * по-прежнему недостаточно для входа.
+ */
+@Injectable()
+export class TotpService {
+  constructor(private readonly crypto: CryptoService) {}
+
+  /** Создаёт секрет и ссылку для привязки приложения. */
+  createSecret(email: string): CreatedTotpSecret {
+    const secret = authenticator.generateSecret();
+
+    return {
+      secret,
+      encryptedSecret: this.crypto.encrypt(secret),
+      keyUri: authenticator.keyuri(email, ISSUER, secret),
+    };
+  }
+
+  /**
+   * Проверяет код.
+   *
+   * Возвращает `false`, если секрет не расшифровывается: смена ключа
+   * шифрования должна выглядеть как неверный код, а не как отказ сервера.
+   */
+  verify(encryptedSecret: string, code: string): boolean {
+    try {
+      return authenticator.verify({ token: code, secret: this.crypto.decrypt(encryptedSecret) });
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Название системы в приложении-аутентификаторе. */
+const ISSUER = 'CAIRN';
+```
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/auth/totp`
+Expected: PASS, 7 тестов.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/auth apps/api/package.json pnpm-lock.yaml
+git commit -m "Добавить второй фактор аутентификации"
+```
+
+---
+
+### Task 22: Токены и репозиторий сессий
+
+Токены сессий хэшируются sha256, а не argon2: у случайного 32-байтного токена нет словаря для перебора, а argon2 на каждом запросе стоил бы сотни миллисекунд.
+
+**Files:**
+- Create: `apps/api/src/auth/token.ts`, `apps/api/src/auth/sessions.repository.ts`
+- Test: `apps/api/src/auth/token.test.ts`, `apps/api/src/auth/sessions.repository.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/auth/token.test.ts`**
+
+```typescript
+import { describe, expect, it } from 'vitest';
+
+import { generateToken, hashToken } from './token';
+
+describe('generateToken', () => {
+  it('даёт разные токены', () => {
+    expect(generateToken()).not.toBe(generateToken());
+  });
+
+  it('годится для передачи в cookie и ссылке', () => {
+    // base64url без символов, требующих экранирования в URL.
+    expect(generateToken()).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it('содержит не меньше 32 байт энтропии', () => {
+    expect(generateToken().length).toBeGreaterThanOrEqual(43);
+  });
+});
+
+describe('hashToken', () => {
+  it('даёт одинаковый хэш для одного токена', () => {
+    const token = generateToken();
+
+    expect(hashToken(token)).toBe(hashToken(token));
+  });
+
+  it('даёт разные хэши для разных токенов', () => {
+    expect(hashToken(generateToken())).not.toBe(hashToken(generateToken()));
+  });
+
+  it('не содержит исходный токен', () => {
+    const token = generateToken();
+
+    expect(hashToken(token)).not.toContain(token);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/auth/token`
+Expected: FAIL — «Failed to resolve import "./token"».
+
+- [ ] **Step 3: Создать `apps/api/src/auth/token.ts`**
+
+```typescript
+import { createHash, randomBytes } from 'node:crypto';
+
+/**
+ * Создаёт случайный токен для сессии или одноразовой ссылки.
+ *
+ * Кодировка base64url: токен попадает и в cookie, и в адрес ссылки,
+ * а значит не должен требовать экранирования.
+ */
+export function generateToken(): string {
+  return randomBytes(TOKEN_BYTES).toString('base64url');
+}
+
+/**
+ * Хэширует токен для хранения в базе.
+ *
+ * Используется sha256, а не argon2: токен случаен и достаточно длинен,
+ * перебирать его нечем, а argon2 на каждом запросе стоил бы сотни
+ * миллисекунд. Медленный хэш нужен паролям, которые люди выбирают сами.
+ */
+export function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+/** Длина токена в байтах до кодирования. */
+const TOKEN_BYTES = 32;
+```
+
+- [ ] **Step 4: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/auth/token`
+Expected: PASS, 6 тестов.
+
+- [ ] **Step 5: Написать падающий тест `apps/api/src/auth/sessions.repository.test.ts`**
+
+```typescript
+import { SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { SessionsRepository } from './sessions.repository';
+import { generateToken } from './token';
+import { sessions, subjects } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('SessionsRepository', () => {
+  let testDb: TestDatabase;
+  let repository: SessionsRepository;
+  let subjectId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    repository = new SessionsRepository(testDb.db);
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'пользователь' })
+      .returning();
+    subjectId = subject!.id;
+  });
+
+  describe('create', () => {
+    it('возвращает токен и не хранит его открытым', async () => {
+      const token = await repository.create(testDb.db, subjectId, {});
+
+      const [stored] = await testDb.db.select().from(sessions);
+
+      expect(stored?.tokenHash).not.toBe(token);
+    });
+
+    it('сохраняет источник запроса', async () => {
+      await repository.create(testDb.db, subjectId, { ip: '10.0.0.1', userAgent: 'браузер' });
+
+      const [stored] = await testDb.db.select().from(sessions);
+
+      expect(stored?.ip).toBe('10.0.0.1');
+      expect(stored?.userAgent).toBe('браузер');
+    });
+  });
+
+  describe('findActive', () => {
+    it('находит живую сессию по токену', async () => {
+      const token = await repository.create(testDb.db, subjectId, {});
+
+      expect(await repository.findActive(token)).toMatchObject({ subjectId });
+    });
+
+    it('не находит по неизвестному токену', async () => {
+      expect(await repository.findActive(generateToken())).toBeNull();
+    });
+
+    it('не находит отозванную сессию', async () => {
+      const token = await repository.create(testDb.db, subjectId, {});
+      await repository.revoke(testDb.db, token);
+
+      expect(await repository.findActive(token)).toBeNull();
+    });
+
+    it('не находит истёкшую сессию', async () => {
+      const token = await repository.create(testDb.db, subjectId, {}, new Date(Date.now() - 1000));
+
+      expect(await repository.findActive(token)).toBeNull();
+    });
+  });
+
+  describe('revokeAllForSubject', () => {
+    it('завершает все сессии субъекта и возвращает их число', async () => {
+      // Отзыв субъекта обязан немедленно закрывать доступ (спека 4.5).
+      await repository.create(testDb.db, subjectId, {});
+      await repository.create(testDb.db, subjectId, {});
+
+      expect(await repository.revokeAllForSubject(testDb.db, subjectId)).toBe(2);
+    });
+
+    it('не трогает сессии других субъектов', async () => {
+      const [other] = await testDb.db
+        .insert(subjects)
+        .values({ kind: SubjectKind.User, label: 'другой' })
+        .returning();
+      const otherToken = await repository.create(testDb.db, other!.id, {});
+      await repository.create(testDb.db, subjectId, {});
+
+      await repository.revokeAllForSubject(testDb.db, subjectId);
+
+      expect(await repository.findActive(otherToken)).not.toBeNull();
+    });
+
+    it('не считает уже отозванные сессии повторно', async () => {
+      const token = await repository.create(testDb.db, subjectId, {});
+      await repository.revoke(testDb.db, token);
+
+      expect(await repository.revokeAllForSubject(testDb.db, subjectId)).toBe(0);
+    });
+  });
+});
+```
+
+- [ ] **Step 6: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/auth/sessions`
+Expected: FAIL — «Failed to resolve import "./sessions.repository"».
+
+- [ ] **Step 7: Создать `apps/api/src/auth/sessions.repository.ts`**
+
+```typescript
+import { Inject, Injectable } from '@nestjs/common';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+
+import { DATABASE } from '../db/db.module';
+import type { Database, Executor } from '../db/db.types';
+import { sessions, type Session } from '../db/schema';
+import { generateToken, hashToken } from './token';
+
+/** Сведения об источнике запроса, сохраняемые в сессии. */
+export interface SessionOrigin {
+  ip?: string;
+  userAgent?: string;
+}
+
+/**
+ * Сессии пользователей.
+ *
+ * Хранятся в базе ради мгновенного отзыва: для системы с секретами
+ * отозвать доступ нужно немедленно (спека 4.5).
+ */
+@Injectable()
+export class SessionsRepository {
+  constructor(@Inject(DATABASE) private readonly db: Database) {}
+
+  /**
+   * Создаёт сессию и возвращает токен в открытом виде.
+   *
+   * Открытый токен существует только в этом возвращаемом значении и в cookie
+   * браузера; в базу попадает лишь его хэш.
+   */
+  async create(
+    tx: Executor,
+    subjectId: string,
+    origin: SessionOrigin,
+    expiresAt: Date = new Date(Date.now() + SESSION_TTL_MS),
+  ): Promise<string> {
+    const token = generateToken();
+
+    await tx.insert(sessions).values({
+      subjectId,
+      tokenHash: hashToken(token),
+      expiresAt,
+      ip: origin.ip ?? null,
+      userAgent: origin.userAgent ?? null,
+    });
+
+    return token;
+  }
+
+  /** Находит живую сессию по токену: не отозванную и не истёкшую. */
+  async findActive(token: string): Promise<Session | null> {
+    const [session] = await this.db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.tokenHash, hashToken(token)),
+          isNull(sessions.revokedAt),
+          gt(sessions.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    return session ?? null;
+  }
+
+  /** Отзывает одну сессию. */
+  async revoke(tx: Executor, token: string): Promise<void> {
+    await tx
+      .update(sessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(sessions.tokenHash, hashToken(token)), isNull(sessions.revokedAt)));
+  }
+
+  /**
+   * Отзывает все живые сессии субъекта и возвращает их число.
+   *
+   * Число попадает в журнал: без него из записи не видно, был ли у
+   * отозванного субъекта активный доступ в момент отзыва (спека 7.2).
+   */
+  async revokeAllForSubject(tx: Executor, subjectId: string): Promise<number> {
+    const revoked = await tx
+      .update(sessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(sessions.subjectId, subjectId), isNull(sessions.revokedAt)))
+      .returning({ id: sessions.id });
+
+    return revoked.length;
+  }
+
+  /**
+   * Отмечает активность сессии.
+   *
+   * Обновление реже раза в минуту: писать в базу на каждом запросе
+   * ради поля «последняя активность» не стоит.
+   */
+  async touch(sessionId: string): Promise<void> {
+    await this.db
+      .update(sessions)
+      .set({ lastSeenAt: new Date() })
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          sql`${sessions.lastSeenAt} < now() - interval '1 minute'`,
+        ),
+      );
+  }
+}
+
+/** Срок жизни сессии — 30 дней (спека 4.5). */
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+```
+
+- [ ] **Step 8: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/auth`
+Expected: PASS, 22 теста.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/api/src/auth
+git commit -m "Добавить токены и репозиторий сессий"
+```
+
+---
+
+### Task 23: Ограничение попыток входа
+
+**Files:**
+- Create: `apps/api/src/auth/login-attempts.service.ts`
+- Test: `apps/api/src/auth/login-attempts.service.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/auth/login-attempts.service.test.ts`**
+
+```typescript
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { LoginAttemptsService } from './login-attempts.service';
+
+describe('LoginAttemptsService', () => {
+  let service: LoginAttemptsService;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    service = new LoginAttemptsService();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function failTenTimes(email = 'user@cairn.local', ip = '10.0.0.1'): void {
+    for (let index = 0; index < 10; index += 1) {
+      service.registerFailure(email, ip);
+    }
+  }
+
+  it('пропускает первую попытку', () => {
+    expect(service.isBlocked('user@cairn.local', '10.0.0.1')).toBe(false);
+  });
+
+  it('блокирует после десяти неудач', () => {
+    failTenTimes();
+
+    expect(service.isBlocked('user@cairn.local', '10.0.0.1')).toBe(true);
+  });
+
+  it('не блокирует на девятой неудаче', () => {
+    for (let index = 0; index < 9; index += 1) {
+      service.registerFailure('user@cairn.local', '10.0.0.1');
+    }
+
+    expect(service.isBlocked('user@cairn.local', '10.0.0.1')).toBe(false);
+  });
+
+  it('не блокирует тот же адрес с другого источника', () => {
+    // Составной ключ: иначе перебор с чужой машины закрывал бы вход
+    // владельцу учётной записи (спека 6.2).
+    failTenTimes('user@cairn.local', '10.0.0.1');
+
+    expect(service.isBlocked('user@cairn.local', '10.0.0.2')).toBe(false);
+  });
+
+  it('не блокирует другой адрес с того же источника', () => {
+    failTenTimes('user@cairn.local', '10.0.0.1');
+
+    expect(service.isBlocked('other@cairn.local', '10.0.0.1')).toBe(false);
+  });
+
+  it('снимает блокировку через пятнадцать минут', () => {
+    failTenTimes();
+
+    vi.advanceTimersByTime(15 * 60 * 1000 + 1);
+
+    expect(service.isBlocked('user@cairn.local', '10.0.0.1')).toBe(false);
+  });
+
+  it('удерживает блокировку до истечения срока', () => {
+    failTenTimes();
+
+    vi.advanceTimersByTime(14 * 60 * 1000);
+
+    expect(service.isBlocked('user@cairn.local', '10.0.0.1')).toBe(true);
+  });
+
+  it('сбрасывает счётчик при успешном входе', () => {
+    for (let index = 0; index < 9; index += 1) {
+      service.registerFailure('user@cairn.local', '10.0.0.1');
+    }
+    service.registerSuccess('user@cairn.local', '10.0.0.1');
+    service.registerFailure('user@cairn.local', '10.0.0.1');
+
+    expect(service.isBlocked('user@cairn.local', '10.0.0.1')).toBe(false);
+  });
+
+  it('не различает регистр адреса', () => {
+    failTenTimes('User@Cairn.Local', '10.0.0.1');
+
+    expect(service.isBlocked('user@cairn.local', '10.0.0.1')).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/auth/login-attempts`
+Expected: FAIL — «Failed to resolve import "./login-attempts.service"».
+
+- [ ] **Step 3: Создать `apps/api/src/auth/login-attempts.service.ts`**
+
+```typescript
+import { Injectable } from '@nestjs/common';
+
+/**
+ * Ограничение перебора паролей (спека 6.2).
+ *
+ * Ключ составной — «адрес пользователя + адрес источника». Счётчик по одному
+ * лишь адресу пользователя дал бы вектор отказа в обслуживании: зная почту
+ * суперадмина, достаточно раз в четверть часа делать десяток неверных
+ * попыток, чтобы держать его вне системы.
+ *
+ * Состояние хранится в памяти процесса: при перезапуске счётчики обнуляются,
+ * и это приемлемо — защита рассчитана на автоматический перебор, а не на
+ * целенаправленную атаку, от которой защищает второй фактор. При добавлении
+ * второго экземпляра `api` счётчик потребуется вынести в общее хранилище.
+ */
+@Injectable()
+export class LoginAttemptsService {
+  private readonly failures = new Map<string, number[]>();
+
+  /** Проверяет, исчерпан ли лимит попыток для пары. */
+  isBlocked(email: string, ip: string): boolean {
+    return this.recentFailures(buildKey(email, ip)).length >= MAX_FAILURES;
+  }
+
+  /** Отмечает неудачную попытку. */
+  registerFailure(email: string, ip: string): void {
+    const key = buildKey(email, ip);
+
+    this.failures.set(key, [...this.recentFailures(key), Date.now()]);
+  }
+
+  /** Сбрасывает счётчик после успешного входа. */
+  registerSuccess(email: string, ip: string): void {
+    this.failures.delete(buildKey(email, ip));
+  }
+
+  /** Возвращает попытки, попадающие в текущее окно, попутно отбрасывая старые. */
+  private recentFailures(key: string): number[] {
+    const threshold = Date.now() - WINDOW_MS;
+    const recent = (this.failures.get(key) ?? []).filter((at) => at > threshold);
+
+    if (recent.length === 0) {
+      this.failures.delete(key);
+    } else {
+      this.failures.set(key, recent);
+    }
+
+    return recent;
+  }
+}
+
+/** Строит ключ счётчика. Регистр адреса не различается. */
+function buildKey(email: string, ip: string): string {
+  return `${email.toLowerCase()}|${ip}`;
+}
+
+/** Порог блокировки. */
+const MAX_FAILURES = 10;
+
+/** Окно наблюдения и срок блокировки — 15 минут. */
+const WINDOW_MS = 15 * 60 * 1000;
+```
+
+- [ ] **Step 4: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/auth/login-attempts`
+Expected: PASS, 9 тестов.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add apps/api/src/auth
+git commit -m "Добавить ограничение попыток входа"
+```
+
+---
+
+### Task 24: Вход по паролю
+
+Самая ответственная задача чанка: здесь сходятся требования спеки 6.1 и 6.2 — двухшаговый вход и неразличимость четырёх состояний отказа.
+
+**Files:**
+- Create: `apps/api/src/auth/auth.types.ts`, `apps/api/src/auth/auth.service.ts`
+- Test: `apps/api/src/auth/auth.service.test.ts`
+
+- [ ] **Step 1: Создать `apps/api/src/auth/auth.types.ts`**
+
+```typescript
+/**
+ * Итог проверки пароля.
+ *
+ * Размеченное объединение, а не необязательные поля: вызывающий код обязан
+ * различить сессию и челлендж, и типы должны его к этому принуждать.
+ */
+export type LoginOutcome =
+  | { kind: 'session'; token: string }
+  | { kind: 'totp_required'; challengeToken: string };
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/auth/auth.service.test.ts`**
+
+```typescript
+import { AuditSubjectKind, SubjectKind } from '@cairn/shared';
+import { randomBytes } from 'node:crypto';
+
+import { UnauthorizedException } from '@nestjs/common';
+import { authenticator } from 'otplib';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { CryptoService } from '../crypto/crypto.service';
+import { AuthService } from './auth.service';
+import { LoginAttemptsService } from './login-attempts.service';
+import { PasswordService } from './password.service';
+import { SessionsRepository } from './sessions.repository';
+import { TotpService } from './totp.service';
+import { auditLog, subjects, users } from '../db/schema';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+const ORIGIN = { ip: '10.0.0.1', userAgent: 'браузер' };
+
+describe('AuthService.login', () => {
+  let testDb: TestDatabase;
+  let service: AuthService;
+  let totp: TotpService;
+  let passwords: PasswordService;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    passwords = new PasswordService();
+    totp = new TotpService(new CryptoService(randomBytes(32).toString('base64')));
+    service = new AuthService(
+      testDb.db,
+      passwords,
+      totp,
+      new SessionsRepository(testDb.db),
+      new LoginAttemptsService(),
+      new AuditService(),
+    );
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+  });
+
+  async function createUser(options: { password?: string; withTotp?: boolean } = {}) {
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+
+    const secret = options.withTotp ? totp.createSecret('user@cairn.local') : null;
+
+    const [user] = await testDb.db
+      .insert(users)
+      .values({
+        subjectId: subject!.id,
+        email: 'user@cairn.local',
+        passwordHash: options.password ? await passwords.hash(options.password) : null,
+        totpSecretEncrypted: secret?.encryptedSecret ?? null,
+        isTotpEnabled: Boolean(secret),
+      })
+      .returning();
+
+    return { user: user!, subject: subject!, secret };
+  }
+
+  it('выдаёт сессию при верном пароле без второго фактора', async () => {
+    await createUser({ password: 'пароль' });
+
+    const outcome = await service.login('user@cairn.local', 'пароль', ORIGIN);
+
+    expect(outcome.kind).toBe('session');
+  });
+
+  it('выдаёт челлендж при включённом втором факторе', async () => {
+    await createUser({ password: 'пароль', withTotp: true });
+
+    const outcome = await service.login('user@cairn.local', 'пароль', ORIGIN);
+
+    expect(outcome.kind).toBe('totp_required');
+  });
+
+  it('отвергает неверный пароль', async () => {
+    await createUser({ password: 'пароль' });
+
+    await expect(service.login('user@cairn.local', 'не тот', ORIGIN)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('одинаково отвечает на несуществующий адрес', async () => {
+    // Различие в ответах позволило бы перебором выяснить состав
+    // пользователей (спека 6.2).
+    await createUser({ password: 'пароль' });
+
+    const wrongPassword = await service
+      .login('user@cairn.local', 'не тот', ORIGIN)
+      .catch((error: Error) => error.message);
+    const unknownEmail = await service
+      .login('никого@cairn.local', 'не тот', ORIGIN)
+      .catch((error: Error) => error.message);
+
+    expect(wrongPassword).toBe(unknownEmail);
+  });
+
+  it('одинаково отвечает пользователю без действующего пароля', async () => {
+    await createUser();
+
+    const noPassword = await service
+      .login('user@cairn.local', 'любой', ORIGIN)
+      .catch((error: Error) => error.message);
+    const unknownEmail = await service
+      .login('никого@cairn.local', 'любой', ORIGIN)
+      .catch((error: Error) => error.message);
+
+    expect(noPassword).toBe(unknownEmail);
+  });
+
+  it('отказывает отозванному субъекту', async () => {
+    const { subject } = await createUser({ password: 'пароль' });
+    await testDb.db.update(subjects).set({ revokedAt: new Date() });
+
+    await expect(service.login('user@cairn.local', 'пароль', ORIGIN)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(subject.id).toBeDefined();
+  });
+
+  it('блокирует после десяти неудач и отвечает так же, как при неверном пароле', async () => {
+    await createUser({ password: 'пароль' });
+
+    for (let index = 0; index < 10; index += 1) {
+      await service.login('user@cairn.local', 'не тот', ORIGIN).catch(() => undefined);
+    }
+
+    const blocked = await service
+      .login('user@cairn.local', 'пароль', ORIGIN)
+      .catch((error: Error) => error.message);
+    const unknownEmail = await service
+      .login('никого@cairn.local', 'любой', { ip: '10.0.0.9' })
+      .catch((error: Error) => error.message);
+
+    expect(blocked).toBe(unknownEmail);
+  });
+
+  it('пишет успешный вход в журнал', async () => {
+    await createUser({ password: 'пароль' });
+
+    await service.login('user@cairn.local', 'пароль', ORIGIN);
+
+    const [entry] = await testDb.db.select().from(auditLog);
+
+    expect(entry?.action).toBe(AuditAction.LoginSucceeded);
+    expect(entry?.subjectKind).toBe(AuditSubjectKind.User);
+  });
+
+  it('пишет неудачную попытку в журнал', async () => {
+    await createUser({ password: 'пароль' });
+
+    await service.login('user@cairn.local', 'не тот', ORIGIN).catch(() => undefined);
+
+    const [entry] = await testDb.db.select().from(auditLog);
+
+    expect(entry?.action).toBe(AuditAction.LoginFailed);
+  });
+
+  it('не пишет в журнал попытку с несуществующим адресом', async () => {
+    // Субъекта нет, а запись вида system исказила бы картину: журнал
+    // фиксирует действия над системой, а не любой шум на входе.
+    await service.login('никого@cairn.local', 'любой', ORIGIN).catch(() => undefined);
+
+    expect(await testDb.db.select().from(auditLog)).toHaveLength(0);
+  });
+});
+
+describe('AuthService.verifyTotp', () => {
+  let testDb: TestDatabase;
+  let service: AuthService;
+  let totp: TotpService;
+  let passwords: PasswordService;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    passwords = new PasswordService();
+    totp = new TotpService(new CryptoService(randomBytes(32).toString('base64')));
+    service = new AuthService(
+      testDb.db,
+      passwords,
+      totp,
+      new SessionsRepository(testDb.db),
+      new LoginAttemptsService(),
+      new AuditService(),
+    );
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+  });
+
+  async function loginWithTotp(): Promise<{ challengeToken: string; secret: string }> {
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
+      .returning();
+    const created = totp.createSecret('user@cairn.local');
+
+    await testDb.db.insert(users).values({
+      subjectId: subject!.id,
+      email: 'user@cairn.local',
+      passwordHash: await passwords.hash('пароль'),
+      totpSecretEncrypted: created.encryptedSecret,
+      isTotpEnabled: true,
+    });
+
+    const outcome = await service.login('user@cairn.local', 'пароль', ORIGIN);
+
+    if (outcome.kind !== 'totp_required') {
+      throw new Error('ожидался челлендж второго фактора');
+    }
+
+    return { challengeToken: outcome.challengeToken, secret: created.secret };
+  }
+
+  it('выдаёт сессию при верном коде', async () => {
+    const { challengeToken, secret } = await loginWithTotp();
+
+    const token = await service.verifyTotp(challengeToken, authenticator.generate(secret), ORIGIN);
+
+    expect(typeof token).toBe('string');
+  });
+
+  it('отвергает неверный код', async () => {
+    const { challengeToken } = await loginWithTotp();
+
+    await expect(service.verifyTotp(challengeToken, '000000', ORIGIN)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('исчерпывает челлендж после пяти неудач', async () => {
+    const { challengeToken, secret } = await loginWithTotp();
+
+    for (let index = 0; index < 5; index += 1) {
+      await service.verifyTotp(challengeToken, '000000', ORIGIN).catch(() => undefined);
+    }
+
+    await expect(
+      service.verifyTotp(challengeToken, authenticator.generate(secret), ORIGIN),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('не принимает челлендж повторно', async () => {
+    const { challengeToken, secret } = await loginWithTotp();
+    await service.verifyTotp(challengeToken, authenticator.generate(secret), ORIGIN);
+
+    await expect(
+      service.verifyTotp(challengeToken, authenticator.generate(secret), ORIGIN),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('отвергает неизвестный челлендж', async () => {
+    await expect(service.verifyTotp('нет такого', '123456', ORIGIN)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/auth/auth.service`
+Expected: FAIL — «Failed to resolve import "./auth.service"».
+
+- [ ] **Step 4: Создать `apps/api/src/auth/auth.service.ts`**
+
+```typescript
+import { AuditSubjectKind } from '@cairn/shared';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/audit.types';
+import { DATABASE } from '../db/db.module';
+import type { Database } from '../db/db.types';
+import { subjects, totpChallenges, users, type User } from '../db/schema';
+import type { LoginOutcome } from './auth.types';
+import { LoginAttemptsService } from './login-attempts.service';
+import { PasswordService } from './password.service';
+import { SessionsRepository, type SessionOrigin } from './sessions.repository';
+import { generateToken, hashToken } from './token';
+import { TotpService } from './totp.service';
+
+/**
+ * Вход в систему (спека 6.1).
+ *
+ * Вход двухшаговый: проверка пароля и, если второй фактор привязан, проверка
+ * кода. Разделение позволяет считать неудачи кода отдельно от неудач пароля
+ * и не смешивать два разных состояния в одном ответе.
+ */
+@Injectable()
+export class AuthService {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly passwords: PasswordService,
+    private readonly totp: TotpService,
+    private readonly sessions: SessionsRepository,
+    private readonly attempts: LoginAttemptsService,
+    private readonly audit: AuditService,
+  ) {}
+
+  /**
+   * Проверяет пароль.
+   *
+   * Возвращает либо готовую сессию, либо челлендж второго фактора.
+   * Все отказы неразличимы: одинаковое сообщение получают неверный пароль,
+   * несуществующий адрес, исчерпанный лимит попыток и пользователь без
+   * действующего пароля (спека 6.2).
+   */
+  async login(email: string, password: string, origin: SessionOrigin): Promise<LoginOutcome> {
+    const ip = origin.ip ?? 'unknown';
+
+    if (this.attempts.isBlocked(email, ip)) {
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    const found = await this.findActiveUser(email);
+
+    if (!found || !found.passwordHash) {
+      this.attempts.registerFailure(email, ip);
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    if (!(await this.passwords.verify(found.passwordHash, password))) {
+      this.attempts.registerFailure(email, ip);
+      await this.db.transaction(async (tx) => {
+        await this.audit.record(tx, this.actorFor(found), { action: AuditAction.LoginFailed });
+      });
+
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    this.attempts.registerSuccess(email, ip);
+
+    if (found.isTotpEnabled) {
+      return { kind: 'totp_required', challengeToken: await this.createChallenge(found.id) };
+    }
+
+    return { kind: 'session', token: await this.startSession(found, origin) };
+  }
+
+  /**
+   * Проверяет код второго фактора и выдаёт сессию.
+   *
+   * Пять неудачных попыток исчерпывают челлендж, после чего вход
+   * начинается заново с пароля (спека 6.2).
+   */
+  async verifyTotp(challengeToken: string, code: string, origin: SessionOrigin): Promise<string> {
+    const [challenge] = await this.db
+      .select()
+      .from(totpChallenges)
+      .where(
+        and(
+          eq(totpChallenges.tokenHash, hashToken(challengeToken)),
+          isNull(totpChallenges.consumedAt),
+          gt(totpChallenges.expiresAt, new Date()),
+          sql`${totpChallenges.attempts} < ${MAX_TOTP_ATTEMPTS}`,
+        ),
+      )
+      .limit(1);
+
+    if (!challenge) {
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    const found = await this.findActiveUserById(challenge.userId);
+
+    if (!found?.totpSecretEncrypted || !this.totp.verify(found.totpSecretEncrypted, code)) {
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(totpChallenges)
+          .set({ attempts: challenge.attempts + 1 })
+          .where(eq(totpChallenges.id, challenge.id));
+
+        if (found) {
+          await this.audit.record(tx, this.actorFor(found), {
+            action:
+              challenge.attempts + 1 >= MAX_TOTP_ATTEMPTS
+                ? AuditAction.TotpChallengeExhausted
+                : AuditAction.TotpFailed,
+          });
+        }
+      });
+
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    await this.db
+      .update(totpChallenges)
+      .set({ consumedAt: new Date() })
+      .where(eq(totpChallenges.id, challenge.id));
+
+    return this.startSession(found, origin);
+  }
+
+  /** Создаёт сессию и пишет успешный вход в журнал в одной транзакции. */
+  private async startSession(user: ActiveUser, origin: SessionOrigin): Promise<string> {
+    return this.db.transaction(async (tx) => {
+      const token = await this.sessions.create(tx, user.subjectId, origin);
+
+      await this.audit.record(tx, this.actorFor(user), { action: AuditAction.LoginSucceeded });
+
+      return token;
+    });
+  }
+
+  /** Создаёт короткоживущий челлендж второго фактора. */
+  private async createChallenge(userId: string): Promise<string> {
+    const token = generateToken();
+
+    await this.db.insert(totpChallenges).values({
+      userId,
+      tokenHash: hashToken(token),
+      expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS),
+    });
+
+    return token;
+  }
+
+  /** Находит пользователя с неотозванным субъектом по адресу. */
+  private async findActiveUser(email: string): Promise<ActiveUser | null> {
+    const [found] = await this.db
+      .select({ user: users, subjectLabel: subjects.label })
+      .from(users)
+      .innerJoin(subjects, eq(subjects.id, users.subjectId))
+      .where(and(eq(users.email, email.toLowerCase()), isNull(subjects.revokedAt)))
+      .limit(1);
+
+    return found ? { ...found.user, subjectLabel: found.subjectLabel } : null;
+  }
+
+  /** Находит пользователя с неотозванным субъектом по идентификатору. */
+  private async findActiveUserById(userId: string): Promise<ActiveUser | null> {
+    const [found] = await this.db
+      .select({ user: users, subjectLabel: subjects.label })
+      .from(users)
+      .innerJoin(subjects, eq(subjects.id, users.subjectId))
+      .where(and(eq(users.id, userId), isNull(subjects.revokedAt)))
+      .limit(1);
+
+    return found ? { ...found.user, subjectLabel: found.subjectLabel } : null;
+  }
+
+  /** Строит действующее лицо для журнала. */
+  private actorFor(user: ActiveUser) {
+    return {
+      kind: AuditSubjectKind.User as const,
+      id: user.subjectId,
+      label: user.subjectLabel,
+    };
+  }
+}
+
+/** Пользователь с меткой его субъекта. */
+type ActiveUser = User & { subjectLabel: string };
+
+/**
+ * Единое сообщение об отказе.
+ *
+ * Одинаково для всех причин: различия позволили бы перебором выяснить
+ * состав пользователей и то, кто из них заблокирован.
+ */
+const FAILURE_MESSAGE = 'Неверный адрес или пароль';
+
+/** Предел попыток кода второго фактора. */
+const MAX_TOTP_ATTEMPTS = 5;
+
+/** Срок жизни челленджа — 5 минут (спека 4.8). */
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+```
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/auth/auth.service`
+Expected: PASS, 15 тестов.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/auth
+git commit -m "Добавить вход по паролю со вторым фактором"
+```
+
+---
+
+**Результат чанка 6:** вход с двумя факторами работает, сессии отзываются мгновенно, перебор ограничен составным ключом, все отказы неразличимы. Следующий чанк добавляет HTTP-слой аутентификации, приглашения и команды консоли.
