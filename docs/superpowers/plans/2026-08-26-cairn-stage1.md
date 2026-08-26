@@ -24,6 +24,8 @@
 
 **После создания любого `package.json` выполняй `pnpm install` в корне.** Иначе бинарники (`vitest`, `tsx`, `nest`) не появятся в `node_modules/.bin`, и следующий шаг упадёт не по той причине, которая указана в плане.
 
+**После правки `packages/shared` выполняй `pnpm --filter @cairn/shared build`.** Проверка типов бэкенда смотрит в собранный `dist`, а тесты — в исходники через alias. Без пересборки эти два способа увидят разные версии контракта, и расхождение проявится как необъяснимая ошибка типов при зелёных тестах.
+
 **Коммит после каждой задачи.** Сообщения на русском, в повелительном наклонении: «Добавить сервис шифрования».
 
 **TSDoc на русском** (`/** */`) для всех экспортируемых элементов: функций, классов, интерфейсов, типов.
@@ -44,6 +46,8 @@
 - `src/enums.ts` — `Section`, `AccessLevel`, `SubjectKind`, `AuditSubjectKind`, `ProjectLifecycle`, `InvitationKind`.
 - `src/schemas/` — zod-схемы запросов и ответов, по файлу на ресурс.
 - `src/index.ts` — barrel export.
+
+**`apps/api/test/`** — интеграционные тесты на настоящем PostgreSQL через Testcontainers: тестовая фикстура и проверки, требующие живой базы с её ограничениями и правами.
 
 **`apps/api/src/`** — бэкенд.
 - `db/schema/` — таблицы Drizzle, по файлу на группу таблиц.
@@ -397,7 +401,7 @@ git commit -m "Добавить перечисления секций и уро�
     "start": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.tools.json",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts"
   },
@@ -447,13 +451,28 @@ git commit -m "Добавить перечисления секций и уро�
 
 - [ ] **Step 3: Создать `apps/api/tsconfig.tools.json`**
 
+Проверяет файлы вне `src`: конфигурацию Drizzle и интеграционные тесты. Без отдельного конфига они не проверяются вовсе, потому что основной ограничен `rootDir: "./src"`.
+
 ```json
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "noEmit": true
   },
-  "include": ["drizzle.config.ts"]
+  "include": ["drizzle.config.ts", "test/**/*", "src/**/*"]
+}
+```
+
+- [ ] **Step 3a: Создать `apps/api/tsconfig.build.json`**
+
+Nest CLI подхватывает этот файл автоматически. Без него `nest build` скомпилирует тестовые файлы в `dist` вместе с импортами Vitest, которого в продакшен-зависимостях нет.
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["**/*.test.ts", "test/**", "dist", "node_modules"]
 }
 ```
 
@@ -467,7 +486,8 @@ git commit -m "Добавить перечисления секций и уро�
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true
+    "deleteOutDir": true,
+    "tsConfigPath": "tsconfig.build.json"
   }
 }
 ```
@@ -553,6 +573,9 @@ import { config } from 'dotenv';
  *
  * Вызывается первой строкой в точках входа: приложении, миграциях и командах
  * консоли. Под тестами файл не читается — значения задаёт `vitest.config.ts`.
+ *
+ * Не импортируй эту функцию из тестов: она опирается на `__dirname`, которого
+ * нет в ESM, а Vitest транспилирует файлы именно в ESM.
  */
 export function loadEnv(): void {
   config({ path: resolve(__dirname, '../../../.env') });
@@ -573,21 +596,21 @@ export class AppModule {}
 
 - [ ] **Step 11: Создать `apps/api/src/main.ts`**
 
+Переменные окружения загружаются первой строкой `bootstrap()`, а не на верхнем уровне модуля. Это работает потому, что модули читают окружение в фабриках провайдеров, а фабрики выполняются внутри `NestFactory.create()` — то есть уже после `loadEnv()`. Импорт `app.module` на верхнем уровне лишь выполняет декораторы и переменных не касается.
+
 ```typescript
 import 'reflect-metadata';
 
 import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 
+import { AppModule } from './app.module';
 import { loadEnv } from './env';
-
-loadEnv();
-
-// Импорт после загрузки окружения: модули читают переменные при инициализации.
-const { AppModule } = await import('./app.module');
 
 /** Точка входа. CORS не настраивается: оба приложения за одним реверс-прокси (спека 3.3). */
 async function bootstrap(): Promise<void> {
+  loadEnv();
+
   const app = await NestFactory.create(AppModule);
 
   app.use(cookieParser());
@@ -599,8 +622,6 @@ async function bootstrap(): Promise<void> {
 
 void bootstrap();
 ```
-
-Если сборка CommonJS не примет `await import` на верхнем уровне, замени две строки на обычный `import { AppModule } from './app.module';` вверху файла и перенеси `loadEnv()` в отдельный файл `apps/api/src/bootstrap.ts`, который импортируется первым: `import './env-init';`. Проверь `pnpm --filter @cairn/api build` перед тем, как считать шаг выполненным.
 
 - [ ] **Step 12: Запустить тест**
 
@@ -633,11 +654,13 @@ git commit -m "Добавить каркас бэкенда с настроен�
 
 Скрипт, а не SQL-файл: пароль роли приложения берётся из окружения. Захардкоженный в репозитории пароль роли, имеющей доступ к зашифрованным секретам, обесценил бы разделение ролей.
 
+Флаг `ON_ERROR_STOP=1` обязателен: без него psql возвращает нулевой код даже при ошибке SQL, `set -e` не срабатывает, и контейнер отчитывается об успешной инициализации без роли. Сбой всплыл бы позже как непонятная ошибка аутентификации при миграциях.
+
 ```bash
 #!/bin/bash
 set -euo pipefail
 
-psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
   CREATE ROLE cairn_app WITH LOGIN PASSWORD '${CAIRN_APP_PASSWORD}';
   GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO cairn_app;
   GRANT USAGE ON SCHEMA public TO cairn_app;
@@ -648,7 +671,7 @@ EOSQL
 
 - [ ] **Step 2: Создать `docker-compose.yml`**
 
-Публикация порта нужна для локальной разработки и миграций с хоста. Реверс-прокси добавляется в чанке 5, когда появится что проксировать.
+Публикация порта нужна для локальной разработки и миграций с хоста. Реверс-прокси добавляется в последнем чанке, когда появится что проксировать.
 
 ```yaml
 services:
@@ -685,7 +708,11 @@ volumes:
 # Пароль владельца схемы. Этой ролью выполняются миграции.
 POSTGRES_PASSWORD=change_me_owner
 
-# Пароль роли приложения. Задаётся при первом запуске контейнера.
+# Пароль роли приложения.
+# ВНИМАНИЕ: применяется только при первой инициализации тома с данными.
+# Изменение этой строки позже не поменяет пароль в базе — роль сохранит старый,
+# и подключение перестанет работать при внешне правильном .env.
+# Чтобы сменить пароль, выполни ALTER ROLE вручную либо пересоздай том.
 CAIRN_APP_PASSWORD=change_me_app
 
 # ВАЖНО: пароли в строках подключения должны совпадать с двумя переменными выше.
@@ -700,6 +727,8 @@ DATABASE_URL=postgres://cairn_app:change_me_app@localhost:5432/cairn
 # --- Приложение ---
 # Ключ прикладного шифрования: 32 байта в base64.
 # Сгенерировать: openssl rand -base64 32
+# Вставлять без кавычек и без переводов строк: приложение сверяет каноничность
+# записи и откажется стартовать при лишних символах.
 CAIRN_ENCRYPTION_KEY=
 
 # Адрес веб-приложения, используется в ссылках приглашений.
@@ -742,9 +771,9 @@ git commit -m "Добавить развёртывание базы с разд�
 
 ---
 
-## Chunk 2: Схема данных и шифрование
+## Chunk 2: Схема данных
 
-Результат чанка: восемь таблиц созданы миграциями, неизменяемость журнала обеспечена правами роли и покрыта интеграционным тестом, шифрование работает.
+Результат чанка: восемь таблиц объявлены и покрыты тестами на соответствие контракту. Миграции применяются в следующем чанке.
 
 ### Task 5: Схема базы — субъекты и пользователи
 
@@ -1379,7 +1408,7 @@ export * from './users';
 - [ ] **Step 10: Запустить тесты**
 
 Run: `pnpm --filter @cairn/api test src/db/schema`
-Expected: PASS, 21 тест.
+Expected: PASS, 23 теста.
 
 - [ ] **Step 11: Коммит**
 
@@ -1389,6 +1418,14 @@ git commit -m "Добавить таблицы сессий, ссылок, че�
 ```
 
 ---
+
+**Результат чанка 2:** восемь таблиц объявлены, перечисления сверены с контрактом, тесты зелёные. Следующий чанк применяет миграции и добавляет шифрование.
+
+---
+
+## Chunk 3: Миграции, права и шифрование
+
+Результат чанка: таблицы созданы в базе, неизменяемость журнала обеспечена правами роли и покрыта интеграционным тестом, шифрование работает.
 
 ### Task 8: Миграции и права роли приложения
 
@@ -1462,14 +1499,14 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO cairn_app;
 ```json
 {
   "idx": 1,
-  "version": "7",
-  "when": 1774483200000,
+  "version": "<скопируй из записи 0000>",
+  "when": <значение when из записи 0000, увеличенное на 1>,
   "tag": "0001_grant_app_privileges",
   "breakpoints": true
 }
 ```
 
-Значение `when` должно быть больше, чем у записи `0000`. Если сгенерированная запись имеет большее значение — увеличь это на единицу. Поле `version` скопируй из записи `0000`, не меняя.
+Оба подставляемых значения бери из уже существующей записи `0000`, а не придумывай. Причина для `when`: мигратор сравнивает эту метку с временем последней применённой миграции и **молча пропускает** всё, что оказалось раньше. На чистой базе ошибка не проявится, а на базе, где `0000` уже применена, `db:migrate` отработает без вывода, и роль приложения останется без прав — то есть журнал не будет защищён, хотя всё выглядит успешным.
 
 - [ ] **Step 5: Применить миграции**
 
@@ -1484,6 +1521,11 @@ Expected: команда завершается без вывода ошибок
 
 Run: `docker compose exec postgres psql -U cairn_owner -d cairn -c "\dt"`
 Expected: восемь таблиц — `subjects`, `users`, `projects`, `grants`, `sessions`, `invitations`, `totp_challenges`, `audit_log`.
+
+- [ ] **Step 6a: Проверить, что миграция прав применилась**
+
+Run: `docker compose exec postgres psql -U cairn_owner -d cairn -c "\dp audit_log"`
+Expected: в колонке привилегий у `cairn_app` стоят только `arwdDxt`-подобные буквы `ar` — то есть `INSERT` и `SELECT`. Если строки с `cairn_app` нет вовсе, миграция `0001` не применилась: проверь запись в `_journal.json`, особенно поле `when`.
 
 - [ ] **Step 7: Коммит**
 
@@ -1531,10 +1573,16 @@ export interface TestDatabase {
 }
 
 /**
- * Поднимает PostgreSQL в контейнере, применяет миграции и заводит роль приложения.
+ * Поднимает PostgreSQL в контейнере, заводит роль приложения и применяет миграции.
  *
- * Роль заводится здесь же, а не в образе, чтобы тест ограничений прав
- * проверял ровно ту миграцию грантов, что лежит в репозитории.
+ * Порядок обязателен: миграция `0001` выдаёт права роли `cairn_app`, и если
+ * роли ещё нет, PostgreSQL ответит «role does not exist», а `migrate` бросит
+ * исключение.
+ *
+ * Привилегии здесь **не выдаются**. Их выдаёт та самая миграция из репозитория,
+ * которую проверяет тест: продублируй гранты в фикстуре — и тест останется
+ * зелёным, даже если миграцию сломают, забудут зарегистрировать в `_journal.json`
+ * или она окажется пропущенной.
  */
 export async function startTestDatabase(): Promise<TestDatabase> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(
@@ -1544,16 +1592,11 @@ export async function startTestDatabase(): Promise<TestDatabase> {
   const ownerClient = postgres(container.getConnectionUri(), { max: 1 });
   const db = drizzle(ownerClient, { schema });
 
-  await migrate(db, { migrationsFolder: './drizzle' });
-
+  // Роль создаётся до миграций: миграция прав на неё ссылается.
   await db.execute(sql`CREATE ROLE cairn_app WITH LOGIN PASSWORD 'test_app_password'`);
   await db.execute(sql`GRANT USAGE ON SCHEMA public TO cairn_app`);
-  await db.execute(sql`
-    GRANT SELECT, INSERT, UPDATE, DELETE ON
-      subjects, users, projects, grants, sessions, invitations, totp_challenges
-    TO cairn_app
-  `);
-  await db.execute(sql`GRANT SELECT, INSERT ON audit_log TO cairn_app`);
+
+  await migrate(db, { migrationsFolder: './drizzle' });
 
   const appClient = postgres(container.getConnectionUri(), {
     max: 1,
@@ -1606,6 +1649,8 @@ describe('неизменяемость журнала', () => {
   });
 
   it('роль приложения может добавлять записи', async () => {
+    // Заодно проверяет, что миграция прав вообще применилась: без неё роль
+    // не имела бы доступа к таблице и запрос упал бы.
     await testDb.appDb.insert(auditLog).values({
       subjectKind: AuditSubjectKind.System,
       subjectLabel: 'проверка',
@@ -1940,7 +1985,7 @@ pnpm test
 pnpm typecheck
 ```
 
-Expected: оба без ошибок. Тест сборки `AppModule` проходит благодаря ключу из `vitest.config.ts`.
+Expected: оба без ошибок. Тест сборки `AppModule` проходит благодаря ключу из `vitest.config.ts`. Полный прогон теперь включает интеграционный набор на Testcontainers — нужен работающий Docker, и первый запуск занимает заметно больше времени из-за скачивания образа.
 
 - [ ] **Step 8: Коммит**
 
@@ -1951,4 +1996,1996 @@ git commit -m "Добавить сервис прикладного шифров
 
 ---
 
-**Результат чанка 2:** восемь таблиц созданы миграциями, неизменяемость журнала обеспечена правами роли и проверяется тестом, шифрование работает. Следующий чанк добавляет модель прав.
+**Результат чанка 3:** таблицы созданы в базе, неизменяемость журнала обеспечена правами роли и проверяется тестом, шифрование работает. Следующий чанк добавляет модель прав.
+## Chunk 4: Модель доступа
+
+Результат чанка: модель доступа работает и покрыта тестами на уровне сервисов, журнал пишется в одной транзакции с действием, репозитории физически не отдают данные без субъекта.
+
+### Task 11: Подключение приложения к базе
+
+Тестовая фикстура и Testcontainers уже настроены в чанке 3 (Task 9). Здесь появляется подключение, которым пользуется само приложение, — отдельной ролью, без прав на изменение журнала.
+
+**Files:**
+- Create: `apps/api/src/db/db.types.ts`, `apps/api/src/db/db.module.ts`
+- Modify: `apps/api/src/app.module.ts`
+- Test: `apps/api/src/db/db.module.test.ts`
+
+- [ ] **Step 1: Создать `apps/api/src/db/db.types.ts`**
+
+```typescript
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+
+import type * as schema from './schema';
+
+/** Подключение к базе. */
+export type Database = PostgresJsDatabase<typeof schema>;
+
+/**
+ * Транзакция.
+ *
+ * Сервисы принимают её явным параметром: журналирование обязано происходить
+ * в той же транзакции, что и действие (спека 7.3), а неявный контекст
+ * транзакции легко потерять при рефакторинге.
+ */
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+/**
+ * Исполнитель запроса: подключение либо транзакция.
+ *
+ * Методы записи в репозиториях принимают этот тип, чтобы вызывающий сервис
+ * мог передать транзакцию, а тесты — обычное подключение.
+ */
+export type Executor = Database | Transaction;
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/db/db.module.test.ts`**
+
+Тест проверяет ровно одно: приложение не стартует без строки подключения. Молчаливый старт с неработающей базой превратил бы отказ конфигурации в набор непонятных ошибок при первом запросе.
+
+```typescript
+import { Test } from '@nestjs/testing';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { DbModule } from './db.module';
+
+describe('DbModule', () => {
+  const original = process.env.DATABASE_URL;
+
+  afterEach(() => {
+    process.env.DATABASE_URL = original;
+  });
+
+  it('отказывается собираться без строки подключения', async () => {
+    delete process.env.DATABASE_URL;
+
+    await expect(
+      Test.createTestingModule({ imports: [DbModule] }).compile(),
+    ).rejects.toThrow(/DATABASE_URL/);
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/db/db.module`
+Expected: FAIL — «Failed to resolve import "./db.module"».
+
+- [ ] **Step 4: Создать `apps/api/src/db/db.module.ts`**
+
+```typescript
+import { Global, Module } from '@nestjs/common';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+
+import type { Database } from './db.types';
+import * as schema from './schema';
+
+/** Токен внедрения подключения к базе. */
+export const DATABASE = Symbol('DATABASE');
+
+/**
+ * Подключение к базе ролью приложения — без прав на изменение схемы
+ * и журнала (спека 4.7). Миграции выполняются другой ролью.
+ */
+@Global()
+@Module({
+  providers: [
+    {
+      provide: DATABASE,
+      useFactory: (): Database => {
+        const url = process.env.DATABASE_URL;
+
+        if (!url) {
+          throw new Error('DATABASE_URL не задан. Проверь .env в корне монорепо.');
+        }
+
+        return drizzle(postgres(url), { schema });
+      },
+    },
+  ],
+  exports: [DATABASE],
+})
+export class DbModule {}
+```
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/db/db.module`
+Expected: PASS, 1 тест.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/db
+git commit -m "Добавить подключение приложения к базе"
+```
+
+---
+
+
+### Task 12: Разрешение уровня доступа
+
+Ядро модели прав. Задача разбита на две: сначала чистое разрешение уровня, затем требование уровня с исключениями. Причина — разные зоны ответственности: первая отвечает на вопрос «какой уровень», вторая переводит ответ в поведение HTTP.
+
+**Files:**
+- Create: `apps/api/src/access/access.types.ts`, `apps/api/src/access/access.service.ts`
+- Test: `apps/api/src/access/access.service.test.ts`
+
+- [ ] **Step 1: Создать `apps/api/src/access/access.types.ts`**
+
+```typescript
+import type { AuditSubjectKind, SubjectKind } from '@cairn/shared';
+
+/**
+ * Действующий субъект запроса.
+ *
+ * Все методы доступа к данным принимают его первым аргументом, поэтому
+ * проверку прав невозможно забыть — её не нужно вызывать отдельно (спека 5.4).
+ */
+export interface RequestSubject {
+  /** Идентификатор в таблице субъектов. */
+  id: string;
+  kind: SubjectKind;
+  label: string;
+  /** Суперадмин обходит таблицу выдач (ТЗ 4.1). */
+  isSuperadmin: boolean;
+  /** Отозванный субъект не получает доступа ни к чему. */
+  isRevoked: boolean;
+}
+
+/** Действующее лицо для записи в журнал: субъект либо консоль сервера. */
+export type AuditActor =
+  | { kind: Exclude<AuditSubjectKind, AuditSubjectKind.System>; id: string; label: string }
+  | { kind: AuditSubjectKind.System; id: null; label: string };
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/access/access.service.test.ts`**
+
+```typescript
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AccessService } from './access.service';
+import type { RequestSubject } from './access.types';
+import { grants, projects, subjects, users } from '../db/schema/index';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('AccessService.resolveLevel', () => {
+  let testDb: TestDatabase;
+  let service: AccessService;
+  let projectId: string;
+  let subjectId: string;
+  let grantedBy: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    service = new AccessService(testDb.db);
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'подрядчик' })
+      .returning();
+    subjectId = subject!.id;
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'админ' })
+      .returning();
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({ subjectId: adminSubject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+    grantedBy = admin!.id;
+
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'proekt', name: 'Проект' })
+      .returning();
+    projectId = project!.id;
+  });
+
+  function asSubject(overrides: Partial<RequestSubject> = {}): RequestSubject {
+    return {
+      id: subjectId,
+      kind: SubjectKind.User,
+      label: 'подрядчик',
+      isSuperadmin: false,
+      isRevoked: false,
+      ...overrides,
+    };
+  }
+
+  it('без выдачи возвращает отсутствие доступа', async () => {
+    expect(await service.resolveLevel(asSubject(), projectId, Section.Info)).toBeNull();
+  });
+
+  it('возвращает выданный уровень', async () => {
+    await testDb.db.insert(grants).values({
+      subjectId,
+      projectId,
+      section: Section.Info,
+      level: AccessLevel.Read,
+      grantedBy,
+    });
+
+    expect(await service.resolveLevel(asSubject(), projectId, Section.Info)).toBe(AccessLevel.Read);
+  });
+
+  it('не переносит доступ между секциями', async () => {
+    await testDb.db.insert(grants).values({
+      subjectId,
+      projectId,
+      section: Section.Docs,
+      level: AccessLevel.Write,
+      grantedBy,
+    });
+
+    expect(await service.resolveLevel(asSubject(), projectId, Section.Info)).toBeNull();
+  });
+
+  it('суперадмину даёт запись без выдачи', async () => {
+    const level = await service.resolveLevel(
+      asSubject({ isSuperadmin: true }),
+      projectId,
+      Section.Info,
+    );
+
+    expect(level).toBe(AccessLevel.Write);
+  });
+
+  it('отозванному субъекту отказывает даже при живой выдаче', async () => {
+    await testDb.db.insert(grants).values({
+      subjectId,
+      projectId,
+      section: Section.Info,
+      level: AccessLevel.Write,
+      grantedBy,
+    });
+
+    expect(await service.resolveLevel(asSubject({ isRevoked: true }), projectId, Section.Info)).toBeNull();
+  });
+
+  it('отозванному суперадмину отказывает', async () => {
+    // Отзыв сильнее суперадминства: иначе отозвать администратора было бы нечем.
+    const level = await service.resolveLevel(
+      asSubject({ isSuperadmin: true, isRevoked: true }),
+      projectId,
+      Section.Info,
+    );
+
+    expect(level).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/access`
+Expected: FAIL — модуль `./access.service.js` не найден.
+
+- [ ] **Step 4: Создать `apps/api/src/access/access.service.ts`**
+
+```typescript
+import { AccessLevel, type Section } from '@cairn/shared';
+import { Inject, Injectable } from '@nestjs/common';
+import { and, eq, inArray } from 'drizzle-orm';
+
+import { DATABASE } from '../db/db.module';
+import type { Database } from '../db/db.types';
+import { grants } from '../db/schema/index';
+import type { RequestSubject } from './access.types';
+
+/**
+ * Единая проверка прав (ТЗ 4.1).
+ *
+ * Отвечает только за доступ к содержимому проектов. Право управлять самой
+ * системой доступа — принадлежность суперадмина и проверяется отдельным
+ * guard'ом, а не здесь (спека 8).
+ */
+@Injectable()
+export class AccessService {
+  constructor(@Inject(DATABASE) private readonly db: Database) {}
+
+  /**
+   * Возвращает уровень доступа субъекта к секции проекта либо `null`,
+   * если доступа нет вовсе.
+   */
+  async resolveLevel(
+    subject: RequestSubject,
+    projectId: string,
+    section: Section,
+  ): Promise<AccessLevel | null> {
+    // Отзыв сильнее суперадминства, иначе отозвать администратора было бы нечем.
+    if (subject.isRevoked) {
+      return null;
+    }
+
+    if (subject.isSuperadmin) {
+      return AccessLevel.Write;
+    }
+
+    const [grant] = await this.db
+      .select({ level: grants.level })
+      .from(grants)
+      .where(
+        and(
+          eq(grants.subjectId, subject.id),
+          eq(grants.projectId, projectId),
+          eq(grants.section, section),
+        ),
+      )
+      .limit(1);
+
+    return grant?.level ?? null;
+  }
+
+  /**
+   * Возвращает идентификаторы проектов, доступных субъекту хотя бы на уровне
+   * метаданных хотя бы в одной секции.
+   *
+   * Возвращается массив, а не подзапрос: сервис прав не должен протекать
+   * деталями хранения в вызывающий код (спека 5.2).
+   */
+  async visibleProjectIds(subject: RequestSubject): Promise<string[]> {
+    if (subject.isRevoked) {
+      return [];
+    }
+
+    if (subject.isSuperadmin) {
+      const rows = await this.db.select({ id: projectsTable.id }).from(projectsTable);
+
+      return rows.map((row) => row.id);
+    }
+
+    const rows = await this.db
+      .selectDistinct({ projectId: grants.projectId })
+      .from(grants)
+      .where(eq(grants.subjectId, subject.id));
+
+    return rows.map((row) => row.projectId);
+  }
+}
+```
+
+Импорт таблицы проектов добавить к существующему: `import { grants, projects as projectsTable } from '../db/schema/index';`
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/access`
+Expected: PASS, 6 тестов.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/access
+git commit -m "Добавить разрешение уровня доступа"
+```
+
+---
+
+### Task 13: Список видимых проектов
+
+**Files:**
+- Modify: `apps/api/src/access/access.service.ts` (метод уже написан в Task 12)
+- Test: `apps/api/src/access/visible-projects.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/access/visible-projects.test.ts`**
+
+```typescript
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AccessService } from './access.service';
+import type { RequestSubject } from './access.types';
+import { grants, projects, subjects, users } from '../db/schema/index';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('AccessService.visibleProjectIds', () => {
+  let testDb: TestDatabase;
+  let service: AccessService;
+  let subjectId: string;
+  let grantedBy: string;
+  let visibleId: string;
+  let hiddenId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    service = new AccessService(testDb.db);
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'подрядчик' })
+      .returning();
+    subjectId = subject!.id;
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'админ' })
+      .returning();
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({ subjectId: adminSubject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+    grantedBy = admin!.id;
+
+    const [visible] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'vidimyj', name: 'Видимый' })
+      .returning();
+    visibleId = visible!.id;
+
+    const [hidden] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'skrytyj', name: 'Скрытый' })
+      .returning();
+    hiddenId = hidden!.id;
+
+    await testDb.db.insert(grants).values({
+      subjectId,
+      projectId: visibleId,
+      section: Section.Info,
+      level: AccessLevel.Metadata,
+      grantedBy,
+    });
+  });
+
+  const subject = (overrides: Partial<RequestSubject> = {}): RequestSubject => ({
+    id: subjectId,
+    kind: SubjectKind.User,
+    label: 'подрядчик',
+    isSuperadmin: false,
+    isRevoked: false,
+    ...overrides,
+  });
+
+  it('возвращает только проекты с выдачей', async () => {
+    const ids = await service.visibleProjectIds(subject());
+
+    expect(ids).toEqual([visibleId]);
+  });
+
+  it('не раскрывает существование проектов без выдачи', async () => {
+    const ids = await service.visibleProjectIds(subject());
+
+    expect(ids).not.toContain(hiddenId);
+  });
+
+  it('суперадмину возвращает все проекты', async () => {
+    const ids = await service.visibleProjectIds(subject({ isSuperadmin: true }));
+
+    expect(ids).toHaveLength(2);
+  });
+
+  it('отозванному субъекту возвращает пустой список', async () => {
+    expect(await service.visibleProjectIds(subject({ isRevoked: true }))).toEqual([]);
+  });
+
+  it('не дублирует проект при выдачах на несколько секций', async () => {
+    await testDb.db.insert(grants).values({
+      subjectId,
+      projectId: visibleId,
+      section: Section.Docs,
+      level: AccessLevel.Read,
+      grantedBy,
+    });
+
+    expect(await service.visibleProjectIds(subject())).toEqual([visibleId]);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/access/visible-projects`
+Expected: PASS, 5 тестов. Метод реализован в предыдущей задаче — если тест падает, ошибка в реализации, а не в отсутствии кода.
+
+- [ ] **Step 3: Коммит**
+
+```bash
+git add apps/api/src/access
+git commit -m "Покрыть тестами список видимых проектов"
+```
+
+---
+
+### Task 14: Требование уровня и коды ответов
+
+**Files:**
+- Create: `apps/api/src/access/access.guard-errors.ts`
+- Modify: `apps/api/src/access/access.service.ts`
+- Test: `apps/api/src/access/require-level.test.ts`
+
+- [ ] **Step 1: Создать `apps/api/src/access/access.guard-errors.ts`**
+
+```typescript
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+
+/**
+ * Доступа к секции нет вовсе.
+ *
+ * Отвечаем `404`, а не `403`: ответ `403` сообщил бы, что объект существует,
+ * а ТЗ 4.2 требует не раскрывать даже сам факт его существования.
+ */
+export class SectionNotVisibleError extends NotFoundException {
+  constructor() {
+    super('Не найдено');
+  }
+}
+
+/**
+ * Доступ есть, но его уровень ниже требуемого для операции.
+ *
+ * Здесь уместен `403`: отрицать существование объекта, который субъект
+ * только что видел, бессмысленно (спека 5.3).
+ */
+export class InsufficientLevelError extends ForbiddenException {
+  constructor() {
+    super('Недостаточно прав для этого действия');
+  }
+}
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/access/require-level.test.ts`**
+
+```typescript
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AccessService } from './access.service';
+import { InsufficientLevelError, SectionNotVisibleError } from './access.guard-errors';
+import type { RequestSubject } from './access.types';
+import { grants, projects, subjects, users } from '../db/schema/index';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('AccessService.requireLevel', () => {
+  let testDb: TestDatabase;
+  let service: AccessService;
+  let subjectId: string;
+  let projectId: string;
+  let grantedBy: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    service = new AccessService(testDb.db);
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'подрядчик' })
+      .returning();
+    subjectId = subject!.id;
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'админ' })
+      .returning();
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({ subjectId: adminSubject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+    grantedBy = admin!.id;
+
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'proekt', name: 'Проект' })
+      .returning();
+    projectId = project!.id;
+  });
+
+  const subject: RequestSubject = {
+    get id() {
+      return subjectId;
+    },
+    kind: SubjectKind.User,
+    label: 'подрядчик',
+    isSuperadmin: false,
+    isRevoked: false,
+  };
+
+  async function grant(level: AccessLevel): Promise<void> {
+    await testDb.db
+      .insert(grants)
+      .values({ subjectId, projectId, section: Section.Info, level, grantedBy });
+  }
+
+  it('без доступа бросает «не найдено»', async () => {
+    await expect(
+      service.requireLevel(subject, projectId, Section.Info, AccessLevel.Read),
+    ).rejects.toBeInstanceOf(SectionNotVisibleError);
+  });
+
+  it('при недостаточном уровне бросает «недостаточно прав»', async () => {
+    await grant(AccessLevel.Read);
+
+    await expect(
+      service.requireLevel(subject, projectId, Section.Info, AccessLevel.Write),
+    ).rejects.toBeInstanceOf(InsufficientLevelError);
+  });
+
+  it('при достаточном уровне возвращает уровень', async () => {
+    await grant(AccessLevel.Write);
+
+    expect(await service.requireLevel(subject, projectId, Section.Info, AccessLevel.Read)).toBe(
+      AccessLevel.Write,
+    );
+  });
+
+  it('уровень метаданных недостаточен для чтения', async () => {
+    await grant(AccessLevel.Metadata);
+
+    await expect(
+      service.requireLevel(subject, projectId, Section.Info, AccessLevel.Read),
+    ).rejects.toBeInstanceOf(InsufficientLevelError);
+  });
+
+  it('уровень метаданных достаточен для метаданных', async () => {
+    await grant(AccessLevel.Metadata);
+
+    expect(
+      await service.requireLevel(subject, projectId, Section.Info, AccessLevel.Metadata),
+    ).toBe(AccessLevel.Metadata);
+  });
+
+  it('для несуществующего проекта бросает «не найдено»', async () => {
+    // Тот же ответ, что и при отсутствии доступа: различать их — значит
+    // раскрывать, какие проекты существуют.
+    await expect(
+      service.requireLevel(
+        subject,
+        '00000000-0000-0000-0000-000000000000',
+        Section.Info,
+        AccessLevel.Read,
+      ),
+    ).rejects.toBeInstanceOf(SectionNotVisibleError);
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/access/require-level`
+Expected: FAIL — `service.requireLevel is not a function`.
+
+- [ ] **Step 4: Добавить метод в `apps/api/src/access/access.service.ts`**
+
+Порядок уровней задан константой: сравнивать строки перечисления напрямую нельзя, а числовая шкала делает сравнение однозначным.
+
+```typescript
+  /**
+   * Требует уровень не ниже указанного.
+   *
+   * Бросает {@link SectionNotVisibleError} при отсутствии доступа и
+   * {@link InsufficientLevelError} при недостаточном уровне (спека 5.3).
+   */
+  async requireLevel(
+    subject: RequestSubject,
+    projectId: string,
+    section: Section,
+    minimum: AccessLevel,
+  ): Promise<AccessLevel> {
+    const level = await this.resolveLevel(subject, projectId, section);
+
+    if (level === null) {
+      throw new SectionNotVisibleError();
+    }
+
+    if (LEVEL_ORDER[level] < LEVEL_ORDER[minimum]) {
+      throw new InsufficientLevelError();
+    }
+
+    return level;
+  }
+```
+
+Ниже класса добавить константу:
+
+```typescript
+/** Порядок уровней для сравнения. Строки перечисления сравнивать нельзя. */
+const LEVEL_ORDER: Record<AccessLevel, number> = {
+  [AccessLevel.Metadata]: 1,
+  [AccessLevel.Read]: 2,
+  [AccessLevel.Write]: 3,
+};
+```
+
+Импорты дополнить: `import { InsufficientLevelError, SectionNotVisibleError } from './access.guard-errors';`
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/access`
+Expected: PASS, 17 тестов.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/access
+git commit -m "Добавить требование уровня доступа с кодами ответов"
+```
+
+---
+
+### Task 15: Guard суперадмина
+
+**Files:**
+- Create: `apps/api/src/access/superadmin.guard.ts`, `apps/api/src/access/access.module.ts`
+- Test: `apps/api/src/access/superadmin.guard.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/access/superadmin.guard.test.ts`**
+
+```typescript
+import { ForbiddenException, type ExecutionContext } from '@nestjs/common';
+import { SubjectKind } from '@cairn/shared';
+import { describe, expect, it } from 'vitest';
+
+import { SuperadminGuard } from './superadmin.guard';
+import type { RequestSubject } from './access.types';
+
+function contextWith(subject: RequestSubject | undefined): ExecutionContext {
+  return {
+    switchToHttp: () => ({ getRequest: () => ({ subject }) }),
+  } as unknown as ExecutionContext;
+}
+
+const base: RequestSubject = {
+  id: '11111111-1111-1111-1111-111111111111',
+  kind: SubjectKind.User,
+  label: 'кто-то',
+  isSuperadmin: false,
+  isRevoked: false,
+};
+
+describe('SuperadminGuard', () => {
+  const guard = new SuperadminGuard();
+
+  it('пропускает суперадмина', () => {
+    expect(guard.canActivate(contextWith({ ...base, isSuperadmin: true }))).toBe(true);
+  });
+
+  it('отклоняет обычного пользователя', () => {
+    // Именно 403, а не 404: существование администрирования не секрет (спека 8).
+    expect(() => guard.canActivate(contextWith(base))).toThrow(ForbiddenException);
+  });
+
+  it('отклоняет отозванного суперадмина', () => {
+    expect(() => guard.canActivate(contextWith({ ...base, isSuperadmin: true, isRevoked: true }))).toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('отклоняет запрос без субъекта', () => {
+    expect(() => guard.canActivate(contextWith(undefined))).toThrow(ForbiddenException);
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/access/superadmin`
+Expected: FAIL — модуль `./superadmin.guard.js` не найден.
+
+- [ ] **Step 3: Создать `apps/api/src/access/superadmin.guard.ts`**
+
+```typescript
+import { CanActivate, type ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+
+import type { RequestSubject } from './access.types';
+
+/**
+ * Пропускает только суперадмина.
+ *
+ * Управление системой доступа, пользователями и журналом лежит вне сервиса
+ * прав: оно не зависит ни от проекта, ни от секции (спека 8).
+ *
+ * Отказ — `403`, а не `404`: правило нераскрытия защищает сведения о том,
+ * какие проекты существуют, а существование раздела администрирования
+ * секретом не является.
+ */
+@Injectable()
+export class SuperadminGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest<{ subject?: RequestSubject }>();
+    const subject = request.subject;
+
+    if (!subject || subject.isRevoked || !subject.isSuperadmin) {
+      throw new ForbiddenException('Требуются права суперадминистратора');
+    }
+
+    return true;
+  }
+}
+```
+
+- [ ] **Step 4: Создать `apps/api/src/access/access.module.ts`**
+
+```typescript
+import { Module } from '@nestjs/common';
+
+import { AccessService } from './access.service';
+import { SuperadminGuard } from './superadmin.guard';
+
+/** Модуль модели доступа. */
+@Module({
+  providers: [AccessService, SuperadminGuard],
+  exports: [AccessService, SuperadminGuard],
+})
+export class AccessModule {}
+```
+
+- [ ] **Step 5: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/access`
+Expected: PASS, 21 тест.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/access
+git commit -m "Добавить guard суперадмина"
+```
+
+---
+
+### Task 16: Журнал действий
+
+**Files:**
+- Create: `apps/api/src/audit/audit.types.ts`, `apps/api/src/audit/audit.service.ts`, `apps/api/src/audit/audit.module.ts`
+- Test: `apps/api/src/audit/audit.service.test.ts`
+
+- [ ] **Step 1: Создать `apps/api/src/audit/audit.types.ts`**
+
+Действия перечислены явно: свободная строка расползётся синонимами, и фильтр журнала перестанет работать.
+
+```typescript
+/** Типы действий, фиксируемых в журнале на этапе 1 (спека 7.2). */
+export enum AuditAction {
+  LoginSucceeded = 'login.succeeded',
+  LoginFailed = 'login.failed',
+  LogoutPerformed = 'logout.performed',
+  TotpFailed = 'totp.failed',
+  TotpChallengeExhausted = 'totp.challenge_exhausted',
+  TotpEnabled = 'totp.enabled',
+  TotpReset = 'totp.reset',
+  ProjectCreated = 'project.created',
+  ProjectUpdated = 'project.updated',
+  GrantCreated = 'grant.created',
+  GrantUpdated = 'grant.updated',
+  GrantRevoked = 'grant.revoked',
+  InvitationCreated = 'invitation.created',
+  InvitationAccepted = 'invitation.accepted',
+  PasswordResetRequested = 'password_reset.requested',
+  PasswordResetCompleted = 'password_reset.completed',
+  SubjectRevoked = 'subject.revoked',
+  SubjectRestored = 'subject.restored',
+  SuperadminCreated = 'superadmin.created',
+}
+
+/** Данные для записи в журнал. */
+export interface AuditEntryInput {
+  action: AuditAction;
+  entityType?: string;
+  entityId?: string;
+  projectId?: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+- [ ] **Step 2: Написать падающий тест `apps/api/src/audit/audit.service.test.ts`**
+
+```typescript
+import { AuditSubjectKind, SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AuditAction } from './audit.types';
+import { AuditService } from './audit.service';
+import type { AuditActor } from '../access/access.types';
+import { auditLog, projects, subjects } from '../db/schema/index';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('AuditService', () => {
+  let testDb: TestDatabase;
+  let service: AuditService;
+  let actor: AuditActor;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    service = new AuditService();
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'админ' })
+      .returning();
+
+    actor = { kind: AuditSubjectKind.User, id: subject!.id, label: 'админ' };
+  });
+
+  it('записывает действие субъекта', async () => {
+    await testDb.db.transaction(async (tx) => {
+      await service.record(tx, actor, { action: AuditAction.ProjectCreated });
+    });
+
+    const [entry] = await testDb.db.select().from(auditLog);
+
+    expect(entry?.action).toBe(AuditAction.ProjectCreated);
+    expect(entry?.subjectKind).toBe(AuditSubjectKind.User);
+    expect(entry?.subjectLabel).toBe('админ');
+  });
+
+  it('записывает действие с консоли без субъекта', async () => {
+    await testDb.db.transaction(async (tx) => {
+      await service.record(
+        tx,
+        { kind: AuditSubjectKind.System, id: null, label: 'cli create-superadmin' },
+        { action: AuditAction.SuperadminCreated },
+      );
+    });
+
+    const [entry] = await testDb.db.select().from(auditLog);
+
+    expect(entry?.subjectId).toBeNull();
+    expect(entry?.subjectKind).toBe(AuditSubjectKind.System);
+  });
+
+  it('откатывается вместе с действием', async () => {
+    // Либо есть и изменение, и его след, либо нет ни того ни другого (спека 7.3).
+    await expect(
+      testDb.db.transaction(async (tx) => {
+        await tx.insert(projects).values({ slug: 'proekt', name: 'Проект' });
+        await service.record(tx, actor, { action: AuditAction.ProjectCreated });
+
+        throw new Error('сбой после записи');
+      }),
+    ).rejects.toThrow('сбой после записи');
+
+    expect(await testDb.db.select().from(auditLog)).toHaveLength(0);
+    expect(await testDb.db.select().from(projects)).toHaveLength(0);
+  });
+
+  it('сохраняет метку субъекта неизменной после её смены', async () => {
+    await testDb.db.transaction(async (tx) => {
+      await service.record(tx, actor, { action: AuditAction.ProjectCreated });
+    });
+
+    await testDb.db.update(subjects).set({ label: 'другая метка' });
+
+    const [entry] = await testDb.db.select().from(auditLog);
+
+    expect(entry?.subjectLabel).toBe('админ');
+  });
+});
+```
+
+- [ ] **Step 3: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/audit`
+Expected: FAIL — модуль `./audit.service.js` не найден.
+
+- [ ] **Step 4: Создать `apps/api/src/audit/audit.service.ts`**
+
+```typescript
+import { Injectable } from '@nestjs/common';
+
+import type { AuditActor } from '../access/access.types';
+import type { Transaction } from '../db/db.types';
+import { auditLog } from '../db/schema/index';
+import type { AuditEntryInput } from './audit.types';
+
+/**
+ * Журнал действий (ТЗ 4.4).
+ *
+ * Транзакция передаётся параметром намеренно: запись обязана происходить
+ * в той же транзакции, что и само действие, иначе журнал может потерять
+ * след успешного изменения (спека 7.3).
+ *
+ * Вызывается из сервисов, а не из контроллеров: те же сервисы будут
+ * вызываться из MCP-сервера и обработчика webhook на будущих этапах.
+ */
+@Injectable()
+export class AuditService {
+  /** Добавляет запись в журнал. Изменение и удаление записей не предусмотрены. */
+  async record(tx: Transaction, actor: AuditActor, entry: AuditEntryInput): Promise<void> {
+    await tx.insert(auditLog).values({
+      subjectId: actor.id,
+      subjectKind: actor.kind,
+      subjectLabel: actor.label,
+      action: entry.action,
+      entityType: entry.entityType ?? null,
+      entityId: entry.entityId ?? null,
+      projectId: entry.projectId ?? null,
+      metadata: entry.metadata ?? null,
+    });
+  }
+}
+```
+
+- [ ] **Step 5: Создать `apps/api/src/audit/audit.module.ts`**
+
+```typescript
+import { Global, Module } from '@nestjs/common';
+
+import { AuditService } from './audit.service';
+
+/** Модуль журналирования. Глобальный: журнал пишут почти все модули. */
+@Global()
+@Module({
+  providers: [AuditService],
+  exports: [AuditService],
+})
+export class AuditModule {}
+```
+
+- [ ] **Step 6: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/audit`
+Expected: PASS, 4 теста.
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add apps/api/src/audit
+git commit -m "Добавить журнал действий"
+```
+
+---
+**Результат чанка 4:** проверка прав работает и покрыта тестами, guard суперадмина отделён от сервиса прав, журнал пишется в одной транзакции с действием. Следующий чанк добавляет проекции и репозитории.
+
+---
+
+## Chunk 5: Проекции и репозитории
+
+Результат чанка: репозитории физически не отдают данные без субъекта, уровень «метаданные» реально скрывает поля, выдачи адресуются парой «субъект × секция».
+
+### Task 17: Проекции секции «Инфо»
+
+Уровень «метаданные» — это фильтрация полей, а не строк (спека 5.5). Проекции вынесены в отдельный файл: на будущих этапах у каждой секции появится своя, и держать их вместе с репозиториями значило бы размазать одну ответственность по шести файлам.
+
+**Files:**
+- Create: `apps/api/src/projects/project.projection.ts`
+- Create: `packages/shared/src/schemas/project.ts`
+- Modify: `packages/shared/src/index.ts`
+- Test: `apps/api/src/projects/project.projection.test.ts`
+
+- [ ] **Step 1: Создать `packages/shared/src/schemas/project.ts`**
+
+```typescript
+import { z } from 'zod';
+
+import { ProjectLifecycle } from '../enums';
+
+/** Проект на уровне метаданных: видно, что он есть, и его состояние (ТЗ 4.3). */
+export const projectMetadataSchema = z.object({
+  id: z.string().uuid(),
+  slug: z.string(),
+  name: z.string(),
+  lifecycle: z.nativeEnum(ProjectLifecycle),
+});
+
+/** Проект на уровне чтения: все поля паспорта. */
+export const projectDetailSchema = projectMetadataSchema.extend({
+  purpose: z.string().nullable(),
+  stack: z.string().nullable(),
+  repoUrl: z.string().nullable(),
+  ownerUserId: z.string().uuid().nullable(),
+  notes: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+/** Поля, доступные для правки при уровне записи. */
+export const projectUpdateSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  purpose: z.string().max(2000).nullable().optional(),
+  stack: z.string().max(500).nullable().optional(),
+  repoUrl: z.string().url().max(500).nullable().optional(),
+  ownerUserId: z.string().uuid().nullable().optional(),
+  lifecycle: z.nativeEnum(ProjectLifecycle).optional(),
+  notes: z.string().max(10_000).nullable().optional(),
+});
+
+/** Поля для создания проекта. Слаг генерируется сервером и здесь не принимается. */
+export const projectCreateSchema = projectUpdateSchema.extend({
+  name: z.string().min(1).max(200),
+});
+
+/** Проект на уровне метаданных. */
+export type ProjectMetadata = z.infer<typeof projectMetadataSchema>;
+
+/** Проект на уровне чтения. */
+export type ProjectDetail = z.infer<typeof projectDetailSchema>;
+
+/** Данные для правки проекта. */
+export type ProjectUpdate = z.infer<typeof projectUpdateSchema>;
+
+/** Данные для создания проекта. */
+export type ProjectCreate = z.infer<typeof projectCreateSchema>;
+```
+
+- [ ] **Step 2: Дополнить `packages/shared/src/index.ts`**
+
+```typescript
+export * from './enums';
+export * from './schemas/project';
+```
+
+- [ ] **Step 3: Написать падающий тест `apps/api/src/projects/project.projection.test.ts`**
+
+```typescript
+import { AccessLevel, ProjectLifecycle } from '@cairn/shared';
+import { describe, expect, it } from 'vitest';
+
+import { projectProjection } from './project.projection';
+import type { Project } from '../db/schema/index';
+
+const project: Project = {
+  id: '11111111-1111-1111-1111-111111111111',
+  slug: 'proekt',
+  name: 'Проект',
+  purpose: 'Назначение',
+  stack: 'Next.js',
+  repoUrl: 'https://example.com/repo',
+  ownerUserId: null,
+  lifecycle: ProjectLifecycle.Active,
+  notes: 'Заметки',
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+  updatedAt: new Date('2026-01-02T00:00:00Z'),
+};
+
+describe('projectProjection', () => {
+  describe('уровень метаданных', () => {
+    const result = projectProjection(project, AccessLevel.Metadata);
+
+    it('отдаёт название и состояние', () => {
+      expect(result).toMatchObject({ name: 'Проект', lifecycle: ProjectLifecycle.Active });
+    });
+
+    it('скрывает назначение, стек и заметки', () => {
+      expect(result).not.toHaveProperty('purpose');
+      expect(result).not.toHaveProperty('stack');
+      expect(result).not.toHaveProperty('notes');
+    });
+
+    it('скрывает ссылку на репозиторий', () => {
+      expect(result).not.toHaveProperty('repoUrl');
+    });
+  });
+
+  describe('уровень чтения', () => {
+    const result = projectProjection(project, AccessLevel.Read);
+
+    it('отдаёт все поля паспорта', () => {
+      expect(result).toMatchObject({
+        purpose: 'Назначение',
+        stack: 'Next.js',
+        repoUrl: 'https://example.com/repo',
+        notes: 'Заметки',
+      });
+    });
+
+    it('отдаёт даты строками', () => {
+      expect(typeof (result as { createdAt: unknown }).createdAt).toBe('string');
+    });
+  });
+
+  describe('уровень записи', () => {
+    it('отдаёт то же, что и чтение', () => {
+      expect(projectProjection(project, AccessLevel.Write)).toEqual(
+        projectProjection(project, AccessLevel.Read),
+      );
+    });
+  });
+});
+```
+
+- [ ] **Step 4: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/projects`
+Expected: FAIL — модуль `./project.projection.js` не найден.
+
+- [ ] **Step 5: Создать `apps/api/src/projects/project.projection.ts`**
+
+```typescript
+import { AccessLevel, type ProjectDetail, type ProjectMetadata } from '@cairn/shared';
+
+import type { Project } from '../db/schema/index';
+
+/**
+ * Приводит проект к набору полей, разрешённому уровнем доступа (спека 5.5).
+ *
+ * Применяется в сервисном слое до сериализации, поэтому скрытые поля
+ * не доходят до контроллера и не могут просочиться в ответ по недосмотру.
+ */
+export function projectProjection(
+  project: Project,
+  level: AccessLevel,
+): ProjectMetadata | ProjectDetail {
+  const metadata: ProjectMetadata = {
+    id: project.id,
+    slug: project.slug,
+    name: project.name,
+    lifecycle: project.lifecycle,
+  };
+
+  if (level === AccessLevel.Metadata) {
+    return metadata;
+  }
+
+  return {
+    ...metadata,
+    purpose: project.purpose,
+    stack: project.stack,
+    repoUrl: project.repoUrl,
+    ownerUserId: project.ownerUserId,
+    notes: project.notes,
+    createdAt: project.createdAt.toISOString(),
+    updatedAt: project.updatedAt.toISOString(),
+  };
+}
+```
+
+- [ ] **Step 6: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/projects`
+Expected: PASS, 7 тестов.
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add apps/api/src/projects packages/shared/src
+git commit -m "Добавить проекции секции «Инфо»"
+```
+
+---
+
+### Task 18: Репозиторий проектов
+
+Проверка встроена в путь к данным: метода без субъекта в сигнатуре не существует, поэтому её нельзя забыть вызвать (спека 5.4).
+
+**Files:**
+- Create: `apps/api/src/projects/projects.repository.ts`, `apps/api/src/projects/slug.ts`
+- Test: `apps/api/src/projects/projects.repository.test.ts`, `apps/api/src/projects/slug.test.ts`
+
+- [ ] **Step 1: Написать падающий тест `apps/api/src/projects/slug.test.ts`**
+
+```typescript
+import { describe, expect, it } from 'vitest';
+
+import { generateSlug } from './slug';
+
+describe('generateSlug', () => {
+  it('транслитерирует кириллицу', () => {
+    expect(generateSlug('Мой Проект')).toBe('moj-proekt');
+  });
+
+  it('заменяет пробелы дефисами', () => {
+    expect(generateSlug('система учёта')).toBe('sistema-ucheta');
+  });
+
+  it('убирает знаки препинания', () => {
+    expect(generateSlug('Проект №1: главный!')).toBe('proekt-1-glavnyj');
+  });
+
+  it('схлопывает повторяющиеся дефисы', () => {
+    expect(generateSlug('а  —  б')).toBe('a-b');
+  });
+
+  it('обрезает дефисы по краям', () => {
+    expect(generateSlug('  проект  ')).toBe('proekt');
+  });
+
+  it('сохраняет латиницу и цифры', () => {
+    expect(generateSlug('CAIRN v2')).toBe('cairn-v2');
+  });
+
+  it('даёт запасное значение для строки без пригодных символов', () => {
+    // Пустой слаг сделал бы ссылку на проект неработающей.
+    expect(generateSlug('!!!')).toBe('proekt');
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/projects/slug`
+Expected: FAIL — модуль `./slug.js` не найден.
+
+- [ ] **Step 3: Создать `apps/api/src/projects/slug.ts`**
+
+```typescript
+/**
+ * Строит слаг проекта из названия.
+ *
+ * Слаг задаётся один раз при создании и потом не меняется, чтобы ссылки
+ * не ломались (спека 4.4). Уникальность обеспечивает вызывающий код.
+ */
+export function generateSlug(name: string): string {
+  const transliterated = name
+    .toLowerCase()
+    .split('')
+    .map((char) => TRANSLITERATION[char] ?? char)
+    .join('');
+
+  const slug = transliterated
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return slug || FALLBACK_SLUG;
+}
+
+/** Запасной слаг для названий без пригодных символов. */
+const FALLBACK_SLUG = 'proekt';
+
+/** Таблица транслитерации кириллицы. */
+const TRANSLITERATION: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh',
+  з: 'z', и: 'i', й: 'j', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o',
+  п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'c',
+  ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu',
+  я: 'ya',
+};
+```
+
+- [ ] **Step 4: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/projects/slug`
+Expected: PASS, 7 тестов.
+
+- [ ] **Step 5: Написать падающий тест `apps/api/src/projects/projects.repository.test.ts`**
+
+```typescript
+import { AccessLevel, ProjectLifecycle, Section, SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { AccessService } from '../access/access.service';
+import { SectionNotVisibleError } from '../access/access.guard-errors';
+import type { RequestSubject } from '../access/access.types';
+import { ProjectsRepository } from './projects.repository';
+import { grants, projects, subjects, users } from '../db/schema/index';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('ProjectsRepository', () => {
+  let testDb: TestDatabase;
+  let repository: ProjectsRepository;
+  let subjectId: string;
+  let grantedBy: string;
+  let projectId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    repository = new ProjectsRepository(testDb.db, new AccessService(testDb.db));
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'подрядчик' })
+      .returning();
+    subjectId = subject!.id;
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'админ' })
+      .returning();
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({ subjectId: adminSubject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+    grantedBy = admin!.id;
+
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'proekt', name: 'Проект', purpose: 'Назначение' })
+      .returning();
+    projectId = project!.id;
+  });
+
+  const subject = (overrides: Partial<RequestSubject> = {}): RequestSubject => ({
+    id: subjectId,
+    kind: SubjectKind.User,
+    label: 'подрядчик',
+    isSuperadmin: false,
+    isRevoked: false,
+    ...overrides,
+  });
+
+  async function grant(level: AccessLevel): Promise<void> {
+    await testDb.db
+      .insert(grants)
+      .values({ subjectId, projectId, section: Section.Info, level, grantedBy });
+  }
+
+  describe('findById', () => {
+    it('без доступа бросает «не найдено»', async () => {
+      await expect(repository.findById(subject(), projectId)).rejects.toBeInstanceOf(
+        SectionNotVisibleError,
+      );
+    });
+
+    it('на уровне метаданных не отдаёт назначение', async () => {
+      await grant(AccessLevel.Metadata);
+
+      expect(await repository.findById(subject(), projectId)).not.toHaveProperty('purpose');
+    });
+
+    it('на уровне чтения отдаёт назначение', async () => {
+      await grant(AccessLevel.Read);
+
+      expect(await repository.findById(subject(), projectId)).toMatchObject({
+        purpose: 'Назначение',
+      });
+    });
+  });
+
+  describe('findVisible', () => {
+    it('без выдач возвращает пустой список', async () => {
+      expect(await repository.findVisible(subject())).toEqual([]);
+    });
+
+    it('возвращает проекты с выдачей в проекции метаданных', async () => {
+      await grant(AccessLevel.Metadata);
+
+      const visible = await repository.findVisible(subject());
+
+      expect(visible).toHaveLength(1);
+      expect(visible[0]).not.toHaveProperty('purpose');
+    });
+
+    it('суперадмину возвращает все проекты', async () => {
+      expect(await repository.findVisible(subject({ isSuperadmin: true }))).toHaveLength(1);
+    });
+  });
+
+  describe('create', () => {
+    it('генерирует уникальный слаг при совпадении названий', async () => {
+      const first = await repository.create(testDb.db, { name: 'Проект' });
+      const second = await repository.create(testDb.db, { name: 'Проект' });
+
+      expect(first.slug).not.toBe(second.slug);
+    });
+
+    it('ставит состояние «в разработке» по умолчанию', async () => {
+      const created = await repository.create(testDb.db, { name: 'Новый' });
+
+      expect(created.lifecycle).toBe(ProjectLifecycle.Development);
+    });
+  });
+});
+```
+
+- [ ] **Step 6: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/projects/projects.repository`
+Expected: FAIL — модуль `./projects.repository.js` не найден.
+
+- [ ] **Step 7: Создать `apps/api/src/projects/projects.repository.ts`**
+
+```typescript
+import {
+  AccessLevel,
+  Section,
+  type ProjectCreate,
+  type ProjectDetail,
+  type ProjectMetadata,
+  type ProjectUpdate,
+} from '@cairn/shared';
+import { Inject, Injectable } from '@nestjs/common';
+import { eq, inArray } from 'drizzle-orm';
+
+import { AccessService } from '../access/access.service';
+import { SectionNotVisibleError } from '../access/access.guard-errors';
+import type { RequestSubject } from '../access/access.types';
+import { DATABASE } from '../db/db.module';
+import type { Database, Transaction } from '../db/db.types';
+import { projects, type Project } from '../db/schema/index';
+import { projectProjection } from './project.projection';
+import { generateSlug } from './slug';
+
+/**
+ * Доступ к проектам.
+ *
+ * Каждый метод чтения принимает субъект первым аргументом и проверяет права
+ * внутри: отдельного вызова проверки, который можно забыть, не существует
+ * (спека 5.4).
+ *
+ * Методы записи принимают транзакцию, потому что вызывающий сервис пишет
+ * в журнал в той же транзакции (спека 7.3). Право создавать проект
+ * проверяется guard'ом суперадмина, а не здесь: при создании нет
+ * идентификатора проекта, по которому работает сервис прав (спека 4.4).
+ */
+@Injectable()
+export class ProjectsRepository {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly access: AccessService,
+  ) {}
+
+  /** Возвращает проект в проекции, соответствующей уровню доступа субъекта. */
+  async findById(
+    subject: RequestSubject,
+    projectId: string,
+  ): Promise<ProjectMetadata | ProjectDetail> {
+    const level = await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Info,
+      AccessLevel.Metadata,
+    );
+
+    const [project] = await this.db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+
+    if (!project) {
+      throw new SectionNotVisibleError();
+    }
+
+    return projectProjection(project, level);
+  }
+
+  /** Возвращает список видимых субъекту проектов в проекции метаданных. */
+  async findVisible(subject: RequestSubject): Promise<ProjectMetadata[]> {
+    const ids = await this.access.visibleProjectIds(subject);
+
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const rows = await this.db.select().from(projects).where(inArray(projects.id, ids));
+
+    return rows.map((row) => projectProjection(row, AccessLevel.Metadata) as ProjectMetadata);
+  }
+
+  /** Создаёт проект, подбирая свободный слаг. */
+  async create(tx: Transaction | Database, input: ProjectCreate): Promise<Project> {
+    const slug = await this.findFreeSlug(tx, generateSlug(input.name));
+
+    const [created] = await tx
+      .insert(projects)
+      .values({ ...input, slug })
+      .returning();
+
+    return created!;
+  }
+
+  /** Изменяет поля паспорта проекта. Слаг не меняется. */
+  async update(tx: Transaction | Database, projectId: string, input: ProjectUpdate): Promise<Project> {
+    const [updated] = await tx
+      .update(projects)
+      .set({ ...input, updatedAt: new Date() })
+      .where(eq(projects.id, projectId))
+      .returning();
+
+    if (!updated) {
+      throw new SectionNotVisibleError();
+    }
+
+    return updated;
+  }
+
+  /** Подбирает свободный слаг, дополняя базовый числовым суффиксом. */
+  private async findFreeSlug(tx: Transaction | Database, base: string): Promise<string> {
+    for (let suffix = 0; suffix < MAX_SLUG_ATTEMPTS; suffix += 1) {
+      const candidate = suffix === 0 ? base : `${base}-${suffix + 1}`;
+      const [existing] = await tx
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.slug, candidate))
+        .limit(1);
+
+      if (!existing) {
+        return candidate;
+      }
+    }
+
+    throw new Error(`Не удалось подобрать свободный слаг для «${base}»`);
+  }
+}
+
+/** Предел перебора суффиксов слага. */
+const MAX_SLUG_ATTEMPTS = 100;
+```
+
+- [ ] **Step 8: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/projects`
+Expected: PASS, 15 тестов.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/api/src/projects
+git commit -m "Добавить репозиторий проектов"
+```
+
+---
+
+### Task 19: Репозиторий выдач доступа
+
+**Files:**
+- Create: `apps/api/src/grants/grants.repository.ts`
+- Create: `packages/shared/src/schemas/grant.ts`
+- Modify: `packages/shared/src/index.ts`
+- Test: `apps/api/src/grants/grants.repository.test.ts`
+
+- [ ] **Step 1: Создать `packages/shared/src/schemas/grant.ts`**
+
+```typescript
+import { z } from 'zod';
+
+import { AccessLevel, Section, SubjectKind } from '../enums';
+
+/** Установка уровня доступа для пары «субъект × секция». */
+export const grantSetSchema = z.object({
+  subjectId: z.string().uuid(),
+  section: z.nativeEnum(Section),
+  level: z.nativeEnum(AccessLevel),
+});
+
+/** Отзыв выдачи. Адресуется парой, а не идентификатором строки (спека 8). */
+export const grantRevokeSchema = z.object({
+  subjectId: z.string().uuid(),
+  section: z.nativeEnum(Section),
+});
+
+/** Строка матрицы доступов: субъект и его уровни по секциям. */
+export const grantMatrixRowSchema = z.object({
+  subjectId: z.string().uuid(),
+  subjectKind: z.nativeEnum(SubjectKind),
+  subjectLabel: z.string(),
+  isRevoked: z.boolean(),
+  levels: z.record(z.nativeEnum(Section), z.nativeEnum(AccessLevel)),
+});
+
+/** Установка уровня доступа. */
+export type GrantSet = z.infer<typeof grantSetSchema>;
+
+/** Отзыв выдачи. */
+export type GrantRevoke = z.infer<typeof grantRevokeSchema>;
+
+/** Строка матрицы доступов. */
+export type GrantMatrixRow = z.infer<typeof grantMatrixRowSchema>;
+```
+
+- [ ] **Step 2: Дополнить `packages/shared/src/index.ts`**
+
+```typescript
+export * from './enums';
+export * from './schemas/grant';
+export * from './schemas/project';
+```
+
+- [ ] **Step 3: Написать падающий тест `apps/api/src/grants/grants.repository.test.ts`**
+
+```typescript
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { GrantsRepository } from './grants.repository';
+import { grants, projects, subjects, users } from '../db/schema/index';
+import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+describe('GrantsRepository', () => {
+  let testDb: TestDatabase;
+  let repository: GrantsRepository;
+  let subjectId: string;
+  let grantedBy: string;
+  let projectId: string;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+    repository = new GrantsRepository(testDb.db);
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'подрядчик' })
+      .returning();
+    subjectId = subject!.id;
+
+    const [adminSubject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'админ' })
+      .returning();
+    const [admin] = await testDb.db
+      .insert(users)
+      .values({ subjectId: adminSubject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .returning();
+    grantedBy = admin!.id;
+
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'proekt', name: 'Проект' })
+      .returning();
+    projectId = project!.id;
+  });
+
+  describe('set', () => {
+    it('создаёт выдачу', async () => {
+      await testDb.db.transaction(async (tx) => {
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Info,
+          level: AccessLevel.Read,
+        });
+      });
+
+      const rows = await testDb.db.select().from(grants);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.level).toBe(AccessLevel.Read);
+    });
+
+    it('меняет уровень вместо создания второй строки', async () => {
+      // Уникальный индекс по тройке: две выдачи на одну пару разошлись бы в выборках.
+      await testDb.db.transaction(async (tx) => {
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Info,
+          level: AccessLevel.Read,
+        });
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Info,
+          level: AccessLevel.Write,
+        });
+      });
+
+      const rows = await testDb.db.select().from(grants);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.level).toBe(AccessLevel.Write);
+    });
+  });
+
+  describe('revoke', () => {
+    it('удаляет строку выдачи', async () => {
+      // Отсутствие доступа выражается отсутствием строки (спека 4.3).
+      await testDb.db.transaction(async (tx) => {
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Info,
+          level: AccessLevel.Read,
+        });
+        await repository.revoke(tx, projectId, { subjectId, section: Section.Info });
+      });
+
+      expect(await testDb.db.select().from(grants)).toHaveLength(0);
+    });
+
+    it('сообщает, была ли выдача', async () => {
+      const removed = await testDb.db.transaction((tx) =>
+        repository.revoke(tx, projectId, { subjectId, section: Section.Info }),
+      );
+
+      expect(removed).toBe(false);
+    });
+  });
+
+  describe('matrixForProject', () => {
+    it('возвращает строку на каждый субъект с выдачей', async () => {
+      await testDb.db.transaction(async (tx) => {
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Info,
+          level: AccessLevel.Read,
+        });
+      });
+
+      const matrix = await repository.matrixForProject(projectId);
+
+      expect(matrix).toHaveLength(1);
+      expect(matrix[0]?.levels[Section.Info]).toBe(AccessLevel.Read);
+    });
+
+    it('собирает несколько секций в одну строку', async () => {
+      await testDb.db.transaction(async (tx) => {
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Info,
+          level: AccessLevel.Read,
+        });
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Docs,
+          level: AccessLevel.Write,
+        });
+      });
+
+      const matrix = await repository.matrixForProject(projectId);
+
+      expect(matrix).toHaveLength(1);
+      expect(matrix[0]?.levels).toEqual({
+        [Section.Info]: AccessLevel.Read,
+        [Section.Docs]: AccessLevel.Write,
+      });
+    });
+  });
+});
+```
+
+- [ ] **Step 4: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/api test src/grants`
+Expected: FAIL — модуль `./grants.repository.js` не найден.
+
+- [ ] **Step 5: Создать `apps/api/src/grants/grants.repository.ts`**
+
+```typescript
+import { type GrantMatrixRow, type GrantRevoke, type GrantSet, type Section } from '@cairn/shared';
+import { Inject, Injectable } from '@nestjs/common';
+import { and, eq } from 'drizzle-orm';
+
+import { DATABASE } from '../db/db.module';
+import type { Database, Transaction } from '../db/db.types';
+import { grants, subjects } from '../db/schema/index';
+
+/**
+ * Доступ к выдачам.
+ *
+ * Субъект-инициатор здесь не проверяется: управлять выдачами вправе только
+ * суперадмин, и это проверяет guard на уровне контроллера (спека 4.3).
+ * Дублировать проверку здесь значило бы завести второе место, где правило
+ * может разойтись.
+ */
+@Injectable()
+export class GrantsRepository {
+  constructor(@Inject(DATABASE) private readonly db: Database) {}
+
+  /** Устанавливает уровень доступа для пары «субъект × секция». */
+  async set(
+    tx: Transaction | Database,
+    projectId: string,
+    grantedBy: string,
+    input: GrantSet,
+  ): Promise<void> {
+    await tx
+      .insert(grants)
+      .values({
+        subjectId: input.subjectId,
+        projectId,
+        section: input.section,
+        level: input.level,
+        grantedBy,
+      })
+      .onConflictDoUpdate({
+        target: [grants.subjectId, grants.projectId, grants.section],
+        set: { level: input.level, grantedBy, grantedAt: new Date() },
+      });
+  }
+
+  /**
+   * Отзывает выдачу удалением строки.
+   *
+   * Возвращает признак того, была ли выдача: вызывающий сервис пишет в журнал
+   * только состоявшийся отзыв.
+   */
+  async revoke(tx: Transaction | Database, projectId: string, input: GrantRevoke): Promise<boolean> {
+    const removed = await tx
+      .delete(grants)
+      .where(
+        and(
+          eq(grants.subjectId, input.subjectId),
+          eq(grants.projectId, projectId),
+          eq(grants.section, input.section),
+        ),
+      )
+      .returning({ id: grants.id });
+
+    return removed.length > 0;
+  }
+
+  /** Собирает матрицу «субъект × секция» для проекта. */
+  async matrixForProject(projectId: string): Promise<GrantMatrixRow[]> {
+    const rows = await this.db
+      .select({
+        subjectId: grants.subjectId,
+        section: grants.section,
+        level: grants.level,
+        subjectKind: subjects.kind,
+        subjectLabel: subjects.label,
+        revokedAt: subjects.revokedAt,
+      })
+      .from(grants)
+      .innerJoin(subjects, eq(subjects.id, grants.subjectId))
+      .where(eq(grants.projectId, projectId));
+
+    const bySubject = new Map<string, GrantMatrixRow>();
+
+    for (const row of rows) {
+      const existing = bySubject.get(row.subjectId) ?? {
+        subjectId: row.subjectId,
+        subjectKind: row.subjectKind,
+        subjectLabel: row.subjectLabel,
+        isRevoked: row.revokedAt !== null,
+        levels: {} as Record<Section, never>,
+      };
+
+      existing.levels[row.section] = row.level;
+      bySubject.set(row.subjectId, existing);
+    }
+
+    return [...bySubject.values()];
+  }
+}
+```
+
+- [ ] **Step 6: Запустить тест**
+
+Run: `pnpm --filter @cairn/api test src/grants`
+Expected: PASS, 6 тестов.
+
+- [ ] **Step 7: Запустить все тесты**
+
+Run: `pnpm test`
+Expected: PASS во всех пакетах.
+
+- [ ] **Step 8: Коммит**
+
+```bash
+git add apps/api/src/grants packages/shared/src
+git commit -m "Добавить репозиторий выдач доступа"
+```
+
+---
+
+**Результат чанка 4:** модель доступа работает и покрыта тестами, журнал пишется в одной транзакции с действием, репозитории не отдают данные без субъекта. Следующий чанк добавляет аутентификацию и HTTP-слой.
