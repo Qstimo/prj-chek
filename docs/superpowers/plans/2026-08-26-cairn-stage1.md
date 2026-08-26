@@ -12188,3 +12188,1054 @@ git commit -m "Добавить карточку проекта"
 ---
 
 **Результат чанка 13:** человек видит доступные проекты, открывает карточку и получает ровно тот состав полей, который разрешён его уровнем доступа. Следующий чанк добавляет экраны администрирования и развёртывание.
+
+## Chunk 14: Экраны администрирования
+
+Результат чанка: суперадмин заводит проекты, выдаёт доступы, приглашает людей и читает журнал; обладатель уровня записи правит паспорт проекта.
+
+### Task 48: Форма правки проекта
+
+**Files:**
+- Create: `apps/web/src/components/ProjectForm/ProjectForm.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Create: `apps/web/src/app/projects/[id]/edit/page.tsx`, `apps/web/src/app/projects/[id]/edit/EditProjectScreen.tsx`
+- Test: `apps/web/src/components/ProjectForm/ProjectForm.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/ProjectForm/ProjectForm.test.tsx`**
+
+```tsx
+import { ProjectLifecycle } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { ProjectForm } from './ProjectForm';
+
+const project = {
+  name: 'Проект',
+  purpose: 'Назначение',
+  stack: 'Next.js',
+  repoUrl: 'https://example.com/repo',
+  notes: null,
+  lifecycle: ProjectLifecycle.Active,
+};
+
+describe('ProjectForm', () => {
+  it('заполняет поля текущими значениями', () => {
+    render(<ProjectForm initial={project} onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText('Название')).toHaveValue('Проект');
+    expect(screen.getByLabelText('Назначение')).toHaveValue('Назначение');
+  });
+
+  it('передаёт изменённые значения', async () => {
+    const onSubmit = vi.fn();
+    render(<ProjectForm initial={project} onSubmit={onSubmit} />);
+
+    await userEvent.clear(screen.getByLabelText('Название'));
+    await userEvent.type(screen.getByLabelText('Название'), 'Новое имя');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ name: 'Новое имя' }));
+  });
+
+  it('не отправляет пустое название', async () => {
+    const onSubmit = vi.fn();
+    render(<ProjectForm initial={project} onSubmit={onSubmit} />);
+
+    await userEvent.clear(screen.getByLabelText('Название'));
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('предлагает все состояния жизненного цикла', () => {
+    render(<ProjectForm initial={project} onSubmit={vi.fn()} />);
+
+    const select = screen.getByLabelText('Состояние');
+
+    expect(select).toHaveValue(ProjectLifecycle.Active);
+    expect(screen.getByRole('option', { name: 'Приостановлен' })).toBeInTheDocument();
+  });
+
+  it('превращает очищенное необязательное поле в пустое значение', async () => {
+    // Пустая строка и «поля нет» — разные вещи: первая замусорила бы паспорт.
+    const onSubmit = vi.fn();
+    render(<ProjectForm initial={project} onSubmit={onSubmit} />);
+
+    await userEvent.clear(screen.getByLabelText('Назначение'));
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ purpose: null }));
+  });
+
+  it('не даёт сохранить во время отправки', () => {
+    render(<ProjectForm initial={project} onSubmit={vi.fn()} isSubmitting />);
+
+    expect(screen.getByRole('button', { name: 'Сохранение…' })).toBeDisabled();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/ProjectForm`
+Expected: FAIL — «Failed to resolve import "./ProjectForm"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/ProjectForm/constants.ts`**
+
+```typescript
+import { ProjectLifecycle } from '@cairn/shared';
+
+/** Подписи полей паспорта. */
+export const FIELD_LABELS = {
+  name: 'Название',
+  purpose: 'Назначение',
+  stack: 'Стек',
+  repoUrl: 'Репозиторий',
+  notes: 'Заметки',
+  lifecycle: 'Состояние',
+} as const;
+
+/** Варианты состояния жизненного цикла. */
+export const LIFECYCLE_OPTIONS: { value: ProjectLifecycle; label: string }[] = [
+  { value: ProjectLifecycle.Development, label: 'В разработке' },
+  { value: ProjectLifecycle.Active, label: 'Работает' },
+  { value: ProjectLifecycle.Paused, label: 'Приостановлен' },
+  { value: ProjectLifecycle.Archived, label: 'Архив' },
+];
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/ProjectForm/types.ts`**
+
+```typescript
+import type { ProjectLifecycle, ProjectUpdate } from '@cairn/shared';
+
+/** Значения полей формы. */
+export interface ProjectFormValues {
+  name: string;
+  purpose: string | null;
+  stack: string | null;
+  repoUrl: string | null;
+  notes: string | null;
+  lifecycle: ProjectLifecycle;
+}
+
+/** Пропсы формы проекта. */
+export interface IProps {
+  /** Текущие значения полей. */
+  initial: ProjectFormValues;
+  /** Вызывается с изменёнными значениями. */
+  onSubmit: (input: ProjectUpdate) => void;
+  /** Сообщение об ошибке. */
+  error?: string;
+  /** Отправка в процессе. */
+  isSubmitting?: boolean;
+}
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/ProjectForm/ProjectForm.tsx`**
+
+```tsx
+'use client';
+
+import type { ProjectLifecycle, ProjectUpdate } from '@cairn/shared';
+import { useState, type FormEvent } from 'react';
+
+import { FIELD_LABELS, LIFECYCLE_OPTIONS } from './constants';
+import type { IProps, ProjectFormValues } from './types';
+
+/** Форма паспорта проекта: создание и правка (спека 9.1). */
+export function ProjectForm({ initial, onSubmit, error, isSubmitting = false }: IProps) {
+  const [values, setValues] = useState<ProjectFormValues>(initial);
+
+  const canSubmit = values.name.trim().length > 0 && !isSubmitting;
+
+  function change<K extends keyof ProjectFormValues>(key: K, value: ProjectFormValues[K]): void {
+    setValues((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    if (!canSubmit) {
+      return;
+    }
+
+    onSubmit({
+      name: values.name.trim(),
+      purpose: emptyToNull(values.purpose),
+      stack: emptyToNull(values.stack),
+      repoUrl: emptyToNull(values.repoUrl),
+      notes: emptyToNull(values.notes),
+      lifecycle: values.lifecycle,
+    } satisfies ProjectUpdate);
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <TextField
+        id="name"
+        label={FIELD_LABELS.name}
+        value={values.name}
+        onChange={(value) => change('name', value)}
+      />
+      <TextField
+        id="purpose"
+        label={FIELD_LABELS.purpose}
+        value={values.purpose ?? ''}
+        onChange={(value) => change('purpose', value)}
+        multiline
+      />
+      <TextField
+        id="stack"
+        label={FIELD_LABELS.stack}
+        value={values.stack ?? ''}
+        onChange={(value) => change('stack', value)}
+      />
+      <TextField
+        id="repoUrl"
+        label={FIELD_LABELS.repoUrl}
+        value={values.repoUrl ?? ''}
+        onChange={(value) => change('repoUrl', value)}
+      />
+      <TextField
+        id="notes"
+        label={FIELD_LABELS.notes}
+        value={values.notes ?? ''}
+        onChange={(value) => change('notes', value)}
+        multiline
+      />
+
+      <div className="space-y-1">
+        <label htmlFor="lifecycle" className="block text-sm font-medium">
+          {FIELD_LABELS.lifecycle}
+        </label>
+        <select
+          id="lifecycle"
+          value={values.lifecycle}
+          onChange={(event) => change('lifecycle', event.target.value as ProjectLifecycle)}
+          className="w-full rounded-md border border-border px-3 py-2"
+        >
+          {LIFECYCLE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+      >
+        {isSubmitting ? 'Сохранение…' : 'Сохранить'}
+      </button>
+    </form>
+  );
+}
+
+/** Поле ввода с подписью. */
+function TextField({
+  id,
+  label,
+  value,
+  onChange,
+  multiline = false,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  multiline?: boolean;
+}) {
+  const className = 'w-full rounded-md border border-border px-3 py-2';
+
+  return (
+    <div className="space-y-1">
+      <label htmlFor={id} className="block text-sm font-medium">
+        {label}
+      </label>
+      {multiline ? (
+        <textarea
+          id={id}
+          value={value}
+          rows={3}
+          onChange={(event) => onChange(event.target.value)}
+          className={className}
+        />
+      ) : (
+        <input
+          id={id}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className={className}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Превращает пустую строку в отсутствие значения. */
+function emptyToNull(value: string | null): string | null {
+  const trimmed = value?.trim() ?? '';
+
+  return trimmed.length > 0 ? trimmed : null;
+}
+```
+
+- [ ] **Step 6: Создать `apps/web/src/components/ProjectForm/index.ts`**
+
+```typescript
+export { ProjectForm } from './ProjectForm';
+export type { IProps, ProjectFormValues } from './types';
+```
+
+- [ ] **Step 7: Создать экран правки**
+
+`apps/web/src/app/projects/[id]/edit/EditProjectScreen.tsx`:
+
+```tsx
+'use client';
+
+import type { ProjectUpdate } from '@cairn/shared';
+import { useRouter } from 'next/navigation';
+
+import { ApiError } from '@/api';
+import { useMutationUpdateProject } from '@/api/hooks';
+import { ProjectForm, type ProjectFormValues } from '@/components/ProjectForm';
+
+/** Пропсы экрана правки. */
+interface IProps {
+  projectId: string;
+  initial: ProjectFormValues;
+}
+
+/** Правка паспорта проекта. Требует уровень записи (спека 4.3). */
+export function EditProjectScreen({ projectId, initial }: IProps) {
+  const router = useRouter();
+  const mutation = useMutationUpdateProject(projectId);
+
+  function submit(input: ProjectUpdate): void {
+    mutation.mutate(input, {
+      onSuccess: () => {
+        router.push(`/projects/${projectId}`);
+        router.refresh();
+      },
+    });
+  }
+
+  return (
+    <ProjectForm
+      initial={initial}
+      onSubmit={submit}
+      isSubmitting={mutation.isPending}
+      error={
+        mutation.error instanceof ApiError ? mutation.error.message : mutation.error?.message
+      }
+    />
+  );
+}
+```
+
+`apps/web/src/app/projects/[id]/edit/page.tsx`:
+
+```tsx
+import type { ProjectDetail } from '@cairn/shared';
+import { notFound, redirect } from 'next/navigation';
+
+import { apiServer, ApiError } from '@/api';
+import { EditProjectScreen } from './EditProjectScreen';
+
+/** Страница правки проекта. */
+export default async function EditProjectPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  let project: ProjectDetail;
+
+  try {
+    project = await apiServer<ProjectDetail>(`/projects/${id}`);
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 401) {
+      redirect('/login');
+    }
+
+    notFound();
+  }
+
+  // Уровень метаданных не даёт полей паспорта — править нечего.
+  if (!('purpose' in project)) {
+    notFound();
+  }
+
+  return (
+    <main className="mx-auto max-w-3xl space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Правка проекта</h1>
+      <EditProjectScreen
+        projectId={id}
+        initial={{
+          name: project.name,
+          purpose: project.purpose,
+          stack: project.stack,
+          repoUrl: project.repoUrl,
+          notes: project.notes,
+          lifecycle: project.lifecycle,
+        }}
+      />
+    </main>
+  );
+}
+```
+
+- [ ] **Step 8: Запустить тест**
+
+Run: `pnpm --filter @cairn/web test src/components/ProjectForm`
+Expected: PASS, 6 тестов.
+
+- [ ] **Step 9: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить форму правки проекта"
+```
+
+---
+
+### Task 49: Матрица управления доступами
+
+Главный инструмент контроля суперадмина (ТЗ 8). Все шесть секций показываются сразу, включая нереализованные: выдать доступ к документации можно и до того, как она появится.
+
+**Files:**
+- Create: `apps/web/src/components/AccessMatrix/AccessMatrix.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Create: `apps/web/src/app/projects/[id]/access/page.tsx`, `AccessScreen.tsx`
+- Create: `apps/web/src/api/hooks/useQueryGrants.ts`, `useMutationSetGrant.ts`
+- Test: `apps/web/src/components/AccessMatrix/AccessMatrix.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/AccessMatrix/AccessMatrix.test.tsx`**
+
+```tsx
+import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { AccessMatrix } from './AccessMatrix';
+
+const rows = [
+  {
+    subjectId: '11111111-1111-1111-1111-111111111111',
+    subjectKind: SubjectKind.User,
+    subjectLabel: 'user@cairn.local',
+    isRevoked: false,
+    levels: { [Section.Info]: AccessLevel.Read },
+  },
+];
+
+describe('AccessMatrix', () => {
+  it('показывает все шесть секций', () => {
+    // Выдать доступ к будущей секции можно до её реализации (спека 4.3).
+    render(<AccessMatrix rows={rows} onChange={vi.fn()} />);
+
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+  });
+
+  it('показывает текущий уровень', () => {
+    render(<AccessMatrix rows={rows} onChange={vi.fn()} />);
+
+    expect(screen.getByLabelText('user@cairn.local, Инфо')).toHaveValue(AccessLevel.Read);
+  });
+
+  it('передаёт изменение уровня', async () => {
+    const onChange = vi.fn();
+    render(<AccessMatrix rows={rows} onChange={onChange} />);
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('user@cairn.local, Инфо'),
+      AccessLevel.Write,
+    );
+
+    expect(onChange).toHaveBeenCalledWith({
+      subjectId: rows[0]!.subjectId,
+      section: Section.Info,
+      level: AccessLevel.Write,
+    });
+  });
+
+  it('передаёт отзыв доступа как пустой уровень', async () => {
+    const onChange = vi.fn();
+    render(<AccessMatrix rows={rows} onChange={onChange} />);
+
+    await userEvent.selectOptions(screen.getByLabelText('user@cairn.local, Инфо'), '');
+
+    expect(onChange).toHaveBeenCalledWith({
+      subjectId: rows[0]!.subjectId,
+      section: Section.Info,
+      level: null,
+    });
+  });
+
+  it('показывает отсутствие доступа пустым значением', () => {
+    render(<AccessMatrix rows={rows} onChange={vi.fn()} />);
+
+    expect(screen.getByLabelText('user@cairn.local, Документация')).toHaveValue('');
+  });
+
+  it('помечает отозванных субъектов', () => {
+    render(<AccessMatrix rows={[{ ...rows[0]!, isRevoked: true }]} onChange={vi.fn()} />);
+
+    expect(screen.getByText(/отозван/i)).toBeInTheDocument();
+  });
+
+  it('объясняет пустую матрицу', () => {
+    render(<AccessMatrix rows={[]} onChange={vi.fn()} />);
+
+    expect(screen.getByText(/никому не выдан/i)).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/AccessMatrix`
+Expected: FAIL — «Failed to resolve import "./AccessMatrix"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/AccessMatrix/constants.ts`**
+
+```typescript
+import { AccessLevel, Section } from '@cairn/shared';
+
+/** Названия секций на русском. Порядок соответствует ТЗ 3. */
+export const SECTION_LABELS: { section: Section; label: string }[] = [
+  { section: Section.Info, label: 'Инфо' },
+  { section: Section.Infrastructure, label: 'Инфраструктура' },
+  { section: Section.Variables, label: 'Переменные' },
+  { section: Section.Docs, label: 'Документация' },
+  { section: Section.Roadmap, label: 'Роадмап' },
+  { section: Section.Chronicle, label: 'Хроника' },
+];
+
+/** Варианты уровня доступа. Пустое значение означает отсутствие выдачи. */
+export const LEVEL_OPTIONS: { value: AccessLevel | ''; label: string }[] = [
+  { value: '', label: 'Нет' },
+  { value: AccessLevel.Metadata, label: 'Метаданные' },
+  { value: AccessLevel.Read, label: 'Чтение' },
+  { value: AccessLevel.Write, label: 'Запись' },
+];
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/AccessMatrix/types.ts`**
+
+```typescript
+import type { AccessLevel, GrantMatrixRow, Section } from '@cairn/shared';
+
+/** Изменение ячейки матрицы. Пустой уровень означает отзыв. */
+export interface GrantChange {
+  subjectId: string;
+  section: Section;
+  level: AccessLevel | null;
+}
+
+/** Пропсы матрицы доступов. */
+export interface IProps {
+  rows: GrantMatrixRow[];
+  onChange: (change: GrantChange) => void;
+}
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/AccessMatrix/AccessMatrix.tsx`**
+
+```tsx
+'use client';
+
+import type { AccessLevel } from '@cairn/shared';
+
+import { LEVEL_OPTIONS, SECTION_LABELS } from './constants';
+import type { IProps } from './types';
+
+/**
+ * Матрица «субъект × секция» — главный инструмент контроля суперадмина (ТЗ 8).
+ *
+ * Все шесть секций видны сразу, включая нереализованные: модель прав знает
+ * о них с этапа 1, и выдать доступ заранее — нормальный сценарий (спека 4.3).
+ */
+export function AccessMatrix({ rows, onChange }: IProps) {
+  if (rows.length === 0) {
+    return (
+      <p className="text-muted-foreground">
+        Доступ к этому проекту никому не выдан. Выберите пользователя в списке ниже.
+      </p>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            <th scope="col" className="border-b border-border p-2 text-left">
+              Субъект
+            </th>
+            {SECTION_LABELS.map(({ section, label }) => (
+              <th key={section} scope="col" className="border-b border-border p-2 text-left">
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.subjectId}>
+              <th scope="row" className="border-b border-border p-2 text-left font-normal">
+                {row.subjectLabel}
+                {row.isRevoked && (
+                  <span className="ml-2 text-xs text-muted-foreground">отозван</span>
+                )}
+              </th>
+              {SECTION_LABELS.map(({ section, label }) => (
+                <td key={section} className="border-b border-border p-2">
+                  <select
+                    aria-label={`${row.subjectLabel}, ${label}`}
+                    value={row.levels[section] ?? ''}
+                    onChange={(event) =>
+                      onChange({
+                        subjectId: row.subjectId,
+                        section,
+                        level: (event.target.value || null) as AccessLevel | null,
+                      })
+                    }
+                    className="rounded-md border border-border px-2 py-1"
+                  >
+                    {LEVEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 6: Создать `apps/web/src/components/AccessMatrix/index.ts`**
+
+```typescript
+export { AccessMatrix } from './AccessMatrix';
+export type { GrantChange, IProps } from './types';
+```
+
+- [ ] **Step 7: Создать хуки выдач**
+
+`apps/web/src/api/hooks/useQueryGrants.ts`:
+
+```typescript
+'use client';
+
+import type { GrantMatrixRow } from '@cairn/shared';
+import { useQuery } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+
+/** Ключи кэша выдач. */
+export const GRANT_KEYS = {
+  forProject: (projectId: string) => ['grants', projectId] as const,
+};
+
+/** Матрица доступов по проекту. */
+export function useQueryGrants(projectId: string) {
+  return useQuery({
+    queryKey: GRANT_KEYS.forProject(projectId),
+    queryFn: () => apiClient<GrantMatrixRow[]>(`/projects/${projectId}/grants`),
+  });
+}
+```
+
+`apps/web/src/api/hooks/useMutationSetGrant.ts`:
+
+```typescript
+'use client';
+
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+
+import { apiClient } from '../client';
+import type { GrantChange } from '@/components/AccessMatrix';
+import { GRANT_KEYS } from './useQueryGrants';
+
+/**
+ * Установка и отзыв уровня доступа.
+ *
+ * Отзыв — это отдельный запрос удаления, а не установка «пустого» уровня:
+ * в модели данных отсутствие доступа выражается отсутствием строки (спека 4.3).
+ */
+export function useMutationSetGrant(projectId: string) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (change: GrantChange) => {
+      const path = `/projects/${projectId}/grants`;
+      const body = { subjectId: change.subjectId, section: change.section };
+
+      if (change.level === null) {
+        return apiClient(path, { method: 'DELETE', body });
+      }
+
+      return apiClient(path, { method: 'PUT', body: { ...body, level: change.level } });
+    },
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: GRANT_KEYS.forProject(projectId) });
+    },
+  });
+}
+```
+
+Дополни `apps/web/src/api/hooks/index.ts` двумя новыми экспортами.
+
+- [ ] **Step 8: Создать экран управления доступами**
+
+`apps/web/src/app/projects/[id]/access/AccessScreen.tsx`:
+
+```tsx
+'use client';
+
+import { useQueryGrants, useMutationSetGrant } from '@/api/hooks';
+import { AccessMatrix } from '@/components/AccessMatrix';
+
+/** Пропсы экрана доступов. */
+interface IProps {
+  projectId: string;
+}
+
+/** Управление доступами к проекту. Экран суперадмина (спека 9.1). */
+export function AccessScreen({ projectId }: IProps) {
+  const grants = useQueryGrants(projectId);
+  const setGrant = useMutationSetGrant(projectId);
+
+  if (grants.isPending) {
+    return <p className="text-muted-foreground">Загрузка…</p>;
+  }
+
+  if (grants.isError) {
+    return (
+      <p role="alert" className="text-destructive">
+        Не удалось загрузить матрицу доступов.
+      </p>
+    );
+  }
+
+  return <AccessMatrix rows={grants.data} onChange={(change) => setGrant.mutate(change)} />;
+}
+```
+
+`apps/web/src/app/projects/[id]/access/page.tsx`:
+
+```tsx
+import { AccessScreen } from './AccessScreen';
+
+/** Страница управления доступами. */
+export default async function AccessPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  return (
+    <main className="mx-auto max-w-5xl space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Доступы к проекту</h1>
+      <AccessScreen projectId={id} />
+    </main>
+  );
+}
+```
+
+- [ ] **Step 9: Запустить тест**
+
+Run: `pnpm --filter @cairn/web test src/components/AccessMatrix`
+Expected: PASS, 7 тестов.
+
+- [ ] **Step 10: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить матрицу управления доступами"
+```
+
+---
+
+### Task 50: Экран пользователей
+
+**Files:**
+- Create: `apps/web/src/components/UserList/UserList.tsx`, `types.ts`, `constants.ts`, `index.ts`
+- Create: `apps/web/src/app/users/page.tsx`, `UsersScreen.tsx`
+- Create: `apps/web/src/api/hooks/useQueryUsers.ts`, `useMutationUserAction.ts`
+- Test: `apps/web/src/components/UserList/UserList.test.tsx`
+
+- [ ] **Step 1: Написать падающий тест `apps/web/src/components/UserList/UserList.test.tsx`**
+
+```tsx
+import { InvitationKind, SubjectKind } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { UserList } from './UserList';
+
+const user = {
+  id: '11111111-1111-1111-1111-111111111111',
+  subjectId: '22222222-2222-2222-2222-222222222222',
+  subjectKind: SubjectKind.User,
+  email: 'user@cairn.local',
+  isSuperadmin: false,
+  isTotpEnabled: false,
+  hasPassword: true,
+  isRevoked: false,
+  lastLinkKind: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
+const handlers = { onRevoke: vi.fn(), onRestore: vi.fn(), onResetPassword: vi.fn(), onResetTotp: vi.fn() };
+
+describe('UserList', () => {
+  it('показывает адрес пользователя', () => {
+    render(<UserList users={[user]} {...handlers} />);
+
+    expect(screen.getByText('user@cairn.local')).toBeInTheDocument();
+  });
+
+  it('отмечает суперадмина', () => {
+    render(<UserList users={[{ ...user, isSuperadmin: true }]} {...handlers} />);
+
+    expect(screen.getByText('Суперадмин')).toBeInTheDocument();
+  });
+
+  it('показывает приглашённого, ещё не задавшего пароль', () => {
+    render(
+      <UserList
+        users={[{ ...user, hasPassword: false, lastLinkKind: InvitationKind.Invitation }]}
+        {...handlers}
+      />,
+    );
+
+    expect(screen.getByText('Приглашён')).toBeInTheDocument();
+  });
+
+  it('отличает сброшенный пароль от приглашения', () => {
+    // Оба состояния — «нет действующего пароля», различает их вид ссылки (спека 4.2).
+    render(
+      <UserList
+        users={[{ ...user, hasPassword: false, lastLinkKind: InvitationKind.PasswordReset }]}
+        {...handlers}
+      />,
+    );
+
+    expect(screen.getByText('Пароль сброшен')).toBeInTheDocument();
+  });
+
+  it('показывает отозванного', () => {
+    render(<UserList users={[{ ...user, isRevoked: true }]} {...handlers} />);
+
+    expect(screen.getByText('Отозван')).toBeInTheDocument();
+  });
+
+  it('вызывает отзыв доступа', async () => {
+    const onRevoke = vi.fn();
+    render(<UserList users={[user]} {...handlers} onRevoke={onRevoke} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отозвать доступ' }));
+
+    expect(onRevoke).toHaveBeenCalledWith(user.id);
+  });
+
+  it('для отозванного предлагает восстановление вместо отзыва', () => {
+    render(<UserList users={[{ ...user, isRevoked: true }]} {...handlers} />);
+
+    expect(screen.getByRole('button', { name: 'Восстановить' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Отозвать доступ' })).not.toBeInTheDocument();
+  });
+
+  it('спрашивает подтверждение перед сбросом пароля', async () => {
+    // Сброс завершает все сессии человека — случайное нажатие дорого стоит (спека 9.1).
+    const onResetPassword = vi.fn();
+    render(<UserList users={[user]} {...handlers} onResetPassword={onResetPassword} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Сбросить пароль' }));
+
+    expect(onResetPassword).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Да, сбросить' }));
+
+    expect(onResetPassword).toHaveBeenCalledWith(user.id);
+  });
+
+  it('не предлагает сброс второго фактора, если он не привязан', () => {
+    render(<UserList users={[user]} {...handlers} />);
+
+    expect(screen.queryByRole('button', { name: 'Сбросить второй фактор' })).not.toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Запустить тест и убедиться, что он падает**
+
+Run: `pnpm --filter @cairn/web test src/components/UserList`
+Expected: FAIL — «Failed to resolve import "./UserList"».
+
+- [ ] **Step 3: Создать `apps/web/src/components/UserList/types.ts`**
+
+```typescript
+import type { UserRow } from '@cairn/shared';
+
+/** Пропсы списка пользователей. */
+export interface IProps {
+  users: UserRow[];
+  onRevoke: (userId: string) => void;
+  onRestore: (userId: string) => void;
+  onResetPassword: (userId: string) => void;
+  onResetTotp: (userId: string) => void;
+}
+```
+
+- [ ] **Step 4: Создать `apps/web/src/components/UserList/constants.ts`**
+
+```typescript
+/** Подписи действий над пользователем. */
+export const ACTION_LABELS = {
+  revoke: 'Отозвать доступ',
+  restore: 'Восстановить',
+  resetPassword: 'Сбросить пароль',
+  resetTotp: 'Сбросить второй фактор',
+} as const;
+
+/** Текст подтверждения сброса пароля. */
+export const RESET_CONFIRMATION =
+  'Пароль будет обнулён, все сессии пользователя завершены. Он сможет войти только по новой ссылке.';
+```
+
+- [ ] **Step 5: Создать `apps/web/src/components/UserList/UserList.tsx`**
+
+```tsx
+'use client';
+
+import { InvitationKind, type UserRow } from '@cairn/shared';
+import { useState } from 'react';
+
+import { ACTION_LABELS, RESET_CONFIRMATION } from './constants';
+import type { IProps } from './types';
+
+/** Список пользователей с действиями суперадмина (спека 9.1). */
+export function UserList({ users, onRevoke, onRestore, onResetPassword, onResetTotp }: IProps) {
+  const [confirmingReset, setConfirmingReset] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-3">
+      <ul className="space-y-2">
+        {users.map((user) => (
+          <li
+            key={user.id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3"
+          >
+            <div>
+              <p className="font-medium">{user.email}</p>
+              <p className="text-sm text-muted-foreground">{statusOf(user)}</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {user.isRevoked ? (
+                <button type="button" onClick={() => onRestore(user.id)} className={BUTTON_CLASS}>
+                  {ACTION_LABELS.restore}
+                </button>
+              ) : (
+                <button type="button" onClick={() => onRevoke(user.id)} className={BUTTON_CLASS}>
+                  {ACTION_LABELS.revoke}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setConfirmingReset(user.id)}
+                className={BUTTON_CLASS}
+              >
+                {ACTION_LABELS.resetPassword}
+              </button>
+
+              {user.isTotpEnabled && (
+                <button type="button" onClick={() => onResetTotp(user.id)} className={BUTTON_CLASS}>
+                  {ACTION_LABELS.resetTotp}
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {confirmingReset && (
+        <div role="dialog" aria-label="Подтверждение сброса" className="rounded-md border border-border p-4">
+          <p>{RESET_CONFIRMATION}</p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              className="rounded-md bg-destructive px-3 py-1 text-destructive-foreground"
+              onClick={() => {
+                onResetPassword(confirmingReset);
+                setConfirmingReset(null);
+              }}
+            >
+              Да, сбросить
+            </button>
+            <button type="button" className={BUTTON_CLASS} onClick={() => setConfirmingReset(null)}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Описывает состояние пользователя человеческими словами. */
+function statusOf(user: UserRow): string {
+  if (user.isRevoked) {
+    return 'Отозван';
+  }
+
+  if (!user.hasPassword) {
+    return user.lastLinkKind === InvitationKind.PasswordReset ? 'Пароль сброшен' : 'Приглашён';
+  }
+
+  return user.isSuperadmin ? 'Суперадмин' : 'Активен';
+}
+
+/** Оформление кнопок действий. */
+const BUTTON_CLASS = 'rounded-md border border-border px-3 py-1 text-sm';
+```
+
+- [ ] **Step 6: Создать `apps/web/src/components/UserList/index.ts`**
+
+```typescript
+export { UserList } from './UserList';
+export type { IProps } from './types';
+```
+
+- [ ] **Step 7: Запустить тест**
+
+Run: `pnpm --filter @cairn/web test src/components/UserList`
+Expected: PASS, 9 тестов.
+
+- [ ] **Step 8: Коммит**
+
+```bash
+git add apps/web/src
+git commit -m "Добавить список пользователей"
+```
+
+---
+
+**Результат чанка 14:** суперадмин правит проекты, управляет доступами через матрицу и распоряжается пользователями. Последний чанк добавляет журнал, навигацию и развёртывание.
