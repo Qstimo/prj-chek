@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 
 import { AuditModule } from '../audit/audit.module';
 import { CryptoModule } from '../crypto/crypto.module';
@@ -11,9 +11,13 @@ import { SessionGuard } from './session.guard';
 import { SessionsRepository } from './sessions.repository';
 import { TotpService } from './totp.service';
 
-/** Модуль аутентификации. */
+/**
+ * Модуль аутентификации.
+ *
+ * Связь с модулем журнала взаимная: см. комментарий в `AuditModule`.
+ */
 @Module({
-  imports: [DbModule, CryptoModule, AuditModule],
+  imports: [DbModule, CryptoModule, forwardRef(() => AuditModule)],
   controllers: [AuthController],
   providers: [
     AuthService,
