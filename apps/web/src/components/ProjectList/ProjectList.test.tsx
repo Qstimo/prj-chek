@@ -26,6 +26,30 @@ describe('ProjectList', () => {
     expect(screen.getByText(/доступ/i)).toBeInTheDocument();
   });
 
+  it('предлагает создать проект тому, кто вправе', () => {
+    render(<ProjectList projects={[project]} canCreate />);
+
+    expect(screen.getByRole('link', { name: 'Создать проект' })).toHaveAttribute(
+      'href',
+      '/projects/new',
+    );
+  });
+
+  it('не предлагает создание без права', () => {
+    render(<ProjectList projects={[project]} />);
+
+    expect(screen.queryByRole('link', { name: 'Создать проект' })).not.toBeInTheDocument();
+  });
+
+  it('в пустой системе зовёт суперадмина завести первый проект', () => {
+    // Иначе администратор в пустой системе решит, что ему не выдали доступ,
+    // хотя выдавать его некому и незачем.
+    render(<ProjectList projects={[]} canCreate />);
+
+    expect(screen.getByRole('link', { name: 'Создать проект' })).toBeInTheDocument();
+    expect(screen.queryByText(/доступ к проектам выдаёт/i)).not.toBeInTheDocument();
+  });
+
   it('перечисляет проекты списком для программ чтения с экрана', () => {
     render(<ProjectList projects={[project]} />);
 

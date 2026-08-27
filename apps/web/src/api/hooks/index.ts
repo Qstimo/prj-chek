@@ -1,3 +1,4 @@
+export * from './useMutationCreateProject';
 export * from './useMutationSetGrant';
 export * from './useMutationTotpSetup';
 export * from './useMutationUpdateProject';

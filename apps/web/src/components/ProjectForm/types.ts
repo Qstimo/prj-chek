@@ -14,8 +14,13 @@ export interface ProjectFormValues {
 export interface IProps {
   /** Текущие значения полей. */
   initial: ProjectFormValues;
-  /** Вызывается с изменёнными значениями. */
-  onSubmit: (input: ProjectUpdate) => void;
+  /**
+   * Вызывается с изменёнными значениями.
+   *
+   * Тип общий для создания и правки: поля совпадают, различается только
+   * обязательность названия, а форма и так не отправляет пустое.
+   */
+  onSubmit: (input: ProjectUpdate & { name: string }) => void;
   /** Сообщение об ошибке. */
   error?: string;
   /** Отправка в процессе. */
