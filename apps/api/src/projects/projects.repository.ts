@@ -107,7 +107,10 @@ export class ProjectsRepository {
     projectId: string,
     input: ProjectUpdate,
   ): Promise<Project> {
-    await this.access.requireLevel(subject, projectId, Section.Info, AccessLevel.Write);
+    // Проверка идёт тем же исполнителем, что и сама правка: внутри транзакции
+    // обращение к другому подключению увидело бы состояние до неё, а при
+    // единственном подключении в пуле — заблокировалось бы навсегда.
+    await this.access.requireLevel(subject, projectId, Section.Info, AccessLevel.Write, tx);
 
     const [updated] = await tx
       .update(projects)

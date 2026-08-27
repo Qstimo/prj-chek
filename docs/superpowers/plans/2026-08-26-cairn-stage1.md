@@ -2338,7 +2338,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
 import { DATABASE } from '../db/db.module';
-import type { Database } from '../db/db.types';
+import type { Database, Executor } from '../db/db.types';
 import { grants } from '../db/schema';
 import type { RequestSubject } from './access.types';
 
@@ -2348,6 +2348,11 @@ import type { RequestSubject } from './access.types';
  * Отвечает только за доступ к содержимому проектов. Право управлять самой
  * системой доступа — принадлежность суперадмина и проверяется отдельным
  * guard'ом, а не здесь (спека 8).
+ *
+ * Каждый метод принимает необязательного исполнителя запроса. Вызванный
+ * внутри транзакции, он обязан получить именно её: иначе проверка уйдёт
+ * за другим подключением из пула и увидит состояние до транзакции,
+ * а при исчерпанном пуле — повиснет, ожидая свободного подключения.
  */
 @Injectable()
 export class AccessService {
@@ -2361,6 +2366,7 @@ export class AccessService {
     subject: RequestSubject,
     projectId: string,
     section: Section,
+    executor: Executor = this.db,
   ): Promise<AccessLevel | null> {
     // Отзыв сильнее суперадминства, иначе отозвать администратора было бы нечем.
     if (subject.isRevoked) {
@@ -2371,7 +2377,7 @@ export class AccessService {
       return AccessLevel.Write;
     }
 
-    const [grant] = await this.db
+    const [grant] = await executor
       .select({ level: grants.level })
       .from(grants)
       .where(
@@ -2538,18 +2544,21 @@ Expected: FAIL — `service.visibleProjectIds is not a function`.
    * Возвращается массив, а не подзапрос: сервис прав не должен протекать
    * деталями хранения в вызывающий код (спека 5.2).
    */
-  async visibleProjectIds(subject: RequestSubject): Promise<string[]> {
+  async visibleProjectIds(
+    subject: RequestSubject,
+    executor: Executor = this.db,
+  ): Promise<string[]> {
     if (subject.isRevoked) {
       return [];
     }
 
     if (subject.isSuperadmin) {
-      const rows = await this.db.select({ id: projects.id }).from(projects);
+      const rows = await executor.select({ id: projects.id }).from(projects);
 
       return rows.map((row) => row.id);
     }
 
-    const rows = await this.db
+    const rows = await executor
       .selectDistinct({ projectId: grants.projectId })
       .from(grants)
       .where(eq(grants.subjectId, subject.id));
@@ -2755,8 +2764,9 @@ Expected: FAIL — `service.requireLevel is not a function`.
     projectId: string,
     section: Section,
     minimum: AccessLevel,
+    executor: Executor = this.db,
   ): Promise<AccessLevel> {
-    const level = await this.resolveLevel(subject, projectId, section);
+    const level = await this.resolveLevel(subject, projectId, section, executor);
 
     if (level === null) {
       throw new SectionNotVisibleError();
@@ -3746,7 +3756,10 @@ export class ProjectsRepository {
     projectId: string,
     input: ProjectUpdate,
   ): Promise<Project> {
-    await this.access.requireLevel(subject, projectId, Section.Info, AccessLevel.Write);
+    // Проверка идёт тем же исполнителем, что и сама правка: внутри транзакции
+    // обращение к другому подключению увидело бы состояние до неё, а при
+    // единственном подключении в пуле — заблокировалось бы навсегда.
+    await this.access.requireLevel(subject, projectId, Section.Info, AccessLevel.Write, tx);
 
     const [updated] = await tx
       .update(projects)
