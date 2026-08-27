@@ -1,0 +1,10 @@
+{$CAIRN_DOMAIN:localhost} {
+	# API — по префиксу /api, всё остальное отдаёт веб-приложение.
+	handle /api/* {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

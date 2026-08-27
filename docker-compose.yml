@@ -21,5 +21,49 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://cairn_app:${CAIRN_APP_PASSWORD:?}@postgres:5432/cairn
+      DATABASE_OWNER_URL: postgres://cairn_owner:${POSTGRES_PASSWORD:?}@postgres:5432/cairn
+      CAIRN_ENCRYPTION_KEY: ${CAIRN_ENCRYPTION_KEY:?CAIRN_ENCRYPTION_KEY не задан}
+      CAIRN_WEB_URL: ${CAIRN_WEB_URL:-http://localhost}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      CAIRN_INTERNAL_API_URL: http://api:3001/api
+      NODE_ENV: production
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      # Порты вынесены в переменные по той же причине, что и порт базы:
+      # на машине разработчика 80 и 443 часто заняты другим прокси.
+      - '${CAIRN_HTTP_PORT:-80}:80'
+      - '${CAIRN_HTTPS_PORT:-443}:443'
+    environment:
+      CAIRN_DOMAIN: ${CAIRN_DOMAIN:-localhost}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - web
+      - api
+    restart: unless-stopped
+
 volumes:
   postgres-data:
+  caddy-data:
