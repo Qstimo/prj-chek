@@ -63,6 +63,20 @@ export enum ProjectLifecycle {
   Archived = 'archived',
 }
 
+/**
+ * Вид окружения (ТЗ 3.2).
+ *
+ * Список закрытый, но значение `Other` оставляет место окружениям,
+ * которых в нём нет: ТЗ прямо допускает «любые другие». Вид нужен, чтобы
+ * система отличала прод от остального, не угадывая это по названию.
+ */
+export enum EnvironmentKind {
+  Production = 'production',
+  Staging = 'staging',
+  Development = 'development',
+  Other = 'other',
+}
+
 /** Вид одноразовой ссылки на установку пароля (спека 4.6). */
 export enum InvitationKind {
   /** Первичное приглашение. */
