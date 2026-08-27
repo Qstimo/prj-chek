@@ -1,28 +1,30 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 
-import { AuditModule } from '../audit/audit.module';
-import { PasswordService } from '../auth/password.service';
-import { SessionsRepository } from '../auth/sessions.repository';
+import { AccessModule } from '../access/access.module';
+import { AuthModule } from '../auth/auth.module';
 import { DbModule } from '../db/db.module';
+import { UsersModule } from '../users/users.module';
+import { InvitationsController } from './invitations.controller';
 import { InvitationsService } from './invitations.service';
 
 /**
- * Модуль приглашений и одноразовых ссылок.
+ * Модуль приглашений.
  *
- * Контроллеров не имеет: HTTP-слой приглашений добавляется отдельной
- * задачей (спека 4.6). Здесь только сервис, нужный командам консоли
- * и будущему контроллеру.
+ * Связь с модулем пользователей взаимная: контроллер приглашений находит
+ * запись приглашающего, а контроллер пользователей выдаёт ссылку сброса.
+ * Разрывается `forwardRef`.
  *
- * `PasswordService` и `SessionsRepository` объявлены здесь напрямую, а не
- * получены импортом `AuthModule`: тот модуль тянет за собой `AuthService`,
- * `TotpService` и `SessionGuard` с зависимостями, выведенными из типов
- * параметров, — под `tsx` (команды консоли) это ломает резолвинг DI, так как
- * esbuild не эмитит `design:paramtypes`. Обоим сервисам здесь эти зависимости
- * не нужны.
+ * `PasswordService` и `SessionsRepository` больше не объявлены здесь
+ * напрямую: контроллеру нужен `SessionGuard`, а получить только его без
+ * всего `AuthModule` нельзя — приходится импортировать модуль целиком, как
+ * это уже делают `ProjectsModule` и `GrantsModule`. Из-за этого модуль
+ * перестал быть безопасным для команд консоли, запускаемых через `tsx`:
+ * они больше не импортируют его напрямую (см. `cli.module.ts`).
  */
 @Module({
-  imports: [DbModule, AuditModule],
-  providers: [PasswordService, SessionsRepository, InvitationsService],
-  exports: [InvitationsService, PasswordService, SessionsRepository],
+  imports: [DbModule, AccessModule, AuthModule, forwardRef(() => UsersModule)],
+  controllers: [InvitationsController],
+  providers: [InvitationsService],
+  exports: [InvitationsService],
 })
 export class InvitationsModule {}

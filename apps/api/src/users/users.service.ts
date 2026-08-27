@@ -158,6 +158,21 @@ export class UsersService {
     return byUser;
   }
 
+  /** Находит запись пользователя по его субъекту. */
+  async userIdOfSubject(subjectId: string): Promise<string> {
+    const [user] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.subjectId, subjectId))
+      .limit(1);
+
+    if (!user) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return user.id;
+  }
+
   /** Находит пользователя либо бросает «не найдено». */
   private async requireUser(userId: string) {
     const [user] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
