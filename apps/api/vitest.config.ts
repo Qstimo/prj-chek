@@ -20,6 +20,8 @@ export default defineConfig({
     env: {
       // Фиксированный тестовый ключ: 32 нулевых байта в base64.
       CAIRN_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      // Подключение не открывается: драйвер соединяется при первом запросе.
+      DATABASE_URL: 'postgres://cairn_app:test@127.0.0.1:1/cairn_test',
     },
     // Интеграционные тесты поднимают контейнер с базой.
     testTimeout: 60_000,
