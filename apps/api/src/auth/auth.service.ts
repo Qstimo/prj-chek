@@ -1,7 +1,8 @@
-import { AuditSubjectKind } from '@cairn/shared';
+import { AuditSubjectKind, type CurrentSubjectResponse } from '@cairn/shared';
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 
+import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
 import { DATABASE } from '../db/db.module';
@@ -124,6 +125,22 @@ export class AuthService {
       .where(eq(totpChallenges.id, challenge.id));
 
     return this.startSession(found, origin);
+  }
+
+  /** Описывает текущего пользователя для интерфейса. */
+  async describeSubject(subject: RequestSubject): Promise<CurrentSubjectResponse> {
+    const [user] = await this.db
+      .select({ isTotpEnabled: users.isTotpEnabled })
+      .from(users)
+      .where(eq(users.subjectId, subject.id))
+      .limit(1);
+
+    return {
+      id: subject.id,
+      label: subject.label,
+      isSuperadmin: subject.isSuperadmin,
+      isTotpEnabled: user?.isTotpEnabled ?? false,
+    };
   }
 
   /** Создаёт сессию и пишет успешный вход в журнал в одной транзакции. */

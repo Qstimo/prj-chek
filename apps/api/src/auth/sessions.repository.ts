@@ -22,6 +22,11 @@ export interface SessionOrigin {
 export class SessionsRepository {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
+  /** Подключение для операций, не требующих транзакции. */
+  get connection(): Database {
+    return this.db;
+  }
+
   /**
    * Создаёт сессию и возвращает токен в открытом виде.
    *
