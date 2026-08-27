@@ -30,11 +30,17 @@ export interface InvitingActor {
  */
 @Injectable()
 export class InvitationsService {
+  /**
+   * Токены внедрения проставлены явно, а не выведены из типов параметров:
+   * команды консоли запускаются через `tsx`, который транспилирует файлы
+   * через esbuild и не эмитит `design:paramtypes` для `emitDecoratorMetadata`.
+   * Без явного токена Nest в этом окружении не резолвит зависимость.
+   */
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    private readonly passwords: PasswordService,
-    private readonly sessions: SessionsRepository,
-    private readonly audit: AuditService,
+    @Inject(PasswordService) private readonly passwords: PasswordService,
+    @Inject(SessionsRepository) private readonly sessions: SessionsRepository,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   /**

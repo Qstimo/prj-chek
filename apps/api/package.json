@@ -10,7 +10,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.tools.json",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "cli": "tsx src/cli/main.ts"
   },
   "dependencies": {
     "@cairn/shared": "workspace:*",
