@@ -1,0 +1,66 @@
+import { ProjectLifecycle } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+
+import { ProjectSections } from './ProjectSections';
+
+const metadataOnly = {
+  id: '11111111-1111-1111-1111-111111111111',
+  slug: 'proekt',
+  name: 'Проект',
+  lifecycle: ProjectLifecycle.Active,
+};
+
+const detailed = {
+  ...metadataOnly,
+  purpose: 'Назначение проекта',
+  stack: 'Next.js',
+  repoUrl: 'https://example.com/repo',
+  ownerUserId: null,
+  notes: 'Заметки',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-02T00:00:00.000Z',
+};
+
+describe('ProjectSections', () => {
+  it('показывает название на любом уровне', () => {
+    render(<ProjectSections project={metadataOnly} />);
+
+    expect(screen.getByRole('heading', { name: 'Проект' })).toBeInTheDocument();
+  });
+
+  it('на уровне метаданных не показывает поля паспорта', () => {
+    render(<ProjectSections project={metadataOnly} />);
+
+    expect(screen.queryByText('Назначение')).not.toBeInTheDocument();
+  });
+
+  it('на уровне метаданных объясняет, почему полей нет', () => {
+    // Пустая карточка без объяснения читается как ошибка загрузки.
+    render(<ProjectSections project={metadataOnly} />);
+
+    expect(screen.getByText(/содержимое скрыто/i)).toBeInTheDocument();
+  });
+
+  it('на уровне чтения показывает назначение и стек', () => {
+    render(<ProjectSections project={detailed} />);
+
+    expect(screen.getByText('Назначение проекта')).toBeInTheDocument();
+    expect(screen.getByText('Next.js')).toBeInTheDocument();
+  });
+
+  it('показывает ссылку на репозиторий', () => {
+    render(<ProjectSections project={detailed} />);
+
+    expect(screen.getByRole('link', { name: /example\.com/ })).toHaveAttribute(
+      'href',
+      'https://example.com/repo',
+    );
+  });
+
+  it('не показывает пустые поля', () => {
+    render(<ProjectSections project={{ ...detailed, stack: null }} />);
+
+    expect(screen.queryByText('Стек')).not.toBeInTheDocument();
+  });
+});
