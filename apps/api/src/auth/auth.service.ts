@@ -1,5 +1,14 @@
-import { AuditSubjectKind, type CurrentSubjectResponse } from '@cairn/shared';
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  AuditSubjectKind,
+  type CurrentSubjectResponse,
+  type TotpSetupResponse,
+} from '@cairn/shared';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 
 import type { RequestSubject } from '../access/access.types';
@@ -141,6 +150,77 @@ export class AuthService {
       isSuperadmin: subject.isSuperadmin,
       isTotpEnabled: user?.isTotpEnabled ?? false,
     };
+  }
+
+  /**
+   * Начинает привязку второго фактора.
+   *
+   * Секрет сохраняется сразу, но флаг `isTotpEnabled` не поднимается:
+   * иначе человек, не успевший настроить приложение, оказался бы заперт
+   * снаружи собственной учётной записи.
+   */
+  async setupTotp(subject: RequestSubject): Promise<TotpSetupResponse> {
+    const user = await this.findActiveUserById(await this.userIdOfSubject(subject.id));
+
+    if (!user) {
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    if (user.isTotpEnabled) {
+      throw new BadRequestException(
+        'Второй фактор уже привязан. Чтобы сменить устройство, попросите администратора снять привязку.',
+      );
+    }
+
+    const created = this.totp.createSecret(user.email);
+
+    await this.db
+      .update(users)
+      .set({ totpSecretEncrypted: created.encryptedSecret, updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+
+    return { keyUri: created.keyUri, secret: created.secret };
+  }
+
+  /** Подтверждает привязку кодом из приложения и включает второй фактор. */
+  async confirmTotp(subject: RequestSubject, code: string): Promise<void> {
+    const user = await this.findActiveUserById(await this.userIdOfSubject(subject.id));
+
+    if (!user) {
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    if (user.isTotpEnabled || !user.totpSecretEncrypted) {
+      throw new BadRequestException('Привязка не начата');
+    }
+
+    if (!this.totp.verify(user.totpSecretEncrypted, code)) {
+      throw new UnauthorizedException('Неверный код');
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ isTotpEnabled: true, updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+
+      await this.audit.record(tx, this.actorFor(user), { action: AuditAction.TotpEnabled });
+    });
+  }
+
+  /** Находит запись пользователя по его субъекту. */
+  private async userIdOfSubject(subjectId: string): Promise<string> {
+    const [user] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.subjectId, subjectId))
+      .limit(1);
+
+    if (!user) {
+      throw new UnauthorizedException(FAILURE_MESSAGE);
+    }
+
+    return user.id;
   }
 
   /** Создаёт сессию и пишет успешный вход в журнал в одной транзакции. */

@@ -3,4 +3,5 @@ export * from './schemas/audit';
 export * from './schemas/auth';
 export * from './schemas/grant';
 export * from './schemas/project';
+export * from './schemas/totp';
 export * from './schemas/user';

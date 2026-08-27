@@ -1,8 +1,11 @@
 import {
   loginSchema,
+  totpConfirmSchema,
   totpVerifySchema,
   type CurrentSubjectResponse,
   type LoginResponse,
+  type TotpConfirmInput,
+  type TotpSetupResponse,
 } from '@cairn/shared';
 import {
   Body,
@@ -73,6 +76,25 @@ export class AuthController {
     response.cookie(SESSION_COOKIE, token, SESSION_COOKIE_OPTIONS);
 
     return { kind: 'session' };
+  }
+
+  /** Начинает привязку второго фактора. */
+  @Post('totp/setup')
+  @HttpCode(200)
+  @UseGuards(SessionGuard)
+  async setupTotp(@CurrentSubject() subject: RequestSubject): Promise<TotpSetupResponse> {
+    return this.auth.setupTotp(subject);
+  }
+
+  /** Подтверждает привязку второго фактора. */
+  @Post('totp/confirm')
+  @HttpCode(204)
+  @UseGuards(SessionGuard)
+  async confirmTotp(
+    @CurrentSubject() subject: RequestSubject,
+    @Body(new ZodValidationPipe(totpConfirmSchema)) body: TotpConfirmInput,
+  ): Promise<void> {
+    await this.auth.confirmTotp(subject, body.code);
   }
 
   /** Выход: отзыв сессии и удаление cookie. */
