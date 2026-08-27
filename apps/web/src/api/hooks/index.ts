@@ -1,4 +1,5 @@
 export * from './useMutationSetGrant';
+export * from './useMutationTotpSetup';
 export * from './useMutationUpdateProject';
 export * from './useMutationUserAction';
 export * from './useQueryAudit';

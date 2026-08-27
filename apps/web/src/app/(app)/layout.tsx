@@ -1,4 +1,5 @@
 import type { CurrentSubjectResponse } from '@cairn/shared';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
@@ -18,6 +19,17 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     }
 
     throw cause;
+  }
+
+  // Спека 6.4: до привязки второго фактора суперадмину доступен
+  // единственный экран. Проверка на сервере, а не в навигации:
+  // прямой переход по адресу должен упираться в то же ограничение.
+  if (subject.isSuperadmin && !subject.isTotpEnabled) {
+    const path = (await headers()).get('x-pathname') ?? '';
+
+    if (!path.startsWith('/security')) {
+      redirect('/security');
+    }
   }
 
   return (
