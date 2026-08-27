@@ -2,6 +2,7 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
 import { auditLog } from './audit-log';
+import { environmentDomains, environments } from './environments';
 import { grants } from './grants';
 import { invitations } from './invitations';
 import { projects } from './projects';
@@ -18,6 +19,8 @@ const ALL_TABLES = [
   { name: 'subjects', table: subjects },
   { name: 'users', table: users },
   { name: 'projects', table: projects },
+  { name: 'environments', table: environments },
+  { name: 'environment_domains', table: environmentDomains },
   { name: 'grants', table: grants },
   { name: 'sessions', table: sessions },
   { name: 'invitations', table: invitations },
