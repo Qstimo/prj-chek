@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["argon2", "@swc/core", "esbuild"]
+    "onlyBuiltDependencies": ["@swc/core", "esbuild"]
   },
   "scripts": {
     "test": "pnpm -r test",
