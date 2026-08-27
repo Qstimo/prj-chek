@@ -5063,6 +5063,20 @@ describe('AuthService.login', () => {
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  beforeEach(async () => {
+    await testDb.truncate();
+
+    // Новый экземпляр на каждый тест: ограничитель попыток хранит состояние
+    // в памяти процесса и работает по настоящему времени. Блокировка,
+    // выставленная тестом на десять неудачных попыток, иначе пережила бы его
+    // и уронила бы следующие тесты — они получали бы отказ вместо ожидаемого
+    // поведения.
     passwords = new PasswordService();
     totp = new TotpService(new CryptoService(randomBytes(32).toString('base64')));
     service = new AuthService(
@@ -5073,14 +5087,6 @@ describe('AuthService.login', () => {
       new LoginAttemptsService(),
       new AuditService(),
     );
-  });
-
-  afterAll(async () => {
-    await testDb.stop();
-  });
-
-  beforeEach(async () => {
-    await testDb.truncate();
   });
 
   async function createUser(options: { password?: string; withTotp?: boolean } = {}) {
