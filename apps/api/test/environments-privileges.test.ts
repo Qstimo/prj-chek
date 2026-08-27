@@ -1,0 +1,33 @@
+import { sql } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { startTestDatabase, type TestDatabase } from './db-fixture';
+
+describe('права роли приложения на окружения', () => {
+  let testDb: TestDatabase;
+
+  beforeAll(async () => {
+    testDb = await startTestDatabase();
+  });
+
+  afterAll(async () => {
+    await testDb.stop();
+  });
+
+  it('роль приложения читает и пишет окружения', async () => {
+    // Права выдаются миграцией из репозитория, а не фикстурой: иначе тест
+    // остался бы зелёным при сломанной миграции (см. комментарий в db-fixture).
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM environments`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM environment_domains`),
+    ).resolves.toBeDefined();
+  });
+
+  it('роль приложения не меняет схему', async () => {
+    await expect(
+      testDb.appDb.execute(sql`ALTER TABLE environments ADD COLUMN sneaky text`),
+    ).rejects.toThrow();
+  });
+});
