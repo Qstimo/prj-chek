@@ -42,6 +42,7 @@ services:
       dockerfile: apps/web/Dockerfile
     environment:
       CAIRN_INTERNAL_API_URL: http://api:3001/api
+      CAIRN_ALLOW_INSECURE_NO_TOTP: ${CAIRN_ALLOW_INSECURE_NO_TOTP:-}
       NODE_ENV: production
     depends_on:
       - api

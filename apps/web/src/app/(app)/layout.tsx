@@ -7,6 +7,8 @@ import { ApiError } from '@/api';
 import { apiServer } from '@/api/server';
 import { AppNavContainer } from '@/components/AppNav/AppNavContainer';
 
+import { requiresTotpBinding } from './requiresTotpBinding';
+
 /** Разметка раздела для вошедших пользователей. */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   let subject: CurrentSubjectResponse;
@@ -24,7 +26,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // Спека 6.4: до привязки второго фактора суперадмину доступен
   // единственный экран. Проверка на сервере, а не в навигации:
   // прямой переход по адресу должен упираться в то же ограничение.
-  if (subject.isSuperadmin && !subject.isTotpEnabled) {
+  if (requiresTotpBinding(subject, process.env.CAIRN_ALLOW_INSECURE_NO_TOTP === '1')) {
     const path = (await headers()).get('x-pathname') ?? '';
 
     if (!path.startsWith('/security')) {
