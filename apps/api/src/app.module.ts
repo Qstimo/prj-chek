@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AccessModule } from './access/access.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { ChronicleModule } from './chronicle/chronicle.module';
 import { CryptoModule } from './crypto/crypto.module';
 import { DbModule } from './db/db.module';
 import { EnvironmentsModule } from './environments/environments.module';
@@ -21,6 +22,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     ProjectsModule,
     EnvironmentsModule,
+    ChronicleModule,
     GrantsModule,
     InvitationsModule,
     UsersModule,

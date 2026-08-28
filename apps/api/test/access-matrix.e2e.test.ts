@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
 import { DATABASE } from '../src/db/db.module';
-import { environments, grants, projects, subjects, users } from '../src/db/schema';
+import { chronicleEntries, environments, grants, projects, subjects, users } from '../src/db/schema';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
 
 /** Ожидаемый ответ для уровня доступа. */
@@ -123,19 +123,24 @@ describe('матрица доступа', () => {
     return signIn();
   }
 
-  /** Выдаёт уровень на секцию «Инфраструктура» и входит. */
-  async function signInAsInfrastructure(level: AccessLevel | null) {
+  /** Выдаёт уровень на указанную секцию и входит. */
+  async function signInWithSection(section: Section, level: AccessLevel | null) {
     if (level) {
       await testDb.db.insert(grants).values({
         subjectId: contractorSubjectId,
         projectId,
-        section: Section.Infrastructure,
+        section,
         level,
         grantedBy: adminUserId,
       });
     }
 
     return signIn();
+  }
+
+  /** Выдаёт уровень на секцию «Инфраструктура» и входит. */
+  async function signInAsInfrastructure(level: AccessLevel | null) {
+    return signInWithSection(Section.Infrastructure, level);
   }
 
   for (const expectation of MATRIX) {
@@ -235,6 +240,60 @@ describe('матрица доступа', () => {
       await agent
         .post(`/projects/${projectId}/environments`)
         .send({ name: 'Стейдж', kind: EnvironmentKind.Staging })
+        .expect(create);
+    });
+  });
+
+  /**
+   * Хроника (ТЗ 4.3, строка «Хроника»).
+   *
+   * Метаданные — «даты и заголовки событий»; содержимое сводки
+   * открывается уровнем чтения, правка — уровнем записи.
+   */
+  describe.each([
+    { level: null, list: 404, create: 404, seesContent: false },
+    { level: AccessLevel.Metadata, list: 200, create: 403, seesContent: false },
+    { level: AccessLevel.Read, list: 200, create: 403, seesContent: true },
+    { level: AccessLevel.Write, list: 200, create: 201, seesContent: true },
+  ])('хроника на уровне $level', ({ level, list, create, seesContent }) => {
+    beforeEach(async () => {
+      // Запись заводится напрямую до выдачи уровня: проверяется
+      // видимость существующих данных, а не право их создать.
+      await testDb.db.insert(chronicleEntries).values({
+        projectId,
+        occurredOn: '2026-08-27',
+        title: 'Встреча',
+        content: 'Содержимое сводки',
+        createdBySubjectId: contractorSubjectId,
+      });
+    });
+
+    it(`отдаёт ленту кодом ${list}`, async () => {
+      const agent = await signInWithSection(Section.Chronicle, level);
+
+      await agent.get(`/projects/${projectId}/chronicle`).expect(list);
+    });
+
+    it(`${seesContent ? 'показывает' : 'скрывает'} содержимое`, async () => {
+      const agent = await signInWithSection(Section.Chronicle, level);
+
+      const response = await agent.get(`/projects/${projectId}/chronicle`);
+
+      if (list !== 200) {
+        expect(response.body.content).toBeUndefined();
+
+        return;
+      }
+
+      expect(response.body[0]?.content !== undefined).toBe(seesContent);
+    });
+
+    it(`создание отвечает кодом ${create}`, async () => {
+      const agent = await signInWithSection(Section.Chronicle, level);
+
+      await agent
+        .post(`/projects/${projectId}/chronicle`)
+        .send({ occurredOn: '2026-08-27', title: 'Новая', content: 'Текст' })
         .expect(create);
     });
   });
