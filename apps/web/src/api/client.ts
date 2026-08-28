@@ -1,13 +1,15 @@
 'use client';
 
 import { BROWSER_API_URL } from './config';
-import { readResponse } from './response';
+import { readResponse, type ResponseParse } from './response';
 
 /** Параметры запроса. */
 export interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
+  /** Вид тела успешного ответа. Текст нужен выгрузке `.env`. */
+  parse?: ResponseParse;
 }
 
 /**
@@ -25,5 +27,5 @@ export async function apiClient<T>(path: string, options: ApiRequestOptions = {}
     signal: options.signal,
   });
 
-  return readResponse<T>(response);
+  return readResponse<T>(response, options.parse);
 }
