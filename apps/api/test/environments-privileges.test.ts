@@ -31,6 +31,15 @@ describe('права роли приложения на окружения', () 
     ).resolves.toBeDefined();
   });
 
+  it('роль приложения читает и пишет переменные', async () => {
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM variables`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM variable_versions`),
+    ).resolves.toBeDefined();
+  });
+
   it('роль приложения не меняет схему', async () => {
     await expect(
       testDb.appDb.execute(sql`ALTER TABLE environments ADD COLUMN sneaky text`),

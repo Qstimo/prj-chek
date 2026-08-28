@@ -11,6 +11,7 @@ import { sessions } from './sessions';
 import { subjects } from './subjects';
 import { totpChallenges } from './totp-challenges';
 import { users } from './users';
+import { variableVersions, variables } from './variables';
 
 /**
  * Все таблицы системы. Перечислены явно, а не собраны из barrel-экспорта:
@@ -23,6 +24,8 @@ const ALL_TABLES = [
   { name: 'environments', table: environments },
   { name: 'environment_domains', table: environmentDomains },
   { name: 'chronicle_entries', table: chronicleEntries },
+  { name: 'variables', table: variables },
+  { name: 'variable_versions', table: variableVersions },
   { name: 'grants', table: grants },
   { name: 'sessions', table: sessions },
   { name: 'invitations', table: invitations },
