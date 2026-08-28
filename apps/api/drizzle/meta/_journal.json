@@ -57,6 +57,20 @@
       "when": 1787917713398,
       "tag": "0007_variable_privileges",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787924434046,
+      "tag": "0008_rare_proudstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787924434047,
+      "tag": "0009_roadmap_privileges",
+      "breakpoints": true
     }
   ]
 }

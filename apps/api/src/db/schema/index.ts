@@ -4,6 +4,7 @@ export * from './environments';
 export * from './grants';
 export * from './invitations';
 export * from './projects';
+export * from './roadmap';
 export * from './sessions';
 export * from './subjects';
 export * from './totp-challenges';

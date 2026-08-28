@@ -7,6 +7,7 @@ import { environmentDomains, environments } from './environments';
 import { grants } from './grants';
 import { invitations } from './invitations';
 import { projects } from './projects';
+import { roadmapCheckpoints, roadmapPublicLinks, roadmapVersions } from './roadmap';
 import { sessions } from './sessions';
 import { subjects } from './subjects';
 import { totpChallenges } from './totp-challenges';
@@ -26,6 +27,9 @@ const ALL_TABLES = [
   { name: 'chronicle_entries', table: chronicleEntries },
   { name: 'variables', table: variables },
   { name: 'variable_versions', table: variableVersions },
+  { name: 'roadmap_versions', table: roadmapVersions },
+  { name: 'roadmap_checkpoints', table: roadmapCheckpoints },
+  { name: 'roadmap_public_links', table: roadmapPublicLinks },
   { name: 'grants', table: grants },
   { name: 'sessions', table: sessions },
   { name: 'invitations', table: invitations },

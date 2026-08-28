@@ -40,6 +40,15 @@ describe('права роли приложения на окружения', () 
     ).resolves.toBeDefined();
   });
 
+  it('роль приложения читает и пишет роадмап', async () => {
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM roadmap_versions`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM roadmap_public_links`),
+    ).resolves.toBeDefined();
+  });
+
   it('роль приложения не меняет схему', async () => {
     await expect(
       testDb.appDb.execute(sql`ALTER TABLE environments ADD COLUMN sneaky text`),
