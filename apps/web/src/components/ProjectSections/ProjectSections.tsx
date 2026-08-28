@@ -25,6 +25,11 @@ export function ProjectSections({ project, sections = {} }: IProps) {
             Инфраструктура
           </Link>
         )}
+        {sections[Section.Variables] && (
+          <Link href={`/projects/${project.id}/variables`} className="underline">
+            Переменные
+          </Link>
+        )}
         {sections[Section.Chronicle] && (
           <Link href={`/projects/${project.id}/chronicle`} className="underline">
             Хроника
