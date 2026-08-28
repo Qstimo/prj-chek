@@ -1,4 +1,5 @@
 export * from './audit-log';
+export * from './chronicle';
 export * from './environments';
 export * from './grants';
 export * from './invitations';

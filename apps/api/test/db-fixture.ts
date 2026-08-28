@@ -59,7 +59,7 @@ export async function startTestDatabase(): Promise<TestDatabase> {
     truncate: async () => {
       await db.execute(sql`
         TRUNCATE TABLE audit_log, grants, sessions, invitations, totp_challenges,
-                       environment_domains, environments,
+                       chronicle_entries, environment_domains, environments,
                        projects, users, subjects
         RESTART IDENTITY CASCADE
       `);
