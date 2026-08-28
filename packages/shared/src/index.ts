@@ -9,3 +9,4 @@ export * from './schemas/project';
 export * from './schemas/section-levels';
 export * from './schemas/totp';
 export * from './schemas/user';
+export * from './schemas/variable';
