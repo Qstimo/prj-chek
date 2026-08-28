@@ -210,6 +210,9 @@ async function runAdminScenario(admin) {
       ip: '203.0.113.10',
       provider: 'Hetzner',
       domains: ['example.com'],
+      // Изнутри compose соседний контейнер доступен по имени сервиса:
+      // живой адрес для настоящей health-проверки.
+      healthCheckUrl: 'http://web:3000/login',
     },
   });
   check(
@@ -259,6 +262,28 @@ async function runAdminScenario(admin) {
     'выгрузка env содержит ключ',
     envText.text.includes('DATABASE_URL='),
     envText.text.slice(0, 80),
+  );
+
+  const checksRun = await admin('/api/status/run', { method: 'POST' });
+  check('проверки статуса запущены', checksRun.status === 202, `статус ${checksRun.status}`);
+
+  const projectStatus = await admin(`/api/projects/${created.json.id}/status`);
+  check(
+    'окружение прошло health-проверку',
+    projectStatus.json?.environments?.[0]?.health === 'up',
+    JSON.stringify(projectStatus.json?.environments?.[0]),
+  );
+  check(
+    'индикатор проекта вычислен',
+    projectStatus.json?.indicator && projectStatus.json.indicator !== 'unknown',
+    `индикатор ${projectStatus.json?.indicator}`,
+  );
+
+  const summary = await admin('/api/status/summary');
+  check(
+    'сводка статусов содержит проект',
+    summary.json?.some((row) => row.projectId === created.json.id),
+    `строк ${summary.json?.length}`,
   );
 
   const roadmapGrant = await admin(`/api/projects/${created.json.id}/grants`, {
@@ -490,6 +515,20 @@ async function runGuestScenario(guest, { projectId, guestInviteUrl, environmentI
     'раскрытие на уровне «метаданные» отклонено',
     guestReveal.status === 403,
     `статус ${guestReveal.status}`,
+  );
+
+  const guestStatus = await guest(`/api/projects/${projectId}/status`);
+  check(
+    'приглашённому со статусом инфраструктуры виден индикатор',
+    guestStatus.status === 200 && guestStatus.json?.indicator,
+    `статус ${guestStatus.status}, индикатор ${guestStatus.json?.indicator}`,
+  );
+
+  const guestRunChecks = await guest('/api/status/run', { method: 'POST' });
+  check(
+    'запуск проверок приглашённому недоступен',
+    guestRunChecks.status === 403,
+    `статус ${guestRunChecks.status}`,
   );
 
   const guestRoadmap = await guest(`/api/projects/${projectId}/roadmap`);
