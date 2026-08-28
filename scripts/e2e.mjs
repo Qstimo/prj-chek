@@ -218,10 +218,46 @@ async function runAdminScenario(admin) {
     `статус ${environment.status} ${environment.text.slice(0, 120)}`,
   );
 
+  const chronicleGrant = await admin(`/api/projects/${created.json.id}/grants`, {
+    method: 'PUT',
+    body: { subjectId: guestUser.subjectId, section: 'chronicle', level: 'metadata' },
+  });
+  checkCritical(
+    'выдан уровень «метаданные» на «Хронику»',
+    chronicleGrant.status === 200,
+    `статус ${chronicleGrant.status}`,
+  );
+
+  const intake = await admin(`/api/projects/${created.json.id}/intake-address`, {
+    method: 'POST',
+  });
+  checkCritical('приёмный адрес создан', intake.status === 201, `статус ${intake.status}`);
+
+  // Отправка идёт отдельным «машинным» клиентом без cookie:
+  // канал обязан работать без сессии (спека 5.1).
+  const machine = makeAgent();
+  const inbound = await machine(`/api/intake/${intake.json.token}`, {
+    method: 'POST',
+    body: { title: 'Сводка встречи', content: 'Решили выпускать в пятницу.' },
+  });
+  check('входящее принято без сессии', inbound.status === 201, `статус ${inbound.status}`);
+
+  const feed = await admin(`/api/projects/${created.json.id}/chronicle`);
+  check(
+    'входящее видно в хронике с источником webhook',
+    feed.json?.some((entry) => entry.title === 'Сводка встречи' && entry.source === 'webhook'),
+    JSON.stringify(feed.json).slice(0, 160),
+  );
+
   await runLoginScenario(admin, setup.json.secret);
   await runAuditScenario(admin);
 
-  return { projectId: created.json.id, guestUser, guestInviteUrl: invited.json.url };
+  return {
+    projectId: created.json.id,
+    guestUser,
+    guestInviteUrl: invited.json.url,
+    intakeToken: intake.json.token,
+  };
 }
 
 /** Полный вход по паролю: выход, отказ на неверном пароле, челлендж второго фактора. */
@@ -330,6 +366,25 @@ async function runGuestScenario(guest, { projectId, guestInviteUrl }) {
     `статус ${environmentWrite.status}`,
   );
 
+  const guestFeed = await guest(`/api/projects/${projectId}/chronicle`);
+  check(
+    'приглашённому видна лента хроники',
+    guestFeed.status === 200 && guestFeed.json?.length === 1,
+    `статус ${guestFeed.status}`,
+  );
+  check(
+    'на уровне «метаданные» виден заголовок, но не содержимое',
+    guestFeed.json?.[0]?.title === 'Сводка встречи' && guestFeed.json?.[0]?.content === undefined,
+    JSON.stringify(guestFeed.json?.[0]),
+  );
+
+  const guestAddress = await guest(`/api/projects/${projectId}/intake-address`);
+  check(
+    'приёмный адрес не показывается без права записи',
+    guestAddress.status === 403,
+    `статус ${guestAddress.status}`,
+  );
+
   const home = await guest('/');
   check('в меню приглашённого нет «Пользователи»', !home.text.includes('>Пользователи<'), `статус ${home.status}`);
   check('в меню приглашённого нет «Журнал»', !home.text.includes('>Журнал<'));
@@ -342,6 +397,19 @@ async function runGuestScenario(guest, { projectId, guestInviteUrl }) {
 
   const missing = await guest(`/api/projects/${MISSING_PROJECT_ID}`);
   check('несуществующий проект — «не найдено»', missing.status === 404, `статус ${missing.status}`);
+}
+
+/** Отзыв приёмного адреса: прежний токен обязан погаснуть. */
+async function runIntakeRevocationScenario(admin, { projectId, intakeToken }) {
+  const revoked = await admin(`/api/projects/${projectId}/intake-address`, { method: 'DELETE' });
+  check('приёмный адрес отозван', revoked.status === 204, `статус ${revoked.status}`);
+
+  const machine = makeAgent();
+  const rejected = await machine(`/api/intake/${intakeToken}`, {
+    method: 'POST',
+    body: { content: 'Опоздавшая сводка' },
+  });
+  check('после отзыва прежний токен получает 404', rejected.status === 404, `статус ${rejected.status}`);
 }
 
 /** Отзыв субъекта: действующая сессия должна перестать работать сразу. */
@@ -381,6 +449,7 @@ const guest = makeAgent();
 
 const context = await runAdminScenario(admin);
 await runGuestScenario(guest, context);
+await runIntakeRevocationScenario(admin, context);
 await runRevocationScenario(admin, guest, context);
 
 process.exit(report() === 0 ? 0 : 1);
