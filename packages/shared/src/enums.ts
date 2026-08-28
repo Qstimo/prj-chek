@@ -89,6 +89,13 @@ export enum EnvironmentKind {
   Other = 'other',
 }
 
+/** Состояние версии роадмапа. Намерение, задаётся вручную (ТЗ 3.5). */
+export enum RoadmapVersionState {
+  Planned = 'planned',
+  InProgress = 'in_progress',
+  Released = 'released',
+}
+
 /** Вид одноразовой ссылки на установку пароля (спека 4.6). */
 export enum InvitationKind {
   /** Первичное приглашение. */

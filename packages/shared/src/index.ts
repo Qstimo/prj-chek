@@ -6,6 +6,7 @@ export * from './schemas/environment';
 export * from './schemas/grant';
 export * from './schemas/intake';
 export * from './schemas/project';
+export * from './schemas/roadmap';
 export * from './schemas/section-levels';
 export * from './schemas/totp';
 export * from './schemas/user';
