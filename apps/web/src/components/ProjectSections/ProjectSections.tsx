@@ -19,13 +19,18 @@ export function ProjectSections({ project, sections = {} }: IProps) {
     <section className="space-y-4">
       <h1 className="text-2xl font-semibold">{project.name}</h1>
 
-      {sections[Section.Infrastructure] && (
-        <nav className="flex gap-3">
+      <nav className="flex gap-3">
+        {sections[Section.Infrastructure] && (
           <Link href={`/projects/${project.id}/infrastructure`} className="underline">
             Инфраструктура
           </Link>
-        </nav>
-      )}
+        )}
+        {sections[Section.Chronicle] && (
+          <Link href={`/projects/${project.id}/chronicle`} className="underline">
+            Хроника
+          </Link>
+        )}
+      </nav>
 
       {detail ? (
         <dl className="grid gap-3">

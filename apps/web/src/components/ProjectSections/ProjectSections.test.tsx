@@ -83,5 +83,20 @@ describe('ProjectSections', () => {
     render(<ProjectSections project={metadataOnly} sections={{}} />);
 
     expect(screen.queryByRole('link', { name: 'Инфраструктура' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Хроника' })).not.toBeInTheDocument();
+  });
+
+  it('показывает ссылку на хронику при доступе к секции', () => {
+    render(
+      <ProjectSections
+        project={metadataOnly}
+        sections={{ [Section.Chronicle]: AccessLevel.Metadata }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Хроника' })).toHaveAttribute(
+      'href',
+      `/projects/${metadataOnly.id}/chronicle`,
+    );
   });
 });
