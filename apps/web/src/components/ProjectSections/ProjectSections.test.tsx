@@ -114,6 +114,20 @@ describe('ProjectSections', () => {
     );
   });
 
+  it('показывает ссылку на документацию при доступе к секции', () => {
+    render(
+      <ProjectSections
+        project={metadataOnly}
+        sections={{ [Section.Docs]: AccessLevel.Metadata }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Документация' })).toHaveAttribute(
+      'href',
+      `/projects/${metadataOnly.id}/docs`,
+    );
+  });
+
   it('показывает ссылку на хронику при доступе к секции', () => {
     render(
       <ProjectSections

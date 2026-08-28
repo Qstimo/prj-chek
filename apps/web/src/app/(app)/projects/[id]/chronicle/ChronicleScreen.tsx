@@ -12,6 +12,7 @@ import { useState } from 'react';
 import {
   useMutationCreateCheckpoint,
   useMutationCreateChronicleEntry,
+  useMutationCreateDocPage,
   useMutationCreateIntakeAddress,
   useMutationDeleteChronicleEntry,
   useMutationRevokeIntakeAddress,
@@ -25,6 +26,7 @@ import { ChronicleForm, type ChronicleFormValues } from '@/components/ChronicleF
 import { ChronicleList } from '@/components/ChronicleList';
 import { IntakeAddressPanel } from '@/components/IntakeAddressPanel';
 import { PromoteToCheckpoint } from '@/components/PromoteToCheckpoint';
+import { PromoteToDoc } from '@/components/PromoteToDoc';
 
 /** Пропсы экрана хроники. */
 interface IProps {
@@ -44,9 +46,13 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
   const createAddress = useMutationCreateIntakeAddress(projectId);
   const revokeAddress = useMutationRevokeIntakeAddress(projectId);
   const createCheckpoint = useMutationCreateCheckpoint(projectId);
+  const createDocPage = useMutationCreateDocPage(projectId);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [promoting, setPromoting] = useState<{ id: string; title: string } | null>(null);
+  const [promotingToDoc, setPromotingToDoc] = useState<{ title: string; content: string } | null>(
+    null,
+  );
 
   if (chronicle.isPending || sections.isPending) {
     return <p className="text-muted-foreground">Загрузка…</p>;
@@ -62,6 +68,7 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
 
   const canWrite = sections.data[Section.Chronicle] === AccessLevel.Write;
   const canPromote = sections.data[Section.Roadmap] === AccessLevel.Write;
+  const canPromoteToDoc = sections.data[Section.Docs] === AccessLevel.Write;
   const editing = chronicle.data.find((entry) => entry.id === editingId);
 
   function submit(input: ChronicleEntryCreate): void {
@@ -119,7 +126,25 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
         }}
         onDelete={(id) => remove.mutate(id)}
         onPromote={canPromote ? (id, title) => setPromoting({ id, title }) : undefined}
+        onPromoteToDoc={
+          canPromoteToDoc
+            ? (_id, title, content) => setPromotingToDoc({ title, content })
+            : undefined
+        }
       />
+
+      {promotingToDoc && (
+        <PromoteToDoc
+          entryTitle={promotingToDoc.title}
+          entryContent={promotingToDoc.content}
+          isSubmitting={createDocPage.isPending}
+          error={createDocPage.error?.message}
+          onSubmit={(input) =>
+            createDocPage.mutate(input, { onSuccess: () => setPromotingToDoc(null) })
+          }
+          onCancel={() => setPromotingToDoc(null)}
+        />
+      )}
 
       {canWrite && (
         <IntakeAddressPanel
