@@ -615,6 +615,145 @@ async function runPublicRoadmapScenario(admin, { projectId, roadmapToken }) {
   check('после отключения прежний токен получает 404', gone.status === 404, `статус ${gone.status}`);
 }
 
+/**
+ * Вызов MCP от лица агента: JSON-RPC поверх HTTP с Bearer-токеном.
+ *
+ * Сервер может отвечать как JSON, так и SSE-потоком — разбираются оба вида.
+ */
+async function mcpCall(token, body) {
+  const response = await fetch(`${BASE}/api/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  const dataLine = text.split('\n').find((line) => line.startsWith('data:'));
+  const json = dataLine ? parseJson(dataLine.slice('data:'.length).trim()) : parseJson(text);
+
+  return { status: response.status, json, text };
+}
+
+/** Текст ответа инструмента MCP. */
+function toolText(response) {
+  return response.json?.result?.content?.[0]?.text ?? '';
+}
+
+/**
+ * Путь агента (спека этапа 8): токен с профилем «только чтение»,
+ * раскрытие значений — отдельным флагом, каждый вызов — в журнале.
+ */
+async function runAgentScenario(admin, { projectId }) {
+  const created = await admin(`/api/projects/${projectId}/agent-tokens`, {
+    method: 'POST',
+    body: { label: 'Агент проверки' },
+  });
+  checkCritical(
+    'токен агента создан и показан один раз',
+    created.status === 201 && typeof created.json?.token === 'string',
+    `статус ${created.status}`,
+  );
+  check(
+    'ответ создания содержит адрес MCP',
+    created.json?.mcpUrl?.includes('/api/mcp'),
+    created.json?.mcpUrl,
+  );
+
+  const list = await admin(`/api/projects/${projectId}/agent-tokens`);
+  check(
+    'список токенов не содержит открытого значения',
+    list.status === 200 && !list.text.includes(created.json.token),
+    `статус ${list.status}`,
+  );
+
+  const unauthorized = await mcpCall(null, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  check('вызов MCP без токена отклонён', unauthorized.status === 401, `статус ${unauthorized.status}`);
+
+  const initialized = await mcpCall(created.json.token, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-03-26',
+      capabilities: {},
+      clientInfo: { name: 'e2e', version: '0.0.0' },
+    },
+  });
+  checkCritical(
+    'агент согласовал протокол MCP',
+    initialized.json?.result?.serverInfo?.name === 'cairn',
+    initialized.text.slice(0, 160),
+  );
+
+  const tools = await mcpCall(created.json.token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+  const toolNames = (tools.json?.result?.tools ?? []).map((tool) => tool.name);
+  check('агенту доступны инструменты чтения', toolNames.includes('get_project_info'), toolNames.join(', '));
+  check('без флага нет инструмента раскрытия', !toolNames.includes('reveal_variable'));
+
+  const info = await mcpCall(created.json.token, {
+    jsonrpc: '2.0',
+    id: 3,
+    method: 'tools/call',
+    params: { name: 'get_project_info', arguments: {} },
+  });
+  check('агент читает паспорт проекта', toolText(info).includes(PROJECT.purpose), toolText(info).slice(0, 120));
+
+  const keys = await mcpCall(created.json.token, {
+    jsonrpc: '2.0',
+    id: 4,
+    method: 'tools/call',
+    params: { name: 'list_variable_keys', arguments: {} },
+  });
+  check(
+    'агент видит ключи переменных без значений',
+    toolText(keys).includes('DATABASE_URL') && !toolText(keys).includes('very-secret'),
+    toolText(keys).slice(0, 120),
+  );
+
+  const flagged = await admin(`/api/projects/${projectId}/agent-tokens/${created.json.id}`, {
+    method: 'PATCH',
+    body: { canRevealVariables: true },
+  });
+  check('флаг раскрытия включён', flagged.status === 200, `статус ${flagged.status}`);
+
+  const revealed = await mcpCall(created.json.token, {
+    jsonrpc: '2.0',
+    id: 5,
+    method: 'tools/call',
+    params: { name: 'reveal_variable', arguments: { environment: 'Прод', key: 'DATABASE_URL' } },
+  });
+  check(
+    'с флагом раскрытие возвращает значение',
+    toolText(revealed).includes('very-secret'),
+    toolText(revealed).slice(0, 120),
+  );
+
+  const audit = await admin('/api/audit');
+  const entries = audit.json?.entries ?? audit.json ?? [];
+  check(
+    'вызовы агента записаны в журнал',
+    entries.some((entry) => entry.action === 'agent.tool_called'),
+  );
+  check(
+    'записи о вызовах не содержат значения',
+    !JSON.stringify(entries.filter((entry) => entry.action === 'agent.tool_called')).includes(
+      'very-secret',
+    ),
+  );
+
+  const revoked = await admin(`/api/projects/${projectId}/agent-tokens/${created.json.id}`, {
+    method: 'DELETE',
+  });
+  check('токен агента отозван', revoked.status === 204, `статус ${revoked.status}`);
+
+  const rejected = await mcpCall(created.json.token, { jsonrpc: '2.0', id: 6, method: 'tools/list' });
+  check('после отзыва токен получает 401', rejected.status === 401, `статус ${rejected.status}`);
+}
+
 /** Отзыв приёмного адреса: прежний токен обязан погаснуть. */
 async function runIntakeRevocationScenario(admin, { projectId, intakeToken }) {
   const revoked = await admin(`/api/projects/${projectId}/intake-address`, { method: 'DELETE' });
@@ -665,6 +804,7 @@ const guest = makeAgent();
 
 const context = await runAdminScenario(admin);
 await runGuestScenario(guest, context);
+await runAgentScenario(admin, context);
 await runPublicRoadmapScenario(admin, context);
 await runIntakeRevocationScenario(admin, context);
 await runRevocationScenario(admin, guest, context);
