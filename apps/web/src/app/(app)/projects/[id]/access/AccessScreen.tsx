@@ -63,12 +63,24 @@ export function AccessScreen({ projectId }: IProps) {
   return (
     <div className="space-y-6">
       <AccessMatrix rows={rows} onChange={(change) => setGrant.mutate(change)} />
+      {createToken.isError && (
+        <p role="alert" className="text-destructive">
+          Не удалось создать токен агента.
+        </p>
+      )}
       <AgentTokensPanel
         tokens={tokens.data}
         createdToken={createToken.data ?? null}
         onCreate={(input) => createToken.mutate(input)}
         onToggleReveal={(tokenId, value) => toggleReveal.mutate({ tokenId, value })}
-        onRevoke={(tokenId) => revokeToken.mutate(tokenId)}
+        onRevoke={(tokenId) => {
+          // Отзыв только что созданного токена гасит и блок с его
+          // открытым значением — иначе секрет пережил бы сам токен.
+          if (tokenId === createToken.data?.id) {
+            createToken.reset();
+          }
+          revokeToken.mutate(tokenId);
+        }}
         isPending={isTokenPending}
       />
     </div>

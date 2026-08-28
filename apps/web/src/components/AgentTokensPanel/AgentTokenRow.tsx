@@ -4,7 +4,7 @@ import type { AgentToken } from '@cairn/shared';
 import { useState } from 'react';
 
 /** Пропсы строки токена. */
-interface IRowProps {
+interface IProps {
   token: AgentToken;
   onToggleReveal: (tokenId: string, value: boolean) => void;
   onRevoke: (tokenId: string) => void;
@@ -17,7 +17,7 @@ function formatDate(iso: string): string {
 }
 
 /** Строка токена: срок, последний вызов, флаг значений, отзыв с подтверждением. */
-export function AgentTokenRow({ token, onToggleReveal, onRevoke, isPending = false }: IRowProps) {
+export function AgentTokenRow({ token, onToggleReveal, onRevoke, isPending = false }: IProps) {
   const [isConfirming, setIsConfirming] = useState(false);
 
   return (

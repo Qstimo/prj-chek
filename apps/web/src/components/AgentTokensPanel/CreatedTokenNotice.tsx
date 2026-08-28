@@ -4,7 +4,7 @@ import type { AgentTokenCreated } from '@cairn/shared';
 import { useState } from 'react';
 
 /** Пропсы блока с только что созданным токеном. */
-interface INoticeProps {
+interface IProps {
   createdToken: AgentTokenCreated;
 }
 
@@ -21,7 +21,7 @@ function clientConfig(createdToken: AgentTokenCreated): string {
 }
 
 /** Открытое значение токена: показывается один раз, с конфигурацией клиента. */
-export function CreatedTokenNotice({ createdToken }: INoticeProps) {
+export function CreatedTokenNotice({ createdToken }: IProps) {
   const [isCopied, setIsCopied] = useState(false);
 
   return (

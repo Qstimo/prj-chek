@@ -4,7 +4,7 @@ import type { AgentTokenCreate } from '@cairn/shared';
 import { useState } from 'react';
 
 /** Пропсы формы создания токена. */
-interface IFormProps {
+interface IProps {
   onCreate: (input: AgentTokenCreate) => void;
   isPending?: boolean;
 }
@@ -15,7 +15,7 @@ const DEFAULT_TTL_DAYS = 90;
  * Форма выпуска токена. Флаг значений сопровождается предупреждением:
  * раскрытые значения попадут в контекст модели агента (ТЗ 7.4).
  */
-export function AgentTokenCreateForm({ onCreate, isPending = false }: IFormProps) {
+export function AgentTokenCreateForm({ onCreate, isPending = false }: IProps) {
   const [label, setLabel] = useState('');
   const [ttlDays, setTtlDays] = useState(DEFAULT_TTL_DAYS);
   const [canRevealVariables, setCanRevealVariables] = useState(false);

@@ -264,6 +264,99 @@ describe('HTTP: токены агентов и MCP', () => {
       expect(JSON.stringify(calls)).not.toContain('very-secret');
     });
 
+    it('остальные инструменты чтения возвращают данные секций', async () => {
+      const admin = await signIn('admin@cairn.local');
+      await admin
+        .post(`/projects/${projectId}/docs`)
+        .send({ title: 'Развёртывание', content: 'Полное содержимое страницы.' })
+        .expect(201);
+      const version = await admin
+        .post(`/projects/${projectId}/roadmap/versions`)
+        .send({ label: 'v1.0', state: 'in_progress' })
+        .expect(201);
+      await admin
+        .post(`/projects/${projectId}/roadmap/versions/${version.body.id}/checkpoints`)
+        .send({ title: 'Первый чекпоинт' })
+        .expect(201);
+      await admin
+        .post(`/projects/${projectId}/chronicle`)
+        .send({ occurredOn: '2026-08-28', title: 'Решение', content: 'Выпускаем в пятницу.' })
+        .expect(201);
+      await admin
+        .post(`/projects/${projectId}/environments`)
+        .send({ name: 'Прод', kind: EnvironmentKind.Production })
+        .expect(201);
+
+      const token = await createToken();
+
+      const doc = resultOf(
+        await rpc(token, toolsCall('read_doc_page', { title: 'Развёртывание' })).expect(200),
+      ) as { result: { content: { text: string }[] } };
+      expect(doc.result.content[0]!.text).toContain('Полное содержимое страницы');
+
+      const roadmap = resultOf(await rpc(token, toolsCall('get_roadmap')).expect(200)) as {
+        result: { content: { text: string }[] };
+      };
+      expect(roadmap.result.content[0]!.text).toContain('Первый чекпоинт');
+
+      const chronicle = resultOf(await rpc(token, toolsCall('read_chronicle')).expect(200)) as {
+        result: { content: { text: string }[] };
+      };
+      expect(chronicle.result.content[0]!.text).toContain('Решение');
+
+      const status = resultOf(await rpc(token, toolsCall('get_status')).expect(200)) as {
+        result: { content: { text: string }[] };
+      };
+      expect(status.result.content[0]!.text).toContain('Прод');
+    });
+
+    it('инструменты не достают чужой проект', async () => {
+      const admin = await signIn('admin@cairn.local');
+      const [other] = await testDb.db
+        .insert(projects)
+        .values({ slug: 'chuzhoj', name: 'Чужой', purpose: 'Чужое назначение' })
+        .returning();
+      await admin
+        .post(`/projects/${other!.id}/docs`)
+        .send({ title: 'Чужая страница', content: 'Чужое содержимое.' })
+        .expect(201);
+
+      const token = await createToken();
+
+      const info = resultOf(
+        await rpc(token, toolsCall('get_project_info')).expect(200),
+      ) as { result: { content: { text: string }[] } };
+      expect(info.result.content[0]!.text).not.toContain('Чужое назначение');
+
+      const docs = resultOf(
+        await rpc(token, toolsCall('search_docs', { query: 'Чужое' })).expect(200),
+      ) as { result: { content: { text: string }[] } };
+      expect(docs.result.content[0]!.text).not.toContain('Чужая страница');
+
+      const page = resultOf(
+        await rpc(token, toolsCall('read_doc_page', { title: 'Чужая страница' })).expect(200),
+      ) as { result: { content: { text: string }[] } };
+      expect(page.result.content[0]!.text).not.toContain('Чужое содержимое');
+      expect(page.result.content[0]!.text).toContain('не найдена');
+    });
+
+    it('прямой вызов reveal_variable без флага отвечает ошибкой', async () => {
+      const token = await createToken(false);
+
+      const response = resultOf(
+        await rpc(
+          token,
+          toolsCall('reveal_variable', { environment: 'Прод', key: 'DATABASE_URL' }),
+        ).expect(200),
+      ) as { result: { isError?: boolean; content: { text: string }[] } };
+
+      // Инструмент не зарегистрирован — SDK отвечает ошибкой вызова
+      // («Tool not found»), а не данными.
+      expect(response.result.isError).toBe(true);
+      expect(response.result.content[0]!.text).toContain('not found');
+      expect(JSON.stringify(response)).not.toContain('very-secret');
+    });
+
     it('после отзыва токен получает 401', async () => {
       const token = await createToken();
       const admin = await signIn('admin@cairn.local');

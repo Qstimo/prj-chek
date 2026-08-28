@@ -80,7 +80,7 @@ export class DocsRepository {
   ): Promise<{ id: string; title: string; snippet: string }[]> {
     await this.access.requireLevel(subject, projectId, Section.Docs, AccessLevel.Read);
 
-    const pattern = `%${query}%`;
+    const pattern = `%${escapeLikePattern(query)}%`;
     const rows = await this.db
       .select()
       .from(docPages)
@@ -166,6 +166,15 @@ export class DocsRepository {
 
     return page;
   }
+}
+
+/**
+ * Экранирует метасимволы LIKE: запрос ищется буквально.
+ *
+ * Без этого запрос «%» совпал бы с любой страницей, а «_» — с любым символом.
+ */
+function escapeLikePattern(query: string): string {
+  return query.replace(/[\\%_]/g, (symbol) => `\\${symbol}`);
 }
 
 /** Фрагмент вокруг первого совпадения; без совпадения — начало страницы. */

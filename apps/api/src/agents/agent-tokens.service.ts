@@ -15,7 +15,7 @@ import { AuditAction, type AuditActor } from '../audit/audit.types';
 import { generateToken, hashToken } from '../auth/token';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
-import { agentTokens, grants, subjects, users, type AgentTokenRow } from '../db/schema';
+import { agentTokens, grants, projects, subjects, users, type AgentTokenRow } from '../db/schema';
 
 /** Разрешённый токен: субъект, проект и флаг значений. */
 export interface ResolvedAgent {
@@ -56,8 +56,10 @@ export class AgentTokensService {
   async create(
     actor: RequestSubject,
     projectId: string,
-    input: Required<AgentTokenCreate>,
+    input: AgentTokenCreate,
   ): Promise<{ row: AgentTokenRow; token: string }> {
+    await this.requireProject(projectId);
+
     const token = generateToken();
     const grantedBy = await this.userIdOf(actor);
 
@@ -103,14 +105,15 @@ export class AgentTokensService {
     return { row, token };
   }
 
-  /** Токены проекта: без хэшей и открытых значений. */
+  /** Действующие токены проекта: без хэшей, отозванные не показываются. */
   async list(projectId: string): Promise<AgentToken[]> {
     const rows = await this.db
-      .select()
+      .select({ agentToken: agentTokens })
       .from(agentTokens)
-      .where(eq(agentTokens.projectId, projectId));
+      .innerJoin(subjects, eq(subjects.id, agentTokens.subjectId))
+      .where(and(eq(agentTokens.projectId, projectId), isNull(subjects.revokedAt)));
 
-    return rows.map(toView);
+    return rows.map((row) => toView(row.agentToken));
   }
 
   /** Переключает доступ к значениям переменных (ТЗ 7.3). */
@@ -196,19 +199,39 @@ export class AgentTokensService {
     };
   }
 
-  /** Токен обязан принадлежать проекту из адреса. */
+  /** Токен обязан принадлежать проекту из адреса и быть действующим. */
   private async requireToken(projectId: string, tokenId: string): Promise<AgentTokenRow> {
     const [row] = await this.db
-      .select()
+      .select({ agentToken: agentTokens })
       .from(agentTokens)
-      .where(and(eq(agentTokens.id, tokenId), eq(agentTokens.projectId, projectId)))
+      .innerJoin(subjects, eq(subjects.id, agentTokens.subjectId))
+      .where(
+        and(
+          eq(agentTokens.id, tokenId),
+          eq(agentTokens.projectId, projectId),
+          isNull(subjects.revokedAt),
+        ),
+      )
       .limit(1);
 
     if (!row) {
       throw new NotFoundException('Токен не найден');
     }
 
-    return row;
+    return row.agentToken;
+  }
+
+  /** Проект обязан существовать: иначе — «не найдено», а не сбой вставки. */
+  private async requireProject(projectId: string): Promise<void> {
+    const [row] = await this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundException('Не найдено');
+    }
   }
 
   /** Находит запись пользователя: «кто выдал» в выдачах ссылается на неё. */

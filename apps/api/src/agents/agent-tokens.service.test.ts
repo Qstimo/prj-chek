@@ -136,6 +136,32 @@ describe('сервис токенов агентов', () => {
     expect(actions).toContain(AuditAction.AgentTokenRevoked);
   });
 
+  it('отозванный токен исчезает из списка и больше не правится', async () => {
+    const { row } = await service.create(admin(), projectId, {
+      label: 'Cursor',
+      ttlDays: 90,
+      canRevealVariables: false,
+    });
+
+    await service.revoke(admin(), projectId, row.id);
+
+    expect(await service.list(projectId)).toEqual([]);
+    await expect(service.setRevealFlag(admin(), projectId, row.id, true)).rejects.toThrow(
+      'Токен не найден',
+    );
+    await expect(service.revoke(admin(), projectId, row.id)).rejects.toThrow('Токен не найден');
+  });
+
+  it('создание токена для несуществующего проекта — «не найдено»', async () => {
+    await expect(
+      service.create(admin(), '11111111-1111-1111-1111-111111111111', {
+        label: 'Cursor',
+        ttlDays: 90,
+        canRevealVariables: false,
+      }),
+    ).rejects.toThrow('Не найдено');
+  });
+
   it('список не раскрывает хэшей', async () => {
     await service.create(admin(), projectId, {
       label: 'Cursor',

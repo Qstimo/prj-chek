@@ -189,6 +189,30 @@ describe('репозиторий документации', () => {
     );
   });
 
+  it('метасимволы ILIKE ищутся буквально', async () => {
+    await testDb.db.transaction((tx) =>
+      repository.create(admin(), tx, projectId, {
+        title: 'Скидки',
+        content: 'Скидка 100% на всё.',
+      }),
+    );
+    await testDb.db.transaction((tx) =>
+      repository.create(admin(), tx, projectId, {
+        title: 'Обычная',
+        content: 'Страница без процентов.',
+      }),
+    );
+
+    // «%» — буквальный символ запроса, а не «любая строка»:
+    // иначе такой запрос вернул бы все страницы проекта.
+    const byPercent = await repository.search(admin(), projectId, '100%');
+    expect(byPercent.map((hit) => hit.title)).toEqual(['Скидки']);
+    expect(byPercent[0]!.snippet).toContain('100%');
+
+    const byUnderscore = await repository.search(admin(), projectId, '_');
+    expect(byUnderscore).toEqual([]);
+  });
+
   it('правка и удаление работают', async () => {
     const id = await createPage();
 

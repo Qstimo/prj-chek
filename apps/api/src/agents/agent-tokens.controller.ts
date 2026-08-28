@@ -50,11 +50,7 @@ export class AgentTokensController {
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body(new ZodValidationPipe(agentTokenCreateSchema)) body: AgentTokenCreate,
   ): Promise<AgentTokenCreated> {
-    const { row, token } = await this.tokens.create(
-      subject,
-      projectId,
-      body as Required<AgentTokenCreate>,
-    );
+    const { row, token } = await this.tokens.create(subject, projectId, body);
 
     return {
       id: row.id,
