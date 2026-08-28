@@ -4,9 +4,12 @@ import {
   type ProjectDetail,
   type ProjectMetadata,
   type ProjectUpdate,
+  type SectionLevels,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
 
+import { SectionNotVisibleError } from '../access/access.errors';
+import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction, type AuditActor } from '../audit/audit.types';
@@ -27,7 +30,24 @@ export class ProjectsService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly repository: ProjectsRepository,
     private readonly audit: AuditService,
+    private readonly access: AccessService,
   ) {}
+
+  /**
+   * Возвращает уровни субъекта по секциям проекта.
+   *
+   * Проект, к которому нет ни одной выдачи, обязан выглядеть
+   * несуществующим: пустая карта сообщила бы о его существовании.
+   */
+  async sectionsFor(subject: RequestSubject, projectId: string): Promise<SectionLevels> {
+    const levels = await this.access.levelsForProject(subject, projectId);
+
+    if (Object.keys(levels).length === 0) {
+      throw new SectionNotVisibleError();
+    }
+
+    return levels;
+  }
 
   /** Возвращает список видимых субъекту проектов. */
   async list(subject: RequestSubject): Promise<ProjectMetadata[]> {

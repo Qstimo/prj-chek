@@ -4,5 +4,6 @@ export * from './schemas/auth';
 export * from './schemas/environment';
 export * from './schemas/grant';
 export * from './schemas/project';
+export * from './schemas/section-levels';
 export * from './schemas/totp';
 export * from './schemas/user';

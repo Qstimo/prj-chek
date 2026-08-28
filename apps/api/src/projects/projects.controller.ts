@@ -5,6 +5,7 @@ import {
   type ProjectDetail,
   type ProjectMetadata,
   type ProjectUpdate,
+  type SectionLevels,
 } from '@cairn/shared';
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 
@@ -24,6 +25,20 @@ export class ProjectsController {
   @Get()
   async list(@CurrentSubject() subject: RequestSubject): Promise<ProjectMetadata[]> {
     return this.projects.list(subject);
+  }
+
+  /**
+   * Уровни текущего субъекта по секциям проекта.
+   *
+   * Объявлен до маршрута `:id`, иначе `sections` был бы разобран как
+   * идентификатор проекта и не прошёл бы проверку формата.
+   */
+  @Get(':id/sections')
+  async sections(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SectionLevels> {
+    return this.projects.sectionsFor(subject, id);
   }
 
   /** Карточка проекта в проекции, соответствующей уровню доступа. */

@@ -93,6 +93,30 @@ describe('проекты по HTTP', () => {
     });
   }
 
+  it('отдаёт уровни текущего субъекта по секциям', async () => {
+    const agent = await signIn('admin@cairn.local');
+
+    const response = await agent.get(`/projects/${projectId}/sections`).expect(200);
+
+    expect(response.body).toMatchObject({ info: 'write' });
+  });
+
+  it('отдаёт подрядчику только секции с выдачей', async () => {
+    await grant(AccessLevel.Read);
+    const agent = await signIn('user@cairn.local');
+
+    const response = await agent.get(`/projects/${projectId}/sections`).expect(200);
+
+    expect(response.body).toEqual({ info: 'read' });
+  });
+
+  it('скрывает уровни проекта, к которому нет доступа', async () => {
+    // Пустая карта сообщила бы, что проект существует (ТЗ 4.1).
+    const agent = await signIn('user@cairn.local');
+
+    await agent.get(`/projects/${projectId}/sections`).expect(404);
+  });
+
   it('без доступа отвечает 404, а не 403', async () => {
     // Существование проекта не раскрывается (ТЗ 4.2).
     const agent = await signIn('user@cairn.local');

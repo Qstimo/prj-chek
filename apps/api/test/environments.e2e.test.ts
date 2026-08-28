@@ -78,7 +78,13 @@ describe('HTTP: окружения', () => {
       .post('/auth/login')
       .send({ email, password: 'очень длинный пароль' });
 
-    return response.headers['set-cookie'][0];
+    const cookie = response.headers['set-cookie']?.[0];
+
+    if (!cookie) {
+      throw new Error('Вход не выдал cookie сессии');
+    }
+
+    return cookie;
   }
 
   async function grantLevel(level: AccessLevel): Promise<void> {

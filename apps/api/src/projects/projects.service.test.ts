@@ -27,6 +27,7 @@ describe('ProjectsService', () => {
       testDb.db,
       new ProjectsRepository(testDb.db, access),
       new AuditService(),
+      access,
     );
   });
 

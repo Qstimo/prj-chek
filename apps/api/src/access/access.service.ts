@@ -1,4 +1,4 @@
-import { AccessLevel, type Section } from '@cairn/shared';
+import { AccessLevel, Section, type SectionLevels } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
@@ -85,6 +85,38 @@ export class AccessService {
       .where(eq(grants.subjectId, subject.id));
 
     return rows.map((row) => row.projectId);
+  }
+
+  /**
+   * Возвращает уровни субъекта по секциям проекта.
+   *
+   * Нужен интерфейсу: по данным, прошедшим проекцию, нельзя отличить
+   * уровень чтения от уровня записи, а значит нельзя решить, показывать ли
+   * кнопки правки (спека этапа 2, 6.1).
+   *
+   * Секции без выдачи в карту не попадают.
+   */
+  async levelsForProject(
+    subject: RequestSubject,
+    projectId: string,
+    executor: Executor = this.db,
+  ): Promise<SectionLevels> {
+    if (subject.isRevoked) {
+      return {};
+    }
+
+    if (subject.isSuperadmin) {
+      return Object.fromEntries(
+        Object.values(Section).map((section) => [section, AccessLevel.Write]),
+      );
+    }
+
+    const rows = await executor
+      .select({ section: grants.section, level: grants.level })
+      .from(grants)
+      .where(and(eq(grants.subjectId, subject.id), eq(grants.projectId, projectId)));
+
+    return Object.fromEntries(rows.map((row) => [row.section, row.level]));
   }
 
   /**
