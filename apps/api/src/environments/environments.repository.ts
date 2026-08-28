@@ -14,7 +14,14 @@ import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
-import { environmentDomains, environments, variables, type Environment } from '../db/schema';
+import {
+  domainStatuses,
+  environmentDomains,
+  environmentStatuses,
+  environments,
+  variables,
+  type Environment,
+} from '../db/schema';
 import { environmentProjection } from './environment.projection';
 
 /**
@@ -184,6 +191,24 @@ export class EnvironmentsRepository {
       );
     }
 
+    // Статусы — производные данные и не переживают своё окружение.
+    const domains = await tx
+      .select({ id: environmentDomains.id })
+      .from(environmentDomains)
+      .where(eq(environmentDomains.environmentId, environmentId));
+
+    if (domains.length > 0) {
+      await tx.delete(domainStatuses).where(
+        inArray(
+          domainStatuses.domainId,
+          domains.map((domain) => domain.id),
+        ),
+      );
+    }
+
+    await tx
+      .delete(environmentStatuses)
+      .where(eq(environmentStatuses.environmentId, environmentId));
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
     await tx.delete(environments).where(eq(environments.id, environmentId));
 

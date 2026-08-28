@@ -1,4 +1,4 @@
-import { AccessLevel, EnvironmentKind, Section, SubjectKind } from '@cairn/shared';
+import { AccessLevel, EnvironmentKind, HealthState, Section, SubjectKind } from '@cairn/shared';
 import { ConflictException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -7,7 +7,9 @@ import { AccessService } from '../access/access.service';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import {
+  domainStatuses,
   environmentDomains,
+  environmentStatuses,
   environments,
   grants,
   projects,
@@ -358,6 +360,24 @@ describe('репозиторий окружений', () => {
       await expect(
         testDb.db.transaction((tx) => repository.remove(member(), tx, projectId, id)),
       ).rejects.toBeInstanceOf(InsufficientLevelError);
+    });
+
+    it('удаляет окружение вместе со строками статусов', async () => {
+      // Статусы — производные данные; пережить своё окружение они не должны.
+      const id = await createProd();
+      const [domain] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+      await testDb.db
+        .insert(environmentStatuses)
+        .values({ environmentId: id, health: HealthState.Up });
+      await testDb.db.insert(domainStatuses).values({ domainId: domain!.id });
+
+      await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id));
+
+      expect(await testDb.db.select().from(environmentStatuses)).toHaveLength(0);
+      expect(await testDb.db.select().from(domainStatuses)).toHaveLength(0);
     });
 
     it('не удаляет окружение, у которого есть переменные', async () => {
