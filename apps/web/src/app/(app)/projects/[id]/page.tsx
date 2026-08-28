@@ -1,4 +1,4 @@
-import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
+import type { ProjectDetail, ProjectMetadata, SectionLevels } from '@cairn/shared';
 import { notFound, redirect } from 'next/navigation';
 
 import { ApiError } from '@/api';
@@ -10,9 +10,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
 
   let project: ProjectMetadata | ProjectDetail;
+  let sections: SectionLevels;
 
   try {
-    project = await apiServer<ProjectMetadata | ProjectDetail>(`/projects/${id}`);
+    [project, sections] = await Promise.all([
+      apiServer<ProjectMetadata | ProjectDetail>(`/projects/${id}`),
+      apiServer<SectionLevels>(`/projects/${id}/sections`),
+    ]);
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 401) {
       redirect('/login');
@@ -28,7 +32,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <ProjectSections project={project} />
+      <ProjectSections project={project} sections={sections} />
     </main>
   );
 }

@@ -1,4 +1,5 @@
-import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
+import { Section, type ProjectDetail, type ProjectMetadata } from '@cairn/shared';
+import Link from 'next/link';
 
 import { FIELD_LABELS } from './constants';
 import type { IProps } from './types';
@@ -11,12 +12,20 @@ import type { IProps } from './types';
  * Недоступные секции не приходят от API и потому здесь отсутствуют,
  * а не показываются заблокированными (ТЗ 8).
  */
-export function ProjectSections({ project }: IProps) {
+export function ProjectSections({ project, sections = {} }: IProps) {
   const detail = isDetailed(project) ? project : null;
 
   return (
     <section className="space-y-4">
       <h1 className="text-2xl font-semibold">{project.name}</h1>
+
+      {sections[Section.Infrastructure] && (
+        <nav className="flex gap-3">
+          <Link href={`/projects/${project.id}/infrastructure`} className="underline">
+            Инфраструктура
+          </Link>
+        </nav>
+      )}
 
       {detail ? (
         <dl className="grid gap-3">

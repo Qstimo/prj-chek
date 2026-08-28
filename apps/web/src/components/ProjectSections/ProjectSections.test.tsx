@@ -1,4 +1,4 @@
-import { ProjectLifecycle } from '@cairn/shared';
+import { AccessLevel, ProjectLifecycle, Section } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
@@ -62,5 +62,26 @@ describe('ProjectSections', () => {
     render(<ProjectSections project={{ ...detailed, stack: null }} />);
 
     expect(screen.queryByText('Стек')).not.toBeInTheDocument();
+  });
+
+  it('показывает ссылку на инфраструктуру при доступе к секции', () => {
+    render(
+      <ProjectSections
+        project={metadataOnly}
+        sections={{ [Section.Infrastructure]: AccessLevel.Metadata }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Инфраструктура' })).toHaveAttribute(
+      'href',
+      `/projects/${metadataOnly.id}/infrastructure`,
+    );
+  });
+
+  it('не показывает недоступную секцию', () => {
+    // Недоступные секции отсутствуют, а не выглядят заблокированными (ТЗ 8).
+    render(<ProjectSections project={metadataOnly} sections={{}} />);
+
+    expect(screen.queryByRole('link', { name: 'Инфраструктура' })).not.toBeInTheDocument();
   });
 });
