@@ -372,6 +372,63 @@ describe('матрица доступа', () => {
     });
   });
 
+  /**
+   * Роадмап (ТЗ 4.3, строка «Роадмап»).
+   *
+   * Метаданные — «версии и их прогресс»; формулировки чекпоинтов
+   * открываются чтением, правка — записью.
+   */
+  describe.each([
+    { level: null, list: 404, create: 404, seesTitles: false },
+    { level: AccessLevel.Metadata, list: 200, create: 403, seesTitles: false },
+    { level: AccessLevel.Read, list: 200, create: 403, seesTitles: true },
+    { level: AccessLevel.Write, list: 200, create: 201, seesTitles: true },
+  ])('роадмап на уровне $level', ({ level, list, create, seesTitles }) => {
+    beforeEach(async () => {
+      const adminAgent = request.agent(app.getHttpServer());
+      await adminAgent
+        .post('/auth/login')
+        .send({ email: 'admin@cairn.local', password: 'очень длинный пароль' })
+        .expect(200);
+      const version = await adminAgent
+        .post(`/projects/${projectId}/roadmap/versions`)
+        .send({ label: 'v1.0' })
+        .expect(201);
+      await adminAgent
+        .post(`/projects/${projectId}/roadmap/versions/${version.body.id}/checkpoints`)
+        .send({ title: 'Секретная формулировка' })
+        .expect(201);
+    });
+
+    it(`отдаёт роадмап кодом ${list}`, async () => {
+      const agent = await signInWithSection(Section.Roadmap, level);
+
+      await agent.get(`/projects/${projectId}/roadmap`).expect(list);
+    });
+
+    it(`${seesTitles ? 'показывает' : 'скрывает'} формулировки`, async () => {
+      const agent = await signInWithSection(Section.Roadmap, level);
+
+      const response = await agent.get(`/projects/${projectId}/roadmap`);
+
+      if (list !== 200) {
+        return;
+      }
+
+      expect(JSON.stringify(response.body).includes('Секретная формулировка')).toBe(seesTitles);
+      expect(response.body.versions[0].progress).toEqual({ done: 0, total: 1 });
+    });
+
+    it(`создание версии отвечает кодом ${create}`, async () => {
+      const agent = await signInWithSection(Section.Roadmap, level);
+
+      await agent
+        .post(`/projects/${projectId}/roadmap/versions`)
+        .send({ label: 'v2.0' })
+        .expect(create);
+    });
+  });
+
   describe('проекция полей', () => {
     it('на уровне метаданных назначение скрыто', async () => {
       const agent = await signInAs(AccessLevel.Metadata);
