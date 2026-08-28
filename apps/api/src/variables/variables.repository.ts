@@ -43,16 +43,29 @@ export class VariablesRepository {
     private readonly crypto: CryptoService,
   ) {}
 
-  /** Список переменных окружения: ключи, описания, номера версий — без значений. */
+  /**
+   * Список переменных окружения: ключи, описания, номера версий — без значений.
+   *
+   * Вызванный внутри транзакции, обязан получить её исполнителем: иначе
+   * запрос уйдёт за другим подключением пула и при исчерпанном пуле повиснет
+   * (см. предупреждение в AccessService).
+   */
   async list(
     subject: RequestSubject,
     projectId: string,
     environmentId: string,
+    executor: Executor = this.db,
   ): Promise<Variable[]> {
-    await this.access.requireLevel(subject, projectId, Section.Variables, AccessLevel.Metadata);
-    await this.requireEnvironment(this.db, projectId, environmentId);
+    await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Variables,
+      AccessLevel.Metadata,
+      executor,
+    );
+    await this.requireEnvironment(executor, projectId, environmentId);
 
-    const rows = await this.db
+    const rows = await executor
       .select({
         variable: variables,
         currentVersion: max(variableVersions.versionNo),
@@ -244,14 +257,19 @@ export class VariablesRepository {
     return variable;
   }
 
-  /** Раскрывает текущее значение. Требует уровня чтения (ТЗ 4.3). */
+  /**
+   * Раскрывает текущее значение. Требует уровня чтения (ТЗ 4.3).
+   *
+   * Ключ возвращается вместе со значением: он нужен записи журнала,
+   * и отдельный запрос за ним внутри транзакции был бы лишним.
+   */
   async reveal(
     subject: RequestSubject,
     projectId: string,
     environmentId: string,
     variableId: string,
     executor: Executor = this.db,
-  ): Promise<RevealResponse> {
+  ): Promise<RevealResponse & { key: string }> {
     await this.access.requireLevel(
       subject,
       projectId,
@@ -259,11 +277,15 @@ export class VariablesRepository {
       AccessLevel.Read,
       executor,
     );
-    await this.requireVariable(executor, projectId, environmentId, variableId);
+    const variable = await this.requireVariable(executor, projectId, environmentId, variableId);
 
     const current = await this.currentVersion(executor, variableId);
 
-    return { value: this.crypto.decrypt(current.valueEncrypted), versionNo: current.versionNo };
+    return {
+      value: this.crypto.decrypt(current.valueEncrypted),
+      versionNo: current.versionNo,
+      key: variable.key,
+    };
   }
 
   /** Раскрывает историческую версию. */
@@ -274,7 +296,7 @@ export class VariablesRepository {
     variableId: string,
     versionNo: number,
     executor: Executor = this.db,
-  ): Promise<RevealResponse> {
+  ): Promise<RevealResponse & { key: string }> {
     await this.access.requireLevel(
       subject,
       projectId,
@@ -282,7 +304,7 @@ export class VariablesRepository {
       AccessLevel.Read,
       executor,
     );
-    await this.requireVariable(executor, projectId, environmentId, variableId);
+    const variable = await this.requireVariable(executor, projectId, environmentId, variableId);
 
     const [version] = await executor
       .select()
@@ -296,7 +318,11 @@ export class VariablesRepository {
       throw new SectionNotVisibleError();
     }
 
-    return { value: this.crypto.decrypt(version.valueEncrypted), versionNo };
+    return {
+      value: this.crypto.decrypt(version.valueEncrypted),
+      versionNo,
+      key: variable.key,
+    };
   }
 
   /** История версий без значений: номер, автор, дата. Новые сверху. */

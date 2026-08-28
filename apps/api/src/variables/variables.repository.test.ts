@@ -209,7 +209,7 @@ describe('репозиторий переменных', () => {
 
       const revealed = await repository.reveal(member(), projectId, environmentId, id);
 
-      expect(revealed).toEqual({ value: 'postgres://secret', versionNo: 1 });
+      expect(revealed).toEqual({ value: 'postgres://secret', versionNo: 1, key: 'DATABASE_URL' });
     });
 
     it('отказывает на уровне метаданных', async () => {
@@ -231,7 +231,7 @@ describe('репозиторий переменных', () => {
       const current = await repository.reveal(admin(), projectId, environmentId, id);
 
       expect(old.value).toBe('postgres://secret');
-      expect(current).toEqual({ value: 'новое', versionNo: 2 });
+      expect(current).toMatchObject({ value: 'новое', versionNo: 2 });
     });
   });
 
@@ -290,7 +290,7 @@ describe('репозиторий переменных', () => {
 
       expect(newVersion).toBe(3);
       const revealed = await repository.reveal(admin(), projectId, environmentId, id);
-      expect(revealed).toEqual({ value: 'postgres://secret', versionNo: 3 });
+      expect(revealed).toMatchObject({ value: 'postgres://secret', versionNo: 3 });
     });
 
     it('откат к несуществующей версии выглядит как «не найдено»', async () => {
