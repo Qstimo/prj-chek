@@ -58,6 +58,19 @@ describe('ChronicleEntry', () => {
     expect(onDelete).toHaveBeenCalled();
   });
 
+  it('показывает «В чекпоинт» только при переданном обработчике', async () => {
+    // Кнопка появляется у тех, кто вправе писать в роадмап (ТЗ 3.6).
+    const onPromote = vi.fn();
+    const { rerender } = render(<ChronicleEntry entry={detail} />);
+
+    expect(screen.queryByRole('button', { name: 'В чекпоинт' })).not.toBeInTheDocument();
+
+    rerender(<ChronicleEntry entry={detail} onPromote={onPromote} />);
+    await userEvent.click(screen.getByRole('button', { name: 'В чекпоинт' }));
+
+    expect(onPromote).toHaveBeenCalled();
+  });
+
   it('отменяет удаление', async () => {
     const onDelete = vi.fn();
     render(<ChronicleEntry entry={detail} canWrite onEdit={vi.fn()} onDelete={onDelete} />);

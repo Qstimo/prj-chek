@@ -7,7 +7,7 @@ import { EntryActions } from './EntryActions';
 import type { IProps } from './types';
 
 /** Запись хроники: состав полей задан уровнем доступа (ТЗ 4.3). */
-export function ChronicleEntry({ entry, canWrite = false, onEdit, onDelete }: IProps) {
+export function ChronicleEntry({ entry, canWrite = false, onEdit, onDelete, onPromote }: IProps) {
   const detail = isDetailed(entry) ? entry : null;
 
   return (
@@ -24,7 +24,14 @@ export function ChronicleEntry({ entry, canWrite = false, onEdit, onDelete }: IP
 
       {detail && <p className="whitespace-pre-wrap">{detail.content}</p>}
 
-      {canWrite && <EntryActions onEdit={onEdit} onDelete={onDelete} />}
+      <div className="flex flex-wrap gap-2">
+        {onPromote && (
+          <button type="button" onClick={onPromote} className="rounded-md border px-3 py-1 text-sm">
+            В чекпоинт
+          </button>
+        )}
+        {canWrite && <EntryActions onEdit={onEdit} onDelete={onDelete} />}
+      </div>
     </article>
   );
 }

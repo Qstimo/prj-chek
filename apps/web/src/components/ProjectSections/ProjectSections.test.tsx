@@ -100,6 +100,20 @@ describe('ProjectSections', () => {
     );
   });
 
+  it('показывает ссылку на роадмап при доступе к секции', () => {
+    render(
+      <ProjectSections
+        project={metadataOnly}
+        sections={{ [Section.Roadmap]: AccessLevel.Metadata }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Роадмап' })).toHaveAttribute(
+      'href',
+      `/projects/${metadataOnly.id}/roadmap`,
+    );
+  });
+
   it('показывает ссылку на хронику при доступе к секции', () => {
     render(
       <ProjectSections

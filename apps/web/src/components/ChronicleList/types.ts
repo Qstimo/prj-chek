@@ -7,4 +7,6 @@ export interface IProps {
   canWrite?: boolean;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Поднять запись в чекпоинт: передаётся при праве записи в роадмап. */
+  onPromote?: (id: string, title: string) => void;
 }

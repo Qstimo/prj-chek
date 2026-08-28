@@ -4,7 +4,7 @@ import { ChronicleEntry } from '../ChronicleEntry';
 import type { IProps } from './types';
 
 /** Лента хроники: свежие события сверху (ТЗ 3.6). */
-export function ChronicleList({ entries, canWrite = false, onEdit, onDelete }: IProps) {
+export function ChronicleList({ entries, canWrite = false, onEdit, onDelete, onPromote }: IProps) {
   if (entries.length === 0) {
     return (
       <p className="text-muted-foreground">
@@ -24,6 +24,7 @@ export function ChronicleList({ entries, canWrite = false, onEdit, onDelete }: I
             canWrite={canWrite}
             onEdit={() => onEdit(entry.id)}
             onDelete={() => onDelete(entry.id)}
+            onPromote={onPromote ? () => onPromote(entry.id, entry.title) : undefined}
           />
         </li>
       ))}

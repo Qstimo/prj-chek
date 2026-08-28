@@ -10,6 +10,7 @@ import {
 import { useState } from 'react';
 
 import {
+  useMutationCreateCheckpoint,
   useMutationCreateChronicleEntry,
   useMutationCreateIntakeAddress,
   useMutationDeleteChronicleEntry,
@@ -17,11 +18,13 @@ import {
   useMutationUpdateChronicleEntry,
   useQueryChronicle,
   useQueryIntakeAddress,
+  useQueryRoadmap,
   useQuerySections,
 } from '@/api/hooks';
 import { ChronicleForm, type ChronicleFormValues } from '@/components/ChronicleForm';
 import { ChronicleList } from '@/components/ChronicleList';
 import { IntakeAddressPanel } from '@/components/IntakeAddressPanel';
+import { PromoteToCheckpoint } from '@/components/PromoteToCheckpoint';
 
 /** Пропсы экрана хроники. */
 interface IProps {
@@ -40,8 +43,10 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
   const remove = useMutationDeleteChronicleEntry(projectId);
   const createAddress = useMutationCreateIntakeAddress(projectId);
   const revokeAddress = useMutationRevokeIntakeAddress(projectId);
+  const createCheckpoint = useMutationCreateCheckpoint(projectId);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [promoting, setPromoting] = useState<{ id: string; title: string } | null>(null);
 
   if (chronicle.isPending || sections.isPending) {
     return <p className="text-muted-foreground">Загрузка…</p>;
@@ -56,6 +61,7 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
   }
 
   const canWrite = sections.data[Section.Chronicle] === AccessLevel.Write;
+  const canPromote = sections.data[Section.Roadmap] === AccessLevel.Write;
   const editing = chronicle.data.find((entry) => entry.id === editingId);
 
   function submit(input: ChronicleEntryCreate): void {
@@ -89,6 +95,21 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
         />
       )}
 
+      {promoting && (
+        <PromotePanel
+          projectId={projectId}
+          entryTitle={promoting.title}
+          isSubmitting={createCheckpoint.isPending}
+          onSubmit={(versionId, title) =>
+            createCheckpoint.mutate(
+              { versionId, input: { title } },
+              { onSuccess: () => setPromoting(null) },
+            )
+          }
+          onCancel={() => setPromoting(null)}
+        />
+      )}
+
       <ChronicleList
         entries={chronicle.data}
         canWrite={canWrite}
@@ -97,6 +118,7 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
           setEditingId(id);
         }}
         onDelete={(id) => remove.mutate(id)}
+        onPromote={canPromote ? (id, title) => setPromoting({ id, title }) : undefined}
       />
 
       {canWrite && (
@@ -109,6 +131,42 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
         />
       )}
     </div>
+  );
+}
+
+/** Пропсы панели поднятия: версии загружаются только когда панель открыта. */
+interface PromotePanelProps {
+  projectId: string;
+  entryTitle: string;
+  isSubmitting: boolean;
+  onSubmit: (versionId: string, title: string) => void;
+  onCancel: () => void;
+}
+
+/** Загружает версии роадмапа и отдаёт их панели «В чекпоинт». */
+function PromotePanel({ projectId, entryTitle, isSubmitting, onSubmit, onCancel }: PromotePanelProps) {
+  const roadmap = useQueryRoadmap(projectId);
+
+  if (roadmap.isPending) {
+    return <p className="text-muted-foreground">Загрузка версий…</p>;
+  }
+
+  if (roadmap.isError) {
+    return (
+      <p role="alert" className="text-destructive">
+        Не удалось загрузить роадмап.
+      </p>
+    );
+  }
+
+  return (
+    <PromoteToCheckpoint
+      entryTitle={entryTitle}
+      versions={roadmap.data.versions}
+      isSubmitting={isSubmitting}
+      onSubmit={onSubmit}
+      onCancel={onCancel}
+    />
   );
 }
 
