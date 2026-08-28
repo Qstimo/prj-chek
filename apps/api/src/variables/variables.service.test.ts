@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { EnvironmentKind, SubjectKind } from '@cairn/shared';
+import { AccessLevel, EnvironmentKind, Section, SubjectKind } from '@cairn/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -9,7 +9,15 @@ import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
 import { CryptoService } from '../crypto/crypto.service';
-import { auditLog, environments, projects, subjects, users, variableVersions } from '../db/schema';
+import {
+  auditLog,
+  environments,
+  grants,
+  projects,
+  subjects,
+  users,
+  variableVersions,
+} from '../db/schema';
 import { VariablesRepository } from './variables.repository';
 import { VariablesService } from './variables.service';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
@@ -170,6 +178,45 @@ describe('сервис переменных', () => {
     const [entry] = await entriesOf(AuditAction.VariableDeleted);
     expect(entry?.metadata).toMatchObject({ key: 'KEY' });
     expect(await testDb.db.select().from(variableVersions)).toHaveLength(0);
+  });
+
+  it('агентское раскрытие работает при уровне метаданных и пишет журнал', async () => {
+    // ТЗ 7.3: профиль токена даёт переменным метаданные, а раскрытие
+    // разрешает отдельный флаг — этот путь и проверяется.
+    await service.create(admin(), projectId, environmentId, {
+      key: 'DATABASE_URL',
+      value: 'postgres://secret',
+    });
+    const [variable] = await service.list(admin(), projectId, environmentId);
+
+    const [agentSubjectRow] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.AgentToken, label: 'Cursor' })
+      .returning();
+    await testDb.db.insert(grants).values({
+      subjectId: agentSubjectRow!.id,
+      projectId,
+      section: Section.Variables,
+      level: AccessLevel.Metadata,
+      grantedBy: (await testDb.db.select().from(users))[0]!.id,
+    });
+
+    const agent: RequestSubject = {
+      id: agentSubjectRow!.id,
+      kind: SubjectKind.AgentToken,
+      label: 'Cursor',
+      isSuperadmin: false,
+      isRevoked: false,
+    };
+
+    // Обычное раскрытие агенту недоступно: уровень ниже чтения.
+    await expect(service.reveal(agent, projectId, environmentId, variable!.id)).rejects.toThrow();
+
+    const revealed = await service.revealForAgent(agent, projectId, environmentId, variable!.id);
+    expect(revealed.value).toBe('postgres://secret');
+
+    const [entry] = await entriesOf(AuditAction.VariableRevealed);
+    expect(entry?.subjectKind).toBe(SubjectKind.AgentToken);
   });
 
   it('отказ по правам не оставляет следов в журнале', async () => {

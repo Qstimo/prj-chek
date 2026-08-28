@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AccessModule } from './access/access.module';
+import { AgentsModule } from './agents/agents.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { ChronicleModule } from './chronicle/chronicle.module';
@@ -33,6 +34,7 @@ import { VariablesModule } from './variables/variables.module';
     DocsModule,
     StatusModule,
     IntakeModule,
+    AgentsModule,
     GrantsModule,
     InvitationsModule,
     UsersModule,

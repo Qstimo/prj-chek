@@ -191,6 +191,33 @@ export class VariablesService {
     });
   }
 
+  /**
+   * Раскрытие для агента (ТЗ 7.3): уровень «метаданные» + флаг токена.
+   *
+   * Вызывающий обязан проверить `canRevealVariables` до вызова.
+   * Журнал получает штатный `variable.revealed` от лица токена.
+   */
+  async revealForAgent(
+    subject: RequestSubject,
+    projectId: string,
+    environmentId: string,
+    variableId: string,
+  ): Promise<RevealResponse> {
+    return this.db.transaction(async (tx) => {
+      const revealed = await this.repository.revealForAgent(
+        subject,
+        projectId,
+        environmentId,
+        variableId,
+        tx,
+      );
+
+      await this.recordReveal(tx, subject, projectId, environmentId, variableId, revealed);
+
+      return { value: revealed.value, versionNo: revealed.versionNo };
+    });
+  }
+
   /** Раскрывает историческую версию. */
   async revealVersion(
     subject: RequestSubject,

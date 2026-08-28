@@ -288,6 +288,39 @@ export class VariablesRepository {
     };
   }
 
+  /**
+   * Раскрытие для агента: уровень «метаданные» плюс явный флаг токена.
+   *
+   * Профиль токена даёт переменным метаданные (ТЗ 7.3), а раскрытие
+   * разрешается отдельной настройкой — этот метод и есть её исполнение.
+   * Вызывается ТОЛЬКО из ветки, проверившей `canRevealVariables`;
+   * людских маршрутов к нему нет.
+   */
+  async revealForAgent(
+    subject: RequestSubject,
+    projectId: string,
+    environmentId: string,
+    variableId: string,
+    executor: Executor = this.db,
+  ): Promise<RevealResponse & { key: string }> {
+    await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Variables,
+      AccessLevel.Metadata,
+      executor,
+    );
+    const variable = await this.requireVariable(executor, projectId, environmentId, variableId);
+
+    const current = await this.currentVersion(executor, variableId);
+
+    return {
+      value: this.crypto.decrypt(current.valueEncrypted),
+      versionNo: current.versionNo,
+      key: variable.key,
+    };
+  }
+
   /** Раскрывает историческую версию. */
   async revealVersion(
     subject: RequestSubject,

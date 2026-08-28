@@ -167,6 +167,28 @@ describe('репозиторий документации', () => {
     );
   });
 
+  it('поиск находит по заголовку и содержимому, требует чтения', async () => {
+    await createPage('Развёртывание');
+    await testDb.db.transaction((tx) =>
+      repository.create(admin(), tx, projectId, {
+        title: 'Контакты',
+        content: 'По вопросам сервера пишите дежурному.',
+      }),
+    );
+
+    const byTitle = await repository.search(admin(), projectId, 'развёрт');
+    const byContent = await repository.search(admin(), projectId, 'дежурному');
+
+    expect(byTitle.map((hit) => hit.title)).toEqual(['Развёртывание']);
+    expect(byContent.map((hit) => hit.title)).toEqual(['Контакты']);
+    expect(byContent[0]!.snippet).toContain('дежурному');
+
+    await grant(AccessLevel.Metadata);
+    await expect(repository.search(member(), projectId, 'x')).rejects.toBeInstanceOf(
+      InsufficientLevelError,
+    );
+  });
+
   it('правка и удаление работают', async () => {
     const id = await createPage();
 
