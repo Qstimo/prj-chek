@@ -286,6 +286,30 @@ async function runAdminScenario(admin) {
     `строк ${summary.json?.length}`,
   );
 
+  const docsGrant = await admin(`/api/projects/${created.json.id}/grants`, {
+    method: 'PUT',
+    body: { subjectId: guestUser.subjectId, section: 'docs', level: 'metadata' },
+  });
+  checkCritical(
+    'выдан уровень «метаданные» на «Документацию»',
+    docsGrant.status === 200,
+    `статус ${docsGrant.status}`,
+  );
+
+  const docPage = await admin(`/api/projects/${created.json.id}/docs`, {
+    method: 'POST',
+    body: {
+      title: 'Развёртывание',
+      content: '# Шаги\n\nСекретное содержимое страницы.\n\n```\npnpm install\n```',
+    },
+  });
+  checkCritical('страница документации создана', docPage.status === 201, `статус ${docPage.status}`);
+  check(
+    'содержимое страницы приходит на уровне записи',
+    docPage.text.includes('Секретное содержимое страницы'),
+    docPage.text.slice(0, 120),
+  );
+
   const roadmapGrant = await admin(`/api/projects/${created.json.id}/grants`, {
     method: 'PUT',
     body: { subjectId: guestUser.subjectId, section: 'roadmap', level: 'metadata' },
@@ -515,6 +539,14 @@ async function runGuestScenario(guest, { projectId, guestInviteUrl, environmentI
     'раскрытие на уровне «метаданные» отклонено',
     guestReveal.status === 403,
     `статус ${guestReveal.status}`,
+  );
+
+  const guestDocs = await guest(`/api/projects/${projectId}/docs`);
+  check(
+    'приглашённому виден заголовок страницы без содержимого',
+    guestDocs.json?.[0]?.title === 'Развёртывание' &&
+      !guestDocs.text.includes('Секретное содержимое страницы'),
+    guestDocs.text.slice(0, 120),
   );
 
   const guestStatus = await guest(`/api/projects/${projectId}/status`);
