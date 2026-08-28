@@ -192,6 +192,32 @@ async function runAdminScenario(admin) {
     `статус ${grant.status} ${grant.text.slice(0, 120)}`,
   );
 
+  const infraGrant = await admin(`/api/projects/${created.json.id}/grants`, {
+    method: 'PUT',
+    body: { subjectId: guestUser.subjectId, section: 'infrastructure', level: 'metadata' },
+  });
+  checkCritical(
+    'выдан уровень «метаданные» на «Инфраструктуру»',
+    infraGrant.status === 200,
+    `статус ${infraGrant.status}`,
+  );
+
+  const environment = await admin(`/api/projects/${created.json.id}/environments`, {
+    method: 'POST',
+    body: {
+      name: 'Прод',
+      kind: 'production',
+      ip: '203.0.113.10',
+      provider: 'Hetzner',
+      domains: ['example.com'],
+    },
+  });
+  check(
+    'окружение создано',
+    environment.status === 201,
+    `статус ${environment.status} ${environment.text.slice(0, 120)}`,
+  );
+
   await runLoginScenario(admin, setup.json.secret);
   await runAuditScenario(admin);
 
@@ -279,6 +305,29 @@ async function runGuestScenario(guest, { projectId, guestInviteUrl }) {
       !project.text.includes(PROJECT.purpose) &&
       !project.text.includes(PROJECT.notes),
     `статус ${project.status}`,
+  );
+
+  const environments = await guest(`/api/projects/${projectId}/environments`);
+  check(
+    'приглашённому видно окружение',
+    environments.json?.length === 1,
+    JSON.stringify(environments.json),
+  );
+  check(
+    'на уровне «метаданные» виден домен, но не IP',
+    environments.json?.[0]?.domains?.includes('example.com') &&
+      environments.json?.[0]?.ip === undefined,
+    JSON.stringify(environments.json?.[0]),
+  );
+
+  const environmentWrite = await guest(`/api/projects/${projectId}/environments`, {
+    method: 'POST',
+    body: { name: 'Стейдж', kind: 'staging' },
+  });
+  check(
+    'правка инфраструктуры отклонена',
+    environmentWrite.status === 403,
+    `статус ${environmentWrite.status}`,
   );
 
   const home = await guest('/');
