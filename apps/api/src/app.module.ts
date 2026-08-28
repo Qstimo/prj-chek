@@ -12,6 +12,7 @@ import { IntakeModule } from './intake/intake.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { ProjectsModule } from './projects/projects.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
+import { StatusModule } from './status/status.module';
 import { UsersModule } from './users/users.module';
 import { VariablesModule } from './variables/variables.module';
 
@@ -28,6 +29,7 @@ import { VariablesModule } from './variables/variables.module';
     ChronicleModule,
     VariablesModule,
     RoadmapModule,
+    StatusModule,
     IntakeModule,
     GrantsModule,
     InvitationsModule,

@@ -34,6 +34,7 @@ export enum AuditAction {
   CheckpointDeleted = 'checkpoint.deleted',
   RoadmapPublished = 'roadmap.published',
   RoadmapUnpublished = 'roadmap.unpublished',
+  StatusCheckRun = 'status_check.run',
   GrantCreated = 'grant.created',
   GrantUpdated = 'grant.updated',
   GrantRevoked = 'grant.revoked',
