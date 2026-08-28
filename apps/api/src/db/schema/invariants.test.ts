@@ -1,6 +1,7 @@
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
+import { agentTokens } from './agent-tokens';
 import { auditLog } from './audit-log';
 import { chronicleEntries } from './chronicle';
 import { docPages } from './docs';
@@ -28,6 +29,7 @@ const ALL_TABLES = [
   { name: 'environment_domains', table: environmentDomains },
   { name: 'chronicle_entries', table: chronicleEntries },
   { name: 'doc_pages', table: docPages },
+  { name: 'agent_tokens', table: agentTokens },
   { name: 'variables', table: variables },
   { name: 'variable_versions', table: variableVersions },
   { name: 'roadmap_versions', table: roadmapVersions },

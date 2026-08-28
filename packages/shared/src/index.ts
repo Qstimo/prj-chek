@@ -1,4 +1,5 @@
 export * from './enums';
+export * from './schemas/agent-token';
 export * from './schemas/audit';
 export * from './schemas/auth';
 export * from './schemas/chronicle';

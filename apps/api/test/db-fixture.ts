@@ -58,7 +58,7 @@ export async function startTestDatabase(): Promise<TestDatabase> {
     },
     truncate: async () => {
       await db.execute(sql`
-        TRUNCATE TABLE audit_log, grants, sessions, invitations, totp_challenges,
+        TRUNCATE TABLE audit_log, agent_tokens, grants, sessions, invitations, totp_challenges,
                        domain_statuses, environment_statuses,
                        roadmap_public_links, roadmap_checkpoints, roadmap_versions,
                        variable_versions, variables,
