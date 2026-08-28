@@ -8,6 +8,7 @@ import { CryptoModule } from './crypto/crypto.module';
 import { DbModule } from './db/db.module';
 import { EnvironmentsModule } from './environments/environments.module';
 import { GrantsModule } from './grants/grants.module';
+import { IntakeModule } from './intake/intake.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { ProjectsModule } from './projects/projects.module';
 import { UsersModule } from './users/users.module';
@@ -23,6 +24,7 @@ import { UsersModule } from './users/users.module';
     ProjectsModule,
     EnvironmentsModule,
     ChronicleModule,
+    IntakeModule,
     GrantsModule,
     InvitationsModule,
     UsersModule,
