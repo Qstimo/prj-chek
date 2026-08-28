@@ -429,6 +429,59 @@ describe('матрица доступа', () => {
     });
   });
 
+  /**
+   * Документация (ТЗ 4.3, строка «Документация»).
+   *
+   * Метаданные — «список страниц»; содержимое открывается чтением.
+   */
+  describe.each([
+    { level: null, list: 404, create: 404, seesContent: false },
+    { level: AccessLevel.Metadata, list: 200, create: 403, seesContent: false },
+    { level: AccessLevel.Read, list: 200, create: 403, seesContent: true },
+    { level: AccessLevel.Write, list: 200, create: 201, seesContent: true },
+  ])('документация на уровне $level', ({ level, list, create, seesContent }) => {
+    beforeEach(async () => {
+      const adminAgent = request.agent(app.getHttpServer());
+      await adminAgent
+        .post('/auth/login')
+        .send({ email: 'admin@cairn.local', password: 'очень длинный пароль' })
+        .expect(200);
+      await adminAgent
+        .post(`/projects/${projectId}/docs`)
+        .send({ title: 'Развёртывание', content: 'Секретное содержимое страницы' })
+        .expect(201);
+    });
+
+    it(`отдаёт список кодом ${list}`, async () => {
+      const agent = await signInWithSection(Section.Docs, level);
+
+      await agent.get(`/projects/${projectId}/docs`).expect(list);
+    });
+
+    it(`${seesContent ? 'показывает' : 'скрывает'} содержимое`, async () => {
+      const agent = await signInWithSection(Section.Docs, level);
+
+      const response = await agent.get(`/projects/${projectId}/docs`);
+
+      if (list !== 200) {
+        return;
+      }
+
+      expect(JSON.stringify(response.body).includes('Секретное содержимое страницы')).toBe(
+        seesContent,
+      );
+    });
+
+    it(`создание отвечает кодом ${create}`, async () => {
+      const agent = await signInWithSection(Section.Docs, level);
+
+      await agent
+        .post(`/projects/${projectId}/docs`)
+        .send({ title: 'Новая страница', content: 'Текст' })
+        .expect(create);
+    });
+  });
+
   describe('проекция полей', () => {
     it('на уровне метаданных назначение скрыто', async () => {
       const agent = await signInAs(AccessLevel.Metadata);
