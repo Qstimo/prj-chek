@@ -1,3 +1,4 @@
+export * from './useDocs';
 export * from './useEnvTransfer';
 export * from './useMutationChronicleEntry';
 export * from './useMutationCreateProject';
