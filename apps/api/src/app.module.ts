@@ -12,6 +12,7 @@ import { IntakeModule } from './intake/intake.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { ProjectsModule } from './projects/projects.module';
 import { UsersModule } from './users/users.module';
+import { VariablesModule } from './variables/variables.module';
 
 /** Корневой модуль приложения. */
 @Module({
@@ -24,6 +25,7 @@ import { UsersModule } from './users/users.module';
     ProjectsModule,
     EnvironmentsModule,
     ChronicleModule,
+    VariablesModule,
     IntakeModule,
     GrantsModule,
     InvitationsModule,

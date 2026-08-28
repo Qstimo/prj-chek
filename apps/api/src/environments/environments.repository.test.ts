@@ -1,11 +1,20 @@
 import { AccessLevel, EnvironmentKind, Section, SubjectKind } from '@cairn/shared';
+import { ConflictException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessService } from '../access/access.service';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
-import { environmentDomains, environments, grants, projects, subjects, users } from '../db/schema';
+import {
+  environmentDomains,
+  environments,
+  grants,
+  projects,
+  subjects,
+  users,
+  variables,
+} from '../db/schema';
 import { EnvironmentsRepository } from './environments.repository';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
@@ -349,6 +358,26 @@ describe('репозиторий окружений', () => {
       await expect(
         testDb.db.transaction((tx) => repository.remove(member(), tx, projectId, id)),
       ).rejects.toBeInstanceOf(InsufficientLevelError);
+    });
+
+    it('не удаляет окружение, у которого есть переменные', async () => {
+      // Обещание спеки этапа 2 (раздел 10): переменные привязываются
+      // к окружению, и его удаление не должно тихо уносить секреты.
+      const id = await createProd();
+      const [variable] = await testDb.db
+        .insert(variables)
+        .values({ environmentId: id, key: 'KEY' })
+        .returning();
+
+      await expect(
+        testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id)),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      await testDb.db.delete(variables).where(eq(variables.id, variable!.id));
+
+      await expect(
+        testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id)),
+      ).resolves.toBeDefined();
     });
 
     it('сообщает «не найдено» об уже удалённом окружении', async () => {

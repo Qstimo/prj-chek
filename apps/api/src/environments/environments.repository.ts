@@ -6,7 +6,7 @@ import {
   type EnvironmentMetadata,
   type EnvironmentUpdate,
 } from '@cairn/shared';
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import { SectionNotVisibleError } from '../access/access.errors';
@@ -14,7 +14,7 @@ import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
-import { environmentDomains, environments, type Environment } from '../db/schema';
+import { environmentDomains, environments, variables, type Environment } from '../db/schema';
 import { environmentProjection } from './environment.projection';
 
 /**
@@ -169,6 +169,20 @@ export class EnvironmentsRepository {
     );
 
     const environment = await this.requireEnvironment(tx, projectId, environmentId);
+
+    // Обещание спеки этапа 2: удаление окружения не уносит секреты тихо.
+    // Ключ restrict страхует на уровне базы, но человеку нужен внятный отказ.
+    const [variable] = await tx
+      .select({ id: variables.id })
+      .from(variables)
+      .where(eq(variables.environmentId, environmentId))
+      .limit(1);
+
+    if (variable) {
+      throw new ConflictException(
+        'У окружения есть переменные. Сначала удалите их в секции «Переменные».',
+      );
+    }
 
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
     await tx.delete(environments).where(eq(environments.id, environmentId));
