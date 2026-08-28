@@ -1,0 +1,1 @@
+GRANT SELECT, INSERT, UPDATE, DELETE ON doc_pages TO cairn_app;

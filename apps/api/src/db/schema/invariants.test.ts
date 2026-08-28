@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { auditLog } from './audit-log';
 import { chronicleEntries } from './chronicle';
+import { docPages } from './docs';
 import { environmentDomains, environments } from './environments';
 import { grants } from './grants';
 import { invitations } from './invitations';
@@ -26,6 +27,7 @@ const ALL_TABLES = [
   { name: 'environments', table: environments },
   { name: 'environment_domains', table: environmentDomains },
   { name: 'chronicle_entries', table: chronicleEntries },
+  { name: 'doc_pages', table: docPages },
   { name: 'variables', table: variables },
   { name: 'variable_versions', table: variableVersions },
   { name: 'roadmap_versions', table: roadmapVersions },
