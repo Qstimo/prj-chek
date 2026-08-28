@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { ChronicleModule } from './chronicle/chronicle.module';
 import { CryptoModule } from './crypto/crypto.module';
 import { DbModule } from './db/db.module';
+import { DocsModule } from './docs/docs.module';
 import { EnvironmentsModule } from './environments/environments.module';
 import { GrantsModule } from './grants/grants.module';
 import { IntakeModule } from './intake/intake.module';
@@ -29,6 +30,7 @@ import { VariablesModule } from './variables/variables.module';
     ChronicleModule,
     VariablesModule,
     RoadmapModule,
+    DocsModule,
     StatusModule,
     IntakeModule,
     GrantsModule,
