@@ -218,6 +218,49 @@ async function runAdminScenario(admin) {
     `статус ${environment.status} ${environment.text.slice(0, 120)}`,
   );
 
+  const variablesGrant = await admin(`/api/projects/${created.json.id}/grants`, {
+    method: 'PUT',
+    body: { subjectId: guestUser.subjectId, section: 'variables', level: 'metadata' },
+  });
+  checkCritical(
+    'выдан уровень «метаданные» на «Переменные»',
+    variablesGrant.status === 200,
+    `статус ${variablesGrant.status}`,
+  );
+
+  const variable = await admin(
+    `/api/projects/${created.json.id}/environments/${environment.json.id}/variables`,
+    {
+      method: 'POST',
+      body: { key: 'DATABASE_URL', value: 'postgres://very-secret', description: 'Подключение' },
+    },
+  );
+  checkCritical('переменная создана', variable.status === 201, `статус ${variable.status}`);
+  check(
+    'ответ создания не содержит значения',
+    !variable.text.includes('very-secret'),
+    variable.text.slice(0, 120),
+  );
+
+  const revealed = await admin(
+    `/api/projects/${created.json.id}/environments/${environment.json.id}/variables/${variable.json.id}/reveal`,
+    { method: 'POST' },
+  );
+  check(
+    'раскрытие возвращает значение',
+    revealed.json?.value === 'postgres://very-secret',
+    `статус ${revealed.status}`,
+  );
+
+  const envText = await admin(
+    `/api/projects/${created.json.id}/environments/${environment.json.id}/variables/export`,
+  );
+  check(
+    'выгрузка env содержит ключ',
+    envText.text.includes('DATABASE_URL='),
+    envText.text.slice(0, 80),
+  );
+
   const chronicleGrant = await admin(`/api/projects/${created.json.id}/grants`, {
     method: 'PUT',
     body: { subjectId: guestUser.subjectId, section: 'chronicle', level: 'metadata' },
@@ -257,6 +300,8 @@ async function runAdminScenario(admin) {
     guestUser,
     guestInviteUrl: invited.json.url,
     intakeToken: intake.json.token,
+    environmentId: environment.json.id,
+    variableId: variable.json.id,
   };
 }
 
@@ -304,6 +349,12 @@ async function runAuditScenario(admin) {
   check('журнал содержит выдачу доступа', actions.has('grant.created'));
   check('журнал содержит приглашение', actions.has('invitation.created'));
   check('журнал содержит создание суперадмина с консоли', actions.has('superadmin.created'));
+  check('журнал содержит раскрытие переменной', actions.has('variable.revealed'));
+  check('журнал содержит выгрузку переменных', actions.has('variables.exported'));
+  check(
+    'журнал не содержит значения переменной',
+    !JSON.stringify(entries).includes('very-secret'),
+  );
 
   const auditPage = await admin('/audit');
   check(
@@ -319,7 +370,7 @@ async function runAuditScenario(admin) {
  * Проверяется не только то, что доступно, но и то, что отсутствие доступа
  * выглядит как «не найдено», а не как «запрещено» (спека 4.1).
  */
-async function runGuestScenario(guest, { projectId, guestInviteUrl }) {
+async function runGuestScenario(guest, { projectId, guestInviteUrl, environmentId, variableId }) {
   const accepted = await guest(`/api/invitations/${tokenOf(guestInviteUrl)}/accept`, {
     method: 'POST',
     body: { password: GUEST.password },
@@ -376,6 +427,26 @@ async function runGuestScenario(guest, { projectId, guestInviteUrl }) {
     'на уровне «метаданные» виден заголовок, но не содержимое',
     guestFeed.json?.[0]?.title === 'Сводка встречи' && guestFeed.json?.[0]?.content === undefined,
     JSON.stringify(guestFeed.json?.[0]),
+  );
+
+  const guestVariables = await guest(
+    `/api/projects/${projectId}/environments/${environmentId}/variables`,
+  );
+  check(
+    'приглашённому виден ключ переменной без значения',
+    guestVariables.json?.[0]?.key === 'DATABASE_URL' &&
+      !guestVariables.text.includes('very-secret'),
+    guestVariables.text.slice(0, 120),
+  );
+
+  const guestReveal = await guest(
+    `/api/projects/${projectId}/environments/${environmentId}/variables/${variableId}/reveal`,
+    { method: 'POST' },
+  );
+  check(
+    'раскрытие на уровне «метаданные» отклонено',
+    guestReveal.status === 403,
+    `статус ${guestReveal.status}`,
   );
 
   const guestAddress = await guest(`/api/projects/${projectId}/intake-address`);
