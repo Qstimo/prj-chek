@@ -261,6 +261,48 @@ async function runAdminScenario(admin) {
     envText.text.slice(0, 80),
   );
 
+  const roadmapGrant = await admin(`/api/projects/${created.json.id}/grants`, {
+    method: 'PUT',
+    body: { subjectId: guestUser.subjectId, section: 'roadmap', level: 'metadata' },
+  });
+  checkCritical(
+    'выдан уровень «метаданные» на «Роадмап»',
+    roadmapGrant.status === 200,
+    `статус ${roadmapGrant.status}`,
+  );
+
+  const version = await admin(`/api/projects/${created.json.id}/roadmap/versions`, {
+    method: 'POST',
+    body: { label: 'v1.0', state: 'in_progress' },
+  });
+  checkCritical('версия роадмапа создана', version.status === 201, `статус ${version.status}`);
+
+  const firstCheckpoint = await admin(
+    `/api/projects/${created.json.id}/roadmap/versions/${version.json.id}/checkpoints`,
+    { method: 'POST', body: { title: 'Секретная формулировка чекпоинта' } },
+  );
+  await admin(
+    `/api/projects/${created.json.id}/roadmap/versions/${version.json.id}/checkpoints`,
+    { method: 'POST', body: { title: 'Второй пункт' } },
+  );
+  await admin(
+    `/api/projects/${created.json.id}/roadmap/versions/${version.json.id}/checkpoints/${firstCheckpoint.json.id}`,
+    { method: 'PATCH', body: { isDone: true } },
+  );
+
+  const roadmap = await admin(`/api/projects/${created.json.id}/roadmap`);
+  check(
+    'прогресс версии вычислен как 1/2',
+    roadmap.json?.versions?.[0]?.progress?.done === 1 &&
+      roadmap.json?.versions?.[0]?.progress?.total === 2,
+    JSON.stringify(roadmap.json?.versions?.[0]?.progress),
+  );
+
+  const published = await admin(`/api/projects/${created.json.id}/roadmap/public-link`, {
+    method: 'POST',
+  });
+  checkCritical('роадмап опубликован', published.status === 201, `статус ${published.status}`);
+
   const chronicleGrant = await admin(`/api/projects/${created.json.id}/grants`, {
     method: 'PUT',
     body: { subjectId: guestUser.subjectId, section: 'chronicle', level: 'metadata' },
@@ -302,6 +344,7 @@ async function runAdminScenario(admin) {
     intakeToken: intake.json.token,
     environmentId: environment.json.id,
     variableId: variable.json.id,
+    roadmapToken: published.json.token,
   };
 }
 
@@ -449,6 +492,14 @@ async function runGuestScenario(guest, { projectId, guestInviteUrl, environmentI
     `статус ${guestReveal.status}`,
   );
 
+  const guestRoadmap = await guest(`/api/projects/${projectId}/roadmap`);
+  check(
+    'приглашённому виден прогресс роадмапа без формулировок',
+    guestRoadmap.json?.versions?.[0]?.progress?.done === 1 &&
+      !guestRoadmap.text.includes('Секретная формулировка'),
+    guestRoadmap.text.slice(0, 120),
+  );
+
   const guestAddress = await guest(`/api/projects/${projectId}/intake-address`);
   check(
     'приёмный адрес не показывается без права записи',
@@ -468,6 +519,29 @@ async function runGuestScenario(guest, { projectId, guestInviteUrl, environmentI
 
   const missing = await guest(`/api/projects/${MISSING_PROJECT_ID}`);
   check('несуществующий проект — «не найдено»', missing.status === 404, `статус ${missing.status}`);
+}
+
+/** Публичный роадмап: чтение без сессии, гашение после отключения. */
+async function runPublicRoadmapScenario(admin, { projectId, roadmapToken }) {
+  const machine = makeAgent();
+
+  const publicApi = await machine(`/api/public/roadmap/${roadmapToken}`);
+  check(
+    'публичный роадмап читается без сессии с формулировками',
+    publicApi.status === 200 && publicApi.text.includes('Секретная формулировка'),
+    `статус ${publicApi.status}`,
+  );
+
+  const publicPage = await machine(`/roadmap/${roadmapToken}`);
+  check('публичная страница отдаётся', publicPage.status === 200, `статус ${publicPage.status}`);
+
+  const unpublished = await admin(`/api/projects/${projectId}/roadmap/public-link`, {
+    method: 'DELETE',
+  });
+  check('публикация отключена', unpublished.status === 204, `статус ${unpublished.status}`);
+
+  const gone = await machine(`/api/public/roadmap/${roadmapToken}`);
+  check('после отключения прежний токен получает 404', gone.status === 404, `статус ${gone.status}`);
 }
 
 /** Отзыв приёмного адреса: прежний токен обязан погаснуть. */
@@ -520,6 +594,7 @@ const guest = makeAgent();
 
 const context = await runAdminScenario(admin);
 await runGuestScenario(guest, context);
+await runPublicRoadmapScenario(admin, context);
 await runIntakeRevocationScenario(admin, context);
 await runRevocationScenario(admin, guest, context);
 
