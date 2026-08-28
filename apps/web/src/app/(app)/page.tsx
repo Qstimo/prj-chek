@@ -5,6 +5,8 @@ import { ApiError } from '@/api';
 import { apiServer } from '@/api/server';
 import { ProjectList } from '@/components/ProjectList';
 
+import { SummaryStatus } from './SummaryStatus';
+
 /** Сводка проектов. */
 export default async function HomePage() {
   let projects: ProjectMetadata[];
@@ -26,6 +28,7 @@ export default async function HomePage() {
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-6">
       <h1 className="text-2xl font-semibold">Проекты</h1>
+      <SummaryStatus />
       <ProjectList projects={projects} canCreate={subject.isSuperadmin} />
     </main>
   );
