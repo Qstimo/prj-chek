@@ -30,6 +30,18 @@ export interface McpContext {
   recordCall: (tool: string, args: Record<string, unknown>) => Promise<void>;
 }
 
+/**
+ * Схемы аргументов с явным типом: без него вывод типов перегрузок
+ * `server.tool` уходит в бесконечную инстанциацию (TS2589).
+ */
+const SEARCH_ARGS: z.ZodRawShape = { query: z.string().min(1).max(200) };
+const READ_PAGE_ARGS: z.ZodRawShape = { title: z.string().min(1).max(300) };
+const LIST_KEYS_ARGS: z.ZodRawShape = { environment: z.string().min(1).max(100).optional() };
+const REVEAL_ARGS: z.ZodRawShape = {
+  environment: z.string().min(1).max(100),
+  key: z.string().min(1).max(200),
+};
+
 /** Ответ инструмента: данные текстом, как ожидают клиенты MCP. */
 function asText(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
@@ -45,28 +57,38 @@ function asText(data: unknown) {
 export function registerTools(server: McpServer, deps: McpDeps, context: McpContext): void {
   const { subject, projectId, recordCall } = context;
 
-  server.tool('get_project_info', 'Паспорт проекта: назначение, стек, состояние', {}, async () => {
+  // Перегрузки `server.tool` уводят tsc в бесконечную инстанциацию
+  // (TS2589) — приведение к простой сигнатуре отсекает её, ничего
+  // не меняя в рантайме. Аргументы обработчиков типизируются вручную.
+  const addTool = server.tool.bind(server) as unknown as (
+    name: string,
+    description: string,
+    schema: z.ZodRawShape,
+    handler: (args: never) => Promise<ReturnType<typeof asText>>,
+  ) => void;
+
+  addTool('get_project_info', 'Паспорт проекта: назначение, стек, состояние', {}, async () => {
     await recordCall('get_project_info', {});
 
     return asText(await deps.projects.findById(subject, projectId));
   });
 
-  server.tool(
+  addTool(
     'search_docs',
     'Поиск по документации проекта: заголовки и фрагменты',
-    { query: z.string().min(1).max(200) },
-    async ({ query }) => {
+    SEARCH_ARGS,
+    async ({ query }: { query: string }) => {
       await recordCall('search_docs', { query });
 
       return asText(await deps.docs.search(subject, projectId, query));
     },
   );
 
-  server.tool(
+  addTool(
     'read_doc_page',
     'Содержимое страницы документации по точному заголовку',
-    { title: z.string().min(1).max(300) },
-    async ({ title }) => {
+    READ_PAGE_ARGS,
+    async ({ title }: { title: string }) => {
       await recordCall('read_doc_page', { title });
 
       const pages = await deps.docs.findForProject(subject, projectId);
@@ -80,23 +102,23 @@ export function registerTools(server: McpServer, deps: McpDeps, context: McpCont
     },
   );
 
-  server.tool('get_roadmap', 'Роадмап: версии, чекпоинты и текущая стадия', {}, async () => {
+  addTool('get_roadmap', 'Роадмап: версии, чекпоинты и текущая стадия', {}, async () => {
     await recordCall('get_roadmap', {});
 
     return asText(await deps.roadmap.findForProject(subject, projectId));
   });
 
-  server.tool('read_chronicle', 'Хроника проекта: как мы к этому пришли', {}, async () => {
+  addTool('read_chronicle', 'Хроника проекта: как мы к этому пришли', {}, async () => {
     await recordCall('read_chronicle', {});
 
     return asText(await deps.chronicle.findForProject(subject, projectId));
   });
 
-  server.tool(
+  addTool(
     'list_variable_keys',
     'Ключи конфигурации с описаниями — без значений',
-    { environment: z.string().min(1).max(100).optional() },
-    async ({ environment }) => {
+    LIST_KEYS_ARGS,
+    async ({ environment }: { environment?: string }) => {
       await recordCall('list_variable_keys', { environment: environment ?? null });
 
       const environments = await deps.variables.listEnvironments(subject, projectId);
@@ -117,18 +139,18 @@ export function registerTools(server: McpServer, deps: McpDeps, context: McpCont
     },
   );
 
-  server.tool('get_status', 'Статус окружений и сроки доменов', {}, async () => {
+  addTool('get_status', 'Статус окружений и сроки доменов', {}, async () => {
     await recordCall('get_status', {});
 
     return asText(await deps.status.statusForProject(subject, projectId));
   });
 
   if (context.canRevealVariables) {
-    server.tool(
+    addTool(
       'reveal_variable',
       'Раскрыть значение переменной. Каждое раскрытие фиксируется в журнале.',
-      { environment: z.string().min(1).max(100), key: z.string().min(1).max(200) },
-      async ({ environment, key }) => {
+      REVEAL_ARGS,
+      async ({ environment, key }: { environment: string; key: string }) => {
         await recordCall('reveal_variable', { environment, key });
 
         const environments = await deps.variables.listEnvironments(subject, projectId);
