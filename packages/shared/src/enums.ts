@@ -89,6 +89,33 @@ export enum EnvironmentKind {
   Other = 'other',
 }
 
+/**
+ * Индикатор статуса проекта (ТЗ 6). Вычисляется, руками не задаётся;
+ * единственное ручное состояние — «приостановлен» — приходит из
+ * жизненного цикла проекта.
+ */
+export enum StatusIndicator {
+  Ok = 'ok',
+  Warning = 'warning',
+  Down = 'down',
+  Unknown = 'unknown',
+  Paused = 'paused',
+}
+
+/** Результат health-проверки окружения. */
+export enum HealthState {
+  Up = 'up',
+  Down = 'down',
+}
+
+/** Вид предупреждения о статусе. */
+export enum StatusWarningKind {
+  HealthDown = 'health_down',
+  TlsExpiring = 'tls_expiring',
+  TlsError = 'tls_error',
+  DomainExpiring = 'domain_expiring',
+}
+
 /** Состояние версии роадмапа. Намерение, задаётся вручную (ТЗ 3.5). */
 export enum RoadmapVersionState {
   Planned = 'planned',

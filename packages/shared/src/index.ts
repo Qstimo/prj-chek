@@ -8,6 +8,7 @@ export * from './schemas/intake';
 export * from './schemas/project';
 export * from './schemas/roadmap';
 export * from './schemas/section-levels';
+export * from './schemas/status';
 export * from './schemas/totp';
 export * from './schemas/user';
 export * from './schemas/variable';
