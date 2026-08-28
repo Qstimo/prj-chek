@@ -298,6 +298,80 @@ describe('матрица доступа', () => {
     });
   });
 
+  /**
+   * Переменные (ТЗ 4.3, строка «Переменные»).
+   *
+   * Уникальность секции: список одинаков на всех уровнях и никогда
+   * не содержит значений; раскрытие — отдельное действие уровня чтения.
+   */
+  describe.each([
+    { level: null, list: 404, reveal: 404, create: 404 },
+    { level: AccessLevel.Metadata, list: 200, reveal: 403, create: 403 },
+    { level: AccessLevel.Read, list: 200, reveal: 201, create: 403 },
+    { level: AccessLevel.Write, list: 200, reveal: 201, create: 201 },
+  ])('переменные на уровне $level', ({ level, list, reveal, create }) => {
+    let environmentId: string;
+    let variableId: string;
+
+    beforeEach(async () => {
+      const [environment] = await testDb.db
+        .insert(environments)
+        .values({ projectId, name: 'Прод', kind: EnvironmentKind.Production })
+        .returning();
+      environmentId = environment!.id;
+
+      // Переменная заводится суперадмином по HTTP: значение обязано
+      // пройти через штатное шифрование, а не лечь в базу открытым.
+      const adminAgent = request.agent(app.getHttpServer());
+      await adminAgent
+        .post('/auth/login')
+        .send({ email: 'admin@cairn.local', password: 'очень длинный пароль' })
+        .expect(200);
+      const created = await adminAgent
+        .post(`/projects/${projectId}/environments/${environmentId}/variables`)
+        .send({ key: 'DATABASE_URL', value: 'postgres://secret' })
+        .expect(201);
+      variableId = created.body.id;
+    });
+
+    it(`отдаёт список кодом ${list}`, async () => {
+      const agent = await signInWithSection(Section.Variables, level);
+
+      await agent
+        .get(`/projects/${projectId}/environments/${environmentId}/variables`)
+        .expect(list);
+    });
+
+    it('список не содержит значения ни на одном уровне', async () => {
+      const agent = await signInWithSection(Section.Variables, level);
+
+      const response = await agent.get(
+        `/projects/${projectId}/environments/${environmentId}/variables`,
+      );
+
+      expect(JSON.stringify(response.body)).not.toContain('postgres://secret');
+    });
+
+    it(`раскрытие отвечает кодом ${reveal}`, async () => {
+      const agent = await signInWithSection(Section.Variables, level);
+
+      await agent
+        .post(
+          `/projects/${projectId}/environments/${environmentId}/variables/${variableId}/reveal`,
+        )
+        .expect(reveal);
+    });
+
+    it(`создание отвечает кодом ${create}`, async () => {
+      const agent = await signInWithSection(Section.Variables, level);
+
+      await agent
+        .post(`/projects/${projectId}/environments/${environmentId}/variables`)
+        .send({ key: 'NEW_KEY', value: 'x' })
+        .expect(create);
+    });
+  });
+
   describe('проекция полей', () => {
     it('на уровне метаданных назначение скрыто', async () => {
       const agent = await signInAs(AccessLevel.Metadata);
