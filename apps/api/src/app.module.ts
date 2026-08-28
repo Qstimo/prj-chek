@@ -11,6 +11,7 @@ import { GrantsModule } from './grants/grants.module';
 import { IntakeModule } from './intake/intake.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { ProjectsModule } from './projects/projects.module';
+import { RoadmapModule } from './roadmap/roadmap.module';
 import { UsersModule } from './users/users.module';
 import { VariablesModule } from './variables/variables.module';
 
@@ -26,6 +27,7 @@ import { VariablesModule } from './variables/variables.module';
     EnvironmentsModule,
     ChronicleModule,
     VariablesModule,
+    RoadmapModule,
     IntakeModule,
     GrantsModule,
     InvitationsModule,
