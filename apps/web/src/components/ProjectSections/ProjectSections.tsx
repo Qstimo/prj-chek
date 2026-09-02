@@ -19,29 +19,44 @@ export function ProjectSections({ project, sections = {} }: IProps) {
     <section className="space-y-4">
       <h1 className="text-2xl font-semibold">{project.name}</h1>
 
-      <nav className="flex gap-3">
+      <nav className="flex flex-wrap gap-2">
         {sections[Section.Infrastructure] && (
-          <Link href={`/projects/${project.id}/infrastructure`} className="underline">
+          <Link
+            href={`/projects/${project.id}/infrastructure`}
+            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
+          >
             Инфраструктура
           </Link>
         )}
         {sections[Section.Variables] && (
-          <Link href={`/projects/${project.id}/variables`} className="underline">
+          <Link
+            href={`/projects/${project.id}/variables`}
+            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
+          >
             Переменные
           </Link>
         )}
         {sections[Section.Docs] && (
-          <Link href={`/projects/${project.id}/docs`} className="underline">
+          <Link
+            href={`/projects/${project.id}/docs`}
+            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
+          >
             Документация
           </Link>
         )}
         {sections[Section.Roadmap] && (
-          <Link href={`/projects/${project.id}/roadmap`} className="underline">
+          <Link
+            href={`/projects/${project.id}/roadmap`}
+            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
+          >
             Роадмап
           </Link>
         )}
         {sections[Section.Chronicle] && (
-          <Link href={`/projects/${project.id}/chronicle`} className="underline">
+          <Link
+            href={`/projects/${project.id}/chronicle`}
+            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
+          >
             Хроника
           </Link>
         )}
