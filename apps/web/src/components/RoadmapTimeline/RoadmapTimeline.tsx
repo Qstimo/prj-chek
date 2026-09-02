@@ -21,34 +21,42 @@ export function RoadmapTimeline({ versions, currentIndex }: IProps) {
   const width = STEP * versions.length;
 
   return (
-    <svg
-      role="img"
-      aria-label="Диаграмма роадмапа"
-      viewBox={`0 0 ${width} 72`}
-      className="w-full max-w-2xl"
-    >
-      <line
-        x1={STEP / 2}
-        y1={CY}
-        x2={width - STEP / 2}
-        y2={CY}
-        className="stroke-border"
-        strokeWidth="2"
-      />
-
-      {versions.map((version, index) => (
-        <Mark
-          key={version.id}
-          version={version}
-          cx={STEP / 2 + STEP * index}
-          isCurrent={index === currentIndex}
+    <div className="w-full max-w-2xl">
+      <svg role="img" aria-label="Диаграмма роадмапа" viewBox={`0 0 ${width} 56`} className="w-full">
+        <line
+          x1={STEP / 2}
+          y1={CY}
+          x2={width - STEP / 2}
+          y2={CY}
+          className="stroke-border"
+          strokeWidth="2"
         />
-      ))}
-    </svg>
+
+        {versions.map((version, index) => (
+          <Mark
+            key={version.id}
+            version={version}
+            cx={STEP / 2 + STEP * index}
+            isCurrent={index === currentIndex}
+          />
+        ))}
+      </svg>
+
+      {/* Подписи — в HTML, а не в SVG: текст SVG не умеет переноситься,
+          и длинные названия версий налезали на соседние. Колонки flex
+          повторяют равный шаг отметок, поэтому подпись стоит под своей. */}
+      <div className="flex">
+        {versions.map((version) => (
+          <span key={version.id} className="min-w-0 flex-1 break-words px-1 text-center text-xs">
+            {version.label}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
-/** Одна отметка: круг-основа, сектор прогресса, кольцо текущей, подпись. */
+/** Одна отметка: круг-основа, сектор прогресса, кольцо текущей. */
 function Mark({
   version,
   cx,
@@ -80,10 +88,6 @@ function Mark({
           strokeWidth="2"
         />
       )}
-
-      <text x={cx} y={CY + RADIUS + 20} textAnchor="middle" className="fill-current text-xs">
-        {version.label}
-      </text>
     </g>
   );
 }

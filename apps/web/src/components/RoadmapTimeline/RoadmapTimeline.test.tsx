@@ -53,6 +53,28 @@ describe('RoadmapTimeline', () => {
     expect(screen.getByText('v3.0')).toBeInTheDocument();
   });
 
+  it('подписи живут вне SVG, чтобы длинные названия переносились', () => {
+    const long = [
+      {
+        id: '1',
+        label: 'v1.1 — оплата',
+        state: RoadmapVersionState.Released,
+        progress: { done: 1, total: 1 },
+      },
+      {
+        id: '2',
+        label: 'v2.0 — маркетплейс',
+        state: RoadmapVersionState.Planned,
+        progress: { done: 0, total: 0 },
+      },
+    ];
+    const { container } = render(<RoadmapTimeline versions={long} currentIndex={0} />);
+
+    // В SVG текст не переносится и налезает на соседей; подписи — в HTML.
+    expect(container.querySelector('svg text')).toBeNull();
+    expect(screen.getByText('v2.0 — маркетплейс')).toBeInTheDocument();
+  });
+
   it('выпущенная версия — полный круг независимо от чекпоинтов', () => {
     const { container } = render(<RoadmapTimeline versions={versions} currentIndex={1} />);
 
