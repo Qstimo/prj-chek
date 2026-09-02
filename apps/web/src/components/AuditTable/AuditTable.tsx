@@ -13,7 +13,7 @@ export function AuditTable({ entries }: IProps) {
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-lg border border-border bg-surface">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr>
@@ -26,14 +26,14 @@ export function AuditTable({ entries }: IProps) {
         <tbody>
           {entries.map((entry) => (
             <tr key={entry.id}>
-              <td className="border-b border-border p-2 whitespace-nowrap">
+              <td className="border-b border-border [tr:last-child_&]:border-b-0 p-2 whitespace-nowrap">
                 {formatMoment(entry.createdAt)}
               </td>
-              <td className="border-b border-border p-2">{entry.subjectLabel}</td>
-              <td className="border-b border-border p-2">
+              <td className="border-b border-border [tr:last-child_&]:border-b-0 p-2">{entry.subjectLabel}</td>
+              <td className="border-b border-border [tr:last-child_&]:border-b-0 p-2">
                 {SUBJECT_KIND_LABELS[entry.subjectKind]}
               </td>
-              <td className="border-b border-border p-2">
+              <td className="border-b border-border [tr:last-child_&]:border-b-0 p-2">
                 {ACTION_LABELS[entry.action] ?? entry.action}
               </td>
             </tr>
