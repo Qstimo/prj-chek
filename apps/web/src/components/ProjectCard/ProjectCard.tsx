@@ -13,11 +13,11 @@ export function ProjectCard({ project }: IProps) {
   return (
     <Link
       href={`/projects/${project.id}`}
-      className="block rounded-md border border-border p-4 transition hover:border-primary"
+      className="block rounded-lg border border-border bg-surface p-4 transition hover:border-border-strong hover:bg-surface-strong"
     >
       <div className="flex items-start justify-between gap-3">
         <h2 className="font-medium">{project.name}</h2>
-        <span className={`rounded-md px-2 py-1 text-xs ${LIFECYCLE_STYLES[project.lifecycle]}`}>
+        <span className={`rounded-full px-2 py-1 text-xs ${LIFECYCLE_STYLES[project.lifecycle]}`}>
           {LIFECYCLE_LABELS[project.lifecycle]}
         </span>
       </div>

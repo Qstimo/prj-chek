@@ -11,7 +11,7 @@ export const LIFECYCLE_LABELS: Record<ProjectLifecycle, string> = {
 /** Оформление состояний. Приостановленный намеренно нейтрален, не тревожен. */
 export const LIFECYCLE_STYLES: Record<ProjectLifecycle, string> = {
   [ProjectLifecycle.Development]: 'bg-muted text-muted-foreground',
-  [ProjectLifecycle.Active]: 'bg-primary text-primary-foreground',
+  [ProjectLifecycle.Active]: 'bg-accent-soft text-accent-soft-foreground',
   [ProjectLifecycle.Paused]: 'bg-muted text-muted-foreground',
   [ProjectLifecycle.Archived]: 'bg-muted text-muted-foreground',
 };
