@@ -20,12 +20,15 @@
     --primary: 254 83% 65%;
     --primary-foreground: 0 0% 100%;
     --accent-soft: 258 90% 66%;
-    --ring: 258 90% 66%;
+    /* Текст на полупрозрачной фиолетовой заливке светлее самой заливки:
+       тон в тон не проходит контраст AA для мелкого текста (3.2:1 < 4.5:1). */
+    --accent-soft-foreground: 258 90% 78%;
+    --ring: var(--accent-soft);
     --destructive: 0 72% 60%;
     --destructive-foreground: 0 0% 100%;
     --radius-card: 12px;
     --radius-control: 8px;
-    --glow: 258 90% 66%;
+    --glow: var(--accent-soft);
   }
 
   body {
@@ -56,7 +59,8 @@
   textarea:focus-visible,
   select:focus-visible,
   summary:focus-visible {
-    outline: 2px solid hsl(var(--ring) / 0.7);
+    /* Без прозрачности: с альфой кольцо не добирает нетекстовый контраст 3:1. */
+    outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
   }
 }

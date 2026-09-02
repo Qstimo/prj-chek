@@ -16,7 +16,7 @@ const config: Config = {
         primary: 'hsl(var(--primary))',
         'primary-foreground': 'hsl(var(--primary-foreground))',
         'accent-soft': 'hsl(var(--accent-soft) / 0.22)',
-        'accent-soft-foreground': 'hsl(var(--accent-soft))',
+        'accent-soft-foreground': 'hsl(var(--accent-soft-foreground))',
         destructive: 'hsl(var(--destructive))',
         'destructive-foreground': 'hsl(var(--destructive-foreground))',
       },
