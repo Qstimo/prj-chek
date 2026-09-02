@@ -36,7 +36,7 @@ export function VariableRow({
   }
 
   return (
-    <li className="space-y-2 rounded-md border border-border p-3">
+    <li className="space-y-2 rounded-lg border border-border bg-surface p-3">
       <div className="flex flex-wrap items-baseline gap-3">
         <code className="font-medium">{variable.key}</code>
         <span className="rounded bg-muted px-2 py-0.5 text-xs">v{variable.currentVersion}</span>
