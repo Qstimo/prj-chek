@@ -22,7 +22,7 @@ interface IProps {
  */
 export function UserListItem({ user, onRevoke, onRestore, onRequestReset, onResetTotp }: IProps) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
+    <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-3">
       <div>
         <p className="font-medium">
           {user.email}
