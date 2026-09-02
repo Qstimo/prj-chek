@@ -10,7 +10,7 @@ export function AppNav({ subject, onLogout }: IProps) {
   const links = subject.isSuperadmin ? [...COMMON_LINKS, ...ADMIN_LINKS] : COMMON_LINKS;
 
   return (
-    <nav className="border-b border-border">
+    <nav className="sticky top-0 z-10 border-b border-border bg-surface backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 p-4">
         <ul className="flex gap-4">
           {links.map((link) => (
