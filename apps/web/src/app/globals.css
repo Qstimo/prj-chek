@@ -52,6 +52,15 @@
     @apply tracking-tight;
   }
 
+  /* Стеклянный фон полей задаётся глобально: формы за пределами TextField
+     используют «сырые» input/textarea/select, и без этого их фон рисовал бы
+     UA-стиль тёмной темы (серый), выбиваясь из поверхностей темы. */
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    @apply bg-surface;
+  }
+
   /* Кольцо клавиатурного фокуса — у всех интерактивных элементов (спека, раздел 3). */
   a:focus-visible,
   button:focus-visible,
