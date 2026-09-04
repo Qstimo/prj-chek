@@ -1,6 +1,7 @@
 import { RoadmapVersionState } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RoadmapTimeline } from './RoadmapTimeline';
 import { sectorPath } from './sector';
@@ -10,18 +11,24 @@ const versions = [
     id: '1',
     label: 'v1.0',
     state: RoadmapVersionState.Released,
+    plannedDate: '2026-06-01',
+    releasedDate: '2026-06-15',
     progress: { done: 1, total: 3 },
   },
   {
     id: '2',
     label: 'v2.0',
     state: RoadmapVersionState.InProgress,
+    plannedDate: '2026-12-01',
+    releasedDate: null,
     progress: { done: 1, total: 2 },
   },
   {
     id: '3',
     label: 'v3.0',
     state: RoadmapVersionState.Planned,
+    plannedDate: null,
+    releasedDate: null,
     progress: { done: 0, total: 0 },
   },
 ];
@@ -59,12 +66,16 @@ describe('RoadmapTimeline', () => {
         id: '1',
         label: 'v1.1 — оплата',
         state: RoadmapVersionState.Released,
+        plannedDate: null,
+        releasedDate: null,
         progress: { done: 1, total: 1 },
       },
       {
         id: '2',
         label: 'v2.0 — маркетплейс',
         state: RoadmapVersionState.Planned,
+        plannedDate: null,
+        releasedDate: null,
         progress: { done: 0, total: 0 },
       },
     ];
@@ -94,5 +105,37 @@ describe('RoadmapTimeline', () => {
     render(<RoadmapTimeline versions={[]} currentIndex={null} />);
 
     expect(screen.getByText(/версий пока нет/i)).toBeInTheDocument();
+  });
+
+  it('показывает даты под названиями', () => {
+    render(<RoadmapTimeline versions={versions} currentIndex={1} />);
+
+    expect(screen.getByText('15.06.2026')).toBeInTheDocument();
+    expect(screen.getByText('ожидается 01.12.2026')).toBeInTheDocument();
+  });
+
+  it('с onSelect колонки — кнопки, клик отдаёт id версии', async () => {
+    const onSelect = vi.fn();
+    render(<RoadmapTimeline versions={versions} currentIndex={1} onSelect={onSelect} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Версия v2.0' }));
+
+    expect(onSelect).toHaveBeenCalledWith('2');
+  });
+
+  it('кнопки версий доступны с клавиатуры', async () => {
+    const onSelect = vi.fn();
+    render(<RoadmapTimeline versions={versions} currentIndex={1} onSelect={onSelect} />);
+
+    screen.getByRole('button', { name: 'Версия v1.0' }).focus();
+    await userEvent.keyboard('{Enter}');
+
+    expect(onSelect).toHaveBeenCalledWith('1');
+  });
+
+  it('без onSelect кнопок нет', () => {
+    render(<RoadmapTimeline versions={versions} currentIndex={1} />);
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 });
