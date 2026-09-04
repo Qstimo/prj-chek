@@ -5,6 +5,7 @@ export interface VersionFormInitial {
   label: string;
   state: RoadmapVersionState;
   plannedDate: string | null;
+  releasedDate: string | null;
 }
 
 /** Пропсы формы версии. */

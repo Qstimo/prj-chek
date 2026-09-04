@@ -97,7 +97,12 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
         <VersionForm
           initial={
             editing
-              ? { label: editing.label, state: editing.state, plannedDate: editing.plannedDate }
+              ? {
+                  label: editing.label,
+                  state: editing.state,
+                  plannedDate: editing.plannedDate,
+                  releasedDate: editing.releasedDate,
+                }
               : undefined
           }
           isSubmitting={createVersion.isPending || updateVersion.isPending}
