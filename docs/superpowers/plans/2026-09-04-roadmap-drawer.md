@@ -1641,6 +1641,27 @@ describe('RoadmapScreen', () => {
     expect(screen.queryByRole('dialog', { name: 'v1.0' })).not.toBeInTheDocument();
   });
 
+  it('отправка формы создания вызывает мутацию и закрывает панель', async () => {
+    // Мок сразу зовёт onSuccess — как успешный ответ сервера.
+    const mutate = vi.fn((_input: unknown, options?: { onSuccess?: () => void }) =>
+      options?.onSuccess?.(),
+    );
+    vi.mocked(hooks.useMutationCreateVersion).mockReturnValue(
+      { mutate, isPending: false, error: null } as never,
+    );
+    render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Добавить версию' }));
+    await userEvent.type(screen.getByLabelText('Обозначение'), 'v3.0');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'v3.0' }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(screen.queryByRole('dialog', { name: 'Новая версия' })).not.toBeInTheDocument();
+  });
+
   it('панель закрывается, когда версия исчезла из данных', async () => {
     const { rerender } = render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
 
