@@ -9,6 +9,7 @@ const version: RoadmapVersionRow = {
   projectId: '22222222-2222-2222-2222-222222222222',
   label: 'v1.0',
   plannedDate: '2026-12-01',
+  releasedDate: null,
   state: RoadmapVersionState.InProgress,
   position: 1,
   createdAt: new Date('2026-08-28T10:00:00Z'),
@@ -45,6 +46,7 @@ describe('проекция версии', () => {
       label: 'v1.0',
       state: RoadmapVersionState.InProgress,
       plannedDate: '2026-12-01',
+      releasedDate: null,
       position: 1,
       progress: { done: 1, total: 2 },
     });

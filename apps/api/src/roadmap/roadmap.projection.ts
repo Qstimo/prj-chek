@@ -26,6 +26,7 @@ export function versionProjection(
       label: version.label,
       state: version.state,
       plannedDate: version.plannedDate,
+      releasedDate: version.releasedDate,
       position: version.position,
       progress: {
         done: checkpoints.filter((checkpoint) => checkpoint.isDone).length,

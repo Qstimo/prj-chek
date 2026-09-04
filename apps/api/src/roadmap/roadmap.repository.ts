@@ -83,6 +83,7 @@ export class RoadmapRepository {
         projectId,
         label: input.label,
         plannedDate: input.plannedDate ?? null,
+        releasedDate: input.releasedDate ?? null,
         state: input.state ?? RoadmapVersionState.Planned,
         position: Math.max(0, ...existing.map((row) => row.position)) + 1,
       })

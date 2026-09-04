@@ -150,6 +150,35 @@ describe('репозиторий роадмапа', () => {
         ),
       ).rejects.toBeInstanceOf(SectionNotVisibleError);
     });
+
+    it('сохраняет и отдаёт фактическую дату релиза', async () => {
+      const version = await testDb.db.transaction((tx) =>
+        repository.createVersion(admin(), tx, projectId, {
+          label: 'v1',
+          state: RoadmapVersionState.Released,
+          releasedDate: '2026-09-01',
+        }),
+      );
+
+      expect(version.releasedDate).toBe('2026-09-01');
+
+      const roadmap = await repository.findForProject(admin(), projectId);
+      expect(roadmap.versions[0]!.releasedDate).toBe('2026-09-01');
+    });
+
+    it('правит фактическую дату релиза', async () => {
+      const version = await testDb.db.transaction((tx) =>
+        repository.createVersion(admin(), tx, projectId, { label: 'v1' }),
+      );
+
+      const updated = await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, version.id, {
+          releasedDate: '2026-09-02',
+        }),
+      );
+
+      expect(updated.releasedDate).toBe('2026-09-02');
+    });
   });
 
   describe('роадмап и стадия', () => {

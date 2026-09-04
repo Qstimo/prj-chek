@@ -10,6 +10,7 @@ const metadataVersion = {
   label: 'v1.0',
   state: RoadmapVersionState.InProgress,
   plannedDate: '2026-12-01',
+  releasedDate: null,
   position: 1,
   progress: { done: 1, total: 2 },
 };

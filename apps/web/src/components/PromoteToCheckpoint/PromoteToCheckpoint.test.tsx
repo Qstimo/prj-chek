@@ -11,6 +11,7 @@ const versions = [
     label: 'v1.0',
     state: RoadmapVersionState.InProgress,
     plannedDate: null,
+    releasedDate: null,
     position: 1,
     progress: { done: 0, total: 0 },
   },
