@@ -242,6 +242,22 @@ export class EnvironmentsRepository {
     environmentId: string,
     domains: string[],
   ): Promise<void> {
+    // Статусы проверок ссылаются на домены с restrict (каскады запрещены):
+    // без явной очистки замена доменов падала бы по внешнему ключу.
+    const existing = await tx
+      .select({ id: environmentDomains.id })
+      .from(environmentDomains)
+      .where(eq(environmentDomains.environmentId, environmentId));
+
+    if (existing.length > 0) {
+      await tx.delete(domainStatuses).where(
+        inArray(
+          domainStatuses.domainId,
+          existing.map((domain) => domain.id),
+        ),
+      );
+    }
+
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
 
     if (domains.length === 0) {

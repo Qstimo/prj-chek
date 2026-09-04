@@ -291,6 +291,31 @@ describe('репозиторий окружений', () => {
       expect(domains.map((domain) => domain.name)).toEqual(['api.example.com']);
     });
 
+    it('заменяет домены и после прогона автопроверок', async () => {
+      // Статус ссылается на домен с restrict: без явной очистки статусов
+      // замена доменов падала бы по внешнему ключу (как в remove).
+      const id = await createProd();
+      const [domain] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+      await testDb.db.insert(domainStatuses).values({
+        domainId: domain!.id,
+        tlsError: 'getaddrinfo ENOTFOUND example.com',
+      });
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { domains: [] }),
+      );
+
+      const remaining = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+
+      expect(remaining).toHaveLength(0);
+    });
+
     it('не трогает домены, если поле не передано', async () => {
       // Иначе правка одного лишь провайдера стирала бы адреса.
       const id = await createProd();
