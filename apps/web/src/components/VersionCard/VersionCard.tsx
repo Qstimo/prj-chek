@@ -3,8 +3,8 @@
 import type { RoadmapVersionDetail, RoadmapVersionMetadata } from '@cairn/shared';
 import { useState } from 'react';
 
-import { CheckpointList } from './CheckpointList';
-import { STATE_LABELS } from './constants';
+import { CheckpointList } from '../VersionDrawer/CheckpointList';
+import { STATE_LABELS } from '../VersionDrawer';
 import type { IProps } from './types';
 
 /** Версия роадмапа: паспорт, прогресс и чекпоинты по уровню (ТЗ 3.5). */
