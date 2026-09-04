@@ -1,0 +1,1 @@
+ALTER TABLE "roadmap_versions" ADD COLUMN "released_date" date;

@@ -37,6 +37,7 @@ export const roadmapVersions = pgTable(
       .references(() => projects.id, { onDelete: 'restrict' }),
     label: text('label').notNull(),
     plannedDate: date('planned_date', { mode: 'string' }),
+    releasedDate: date('released_date', { mode: 'string' }),
     state: roadmapVersionStateEnum('state').notNull().default(RoadmapVersionState.Planned),
     position: integer('position').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
