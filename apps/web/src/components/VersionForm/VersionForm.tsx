@@ -4,6 +4,8 @@ import { RoadmapVersionState, type RoadmapVersionCreate } from '@cairn/shared';
 import { useState, type FormEvent } from 'react';
 
 import { TextField } from '../TextField';
+// Глубокий импорт вместо бареля: через index.ts возник бы цикл
+// VersionForm → VersionDrawer/index → VersionDrawer → VersionForm.
 import { STATE_LABELS } from '../VersionDrawer/constants';
 import { DateField } from './DateField';
 import type { IProps } from './types';
