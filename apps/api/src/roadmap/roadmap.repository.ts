@@ -73,9 +73,15 @@ export class RoadmapRepository {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
 
     const existing = await tx
-      .select({ position: roadmapVersions.position })
+      .select({ position: roadmapVersions.position, label: roadmapVersions.label })
       .from(roadmapVersions)
       .where(eq(roadmapVersions.projectId, projectId));
+
+    // Ограничение уникальности есть и в базе, но человеку нужен внятный
+    // отказ, а не 500 от сырого нарушения ключа.
+    if (existing.some((row) => row.label === input.label)) {
+      throw new ConflictException('Версия с таким обозначением уже есть в роадмапе.');
+    }
 
     const [created] = await tx
       .insert(roadmapVersions)
@@ -102,6 +108,20 @@ export class RoadmapRepository {
   ): Promise<RoadmapVersionRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
     await this.requireVersion(tx, projectId, versionId);
+
+    if (input.label !== undefined) {
+      const [duplicate] = await tx
+        .select({ id: roadmapVersions.id })
+        .from(roadmapVersions)
+        .where(
+          and(eq(roadmapVersions.projectId, projectId), eq(roadmapVersions.label, input.label)),
+        )
+        .limit(1);
+
+      if (duplicate && duplicate.id !== versionId) {
+        throw new ConflictException('Версия с таким обозначением уже есть в роадмапе.');
+      }
+    }
 
     const [updated] = await tx
       .update(roadmapVersions)

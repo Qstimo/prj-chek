@@ -115,7 +115,32 @@ describe('репозиторий роадмапа', () => {
     it('не допускает двух версий с одним обозначением в проекте', async () => {
       await createVersion('v1.0');
 
-      await expect(createVersion('v1.0')).rejects.toThrow();
+      // Именно ConflictException: сырое нарушение уникальности БД ушло бы клиенту как 500.
+      await expect(createVersion('v1.0')).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('не даёт переименовать версию в занятое обозначение', async () => {
+      await createVersion('v1.0');
+      const versionId = await createVersion('v2.0');
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.updateVersion(admin(), tx, projectId, versionId, { label: 'v1.0' }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('правка версии без смены обозначения проходит', async () => {
+      const versionId = await createVersion('v1.0');
+
+      const updated = await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, versionId, {
+          label: 'v1.0',
+          state: RoadmapVersionState.InProgress,
+        }),
+      );
+
+      expect(updated.state).toBe(RoadmapVersionState.InProgress);
     });
 
     it('отказывает на уровне чтения', async () => {
