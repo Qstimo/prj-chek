@@ -180,7 +180,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `apps/api/src/roadmap/roadmap.repository.ts:85` (createVersion)
 - Modify: `apps/api/src/roadmap/roadmap.projection.ts:28`
 - Test: `apps/api/src/roadmap/roadmap.repository.test.ts`
-- Modify: фикстуры в `apps/api/src/roadmap/roadmap.projection.test.ts` и `apps/web/src/components/VersionCard/VersionCard.test.tsx` (если typecheck потребует)
+- Modify: фикстуры в `apps/api/src/roadmap/roadmap.projection.test.ts`, `apps/web/src/components/VersionCard/VersionCard.test.tsx` и `apps/web/src/components/PromoteToCheckpoint/PromoteToCheckpoint.test.tsx` (литералы версий без `releasedDate` перестанут проходить typecheck)
 
 - [ ] **Step 1: Написать падающий интеграционный тест**
 
@@ -241,12 +241,12 @@ Expected: FAIL — `createVersion` не пишет поле (первый тес
 - [ ] **Step 4: Прогнать тесты и typecheck, починить фикстуры**
 
 Run: `cd apps/api && pnpm vitest run src/roadmap && cd ../.. && pnpm typecheck`
-Expected: тесты PASS. Если typecheck укажет на фикстуры, где литералы `RoadmapVersionRow`/`RoadmapVersionMetadata` собраны вручную (`roadmap.projection.test.ts`, `apps/web/src/components/VersionCard/VersionCard.test.tsx`) — добавить туда `releasedDate: null` и повторить. К концу шага `pnpm typecheck` зелёный во всех рабочих пространствах.
+Expected: тесты PASS. Typecheck укажет на фикстуры, где литералы `RoadmapVersionRow`/`RoadmapVersionMetadata` собраны вручную: `roadmap.projection.test.ts`, `apps/web/src/components/VersionCard/VersionCard.test.tsx` и `apps/web/src/components/PromoteToCheckpoint/PromoteToCheckpoint.test.tsx` (массив `versions` передаётся в проп типа `(RoadmapVersionMetadata | RoadmapVersionDetail)[]`). Добавить в эти литералы `releasedDate: null` и повторить. Если typecheck укажет ещё какие-то файлы — починить и их тем же способом. К концу шага `pnpm typecheck` зелёный во всех рабочих пространствах.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/roadmap apps/web/src/components/VersionCard
+git add apps/api/src/roadmap apps/web/src/components/VersionCard apps/web/src/components/PromoteToCheckpoint
 git commit -m "Сохранять и отдавать фактическую дату релиза версии
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
@@ -1548,6 +1548,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapScreen.tsx`
 - Create: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapVersionPanel.tsx`
+- Create: `apps/web/src/app/(app)/projects/[id]/roadmap/CreateVersionPanel.tsx`
+- Create: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapPublicLink.tsx`
 - Test: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapScreen.test.tsx`
 
 - [ ] **Step 1: Написать падающие тесты**
@@ -1628,10 +1630,11 @@ describe('RoadmapScreen', () => {
     expect(screen.getByLabelText('Оплата')).toBeInTheDocument();
   });
 
-  it('«Добавить версию» открывает панель создания и вытесняет панель версии', async () => {
+  it('после закрытия панели версии открывается панель создания', async () => {
     render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Версия v1.0' }));
+    await userEvent.keyboard('{Escape}');
     await userEvent.click(screen.getByRole('button', { name: 'Добавить версию' }));
 
     expect(screen.getByRole('dialog', { name: 'Новая версия' })).toBeInTheDocument();
@@ -1663,15 +1666,18 @@ describe('RoadmapScreen', () => {
 });
 ```
 
-Кнопка «Добавить версию» при открытой панели версии: панель — модальный
-диалог Radix, клики сквозь подложку не проходят. Поэтому в тесте вытеснения
-клик по «Добавить версию» выполняем после программного закрытия? Нет:
-кнопка вне панели недоступна, пока панель открыта, — взаимное вытеснение
-обеспечивается самим модальным поведением, а обработчики открытия всё равно
-сбрасывают соседнее состояние. Если `userEvent.click` по кнопке за подложкой
-упадёт — сначала закрыть панель по Esc (`await userEvent.keyboard('{Escape}')`),
-затем кликать «Добавить версию», и проверять только то, что открылась панель
-создания.
+О требовании спеки «открытие одной панели сбрасывает другую»: панель —
+модальный диалог Radix, он помечает остальную страницу `aria-hidden`
+и глушит на ней pointer-events. Пока панель версии открыта, кнопку
+«Добавить версию» нельзя ни кликнуть, ни даже найти через `getByRole` —
+взаимное исключение панелей обеспечивается самим модальным поведением,
+второй одновременно открытой панели не бывает. Поэтому тест выше сначала
+закрывает панель версии по Esc и лишь затем открывает панель создания —
+это единственный достижимый пользователем сценарий, и он детерминирован.
+Обработчики открытия (`setIsCreating(false)` в `onSelect` и `setSelectedVersionId(null)`
+в обработчике «Добавить версию» ниже) всё равно сбрасывают соседнее
+состояние — как страховка на случай будущего немодального режима;
+отдельного теста на них не нужно.
 
 Run: `cd apps/web && pnpm vitest run "src/app/(app)/projects/[id]/roadmap"`
 Expected: FAIL — экран ещё старый.
@@ -1741,6 +1747,81 @@ export function RoadmapVersionPanel({ projectId, version, isCurrent, canWrite, o
 Сверить сигнатуры мутаций с текущим `RoadmapScreen.tsx` (они уже вызываются
 там с теми же аргументами) и с `useMutationRoadmap.test.tsx`.
 
+- [ ] **Step 2а: Реализовать `CreateVersionPanel.tsx` и `RoadmapPublicLink.tsx`**
+
+Эти две обёртки (по образцу `RoadmapVersionPanel`: маршрут-локальный компонент,
+собирающий хуки) выносятся из экрана, чтобы `RoadmapScreen` уложился
+в лимит 100 строк. Отдельных тестов у них нет: покрываются через
+`RoadmapScreen.test.tsx`, где хуки замоканы на уровне бочонка `@/api/hooks`.
+
+`CreateVersionPanel.tsx`:
+
+```tsx
+'use client';
+
+import { useMutationCreateVersion } from '@/api/hooks';
+import { Drawer } from '@/components/Drawer';
+import { VersionForm } from '@/components/VersionForm';
+
+/** Пропсы панели создания версии. */
+interface IProps {
+  projectId: string;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+/** Панель «Новая версия»: форма создания в выезжающем Drawer. */
+export function CreateVersionPanel({ projectId, isOpen, onClose }: IProps) {
+  const createVersion = useMutationCreateVersion(projectId);
+
+  return (
+    <Drawer isOpen={isOpen} onClose={onClose} title="Новая версия">
+      <VersionForm
+        isSubmitting={createVersion.isPending}
+        error={createVersion.error?.message}
+        onSubmit={(input) => createVersion.mutate(input, { onSuccess: onClose })}
+      />
+    </Drawer>
+  );
+}
+```
+
+`RoadmapPublicLink.tsx`:
+
+```tsx
+'use client';
+
+import {
+  useMutationPublishRoadmap,
+  useMutationUnpublishRoadmap,
+  useQueryPublicLink,
+} from '@/api/hooks';
+import { PublicLinkPanel } from '@/components/PublicLinkPanel';
+
+/** Пропсы блока публичной ссылки роадмапа. */
+interface IProps {
+  projectId: string;
+  isSuperadmin: boolean;
+}
+
+/** Публичная ссылка роадмапа: собирает запрос и мутации публикации. */
+export function RoadmapPublicLink({ projectId, isSuperadmin }: IProps) {
+  const publicLink = useQueryPublicLink(projectId);
+  const publish = useMutationPublishRoadmap(projectId);
+  const unpublish = useMutationUnpublishRoadmap(projectId);
+
+  return (
+    <PublicLinkPanel
+      link={publicLink.data ?? null}
+      isSuperadmin={isSuperadmin}
+      isPending={publish.isPending || unpublish.isPending}
+      onPublish={() => publish.mutate()}
+      onUnpublish={() => unpublish.mutate()}
+    />
+  );
+}
+```
+
 - [ ] **Step 3: Переписать `RoadmapScreen.tsx`**
 
 ```tsx
@@ -1749,19 +1830,11 @@ export function RoadmapVersionPanel({ projectId, version, isCurrent, canWrite, o
 import { AccessLevel, Section } from '@cairn/shared';
 import { useState } from 'react';
 
-import {
-  useMutationCreateVersion,
-  useMutationPublishRoadmap,
-  useMutationUnpublishRoadmap,
-  useQueryPublicLink,
-  useQueryRoadmap,
-  useQuerySections,
-} from '@/api/hooks';
-import { Drawer } from '@/components/Drawer';
-import { PublicLinkPanel } from '@/components/PublicLinkPanel';
+import { useQueryRoadmap, useQuerySections } from '@/api/hooks';
 import { RoadmapTimeline } from '@/components/RoadmapTimeline';
-import { VersionForm } from '@/components/VersionForm';
 
+import { CreateVersionPanel } from './CreateVersionPanel';
+import { RoadmapPublicLink } from './RoadmapPublicLink';
 import { RoadmapVersionPanel } from './RoadmapVersionPanel';
 
 /** Пропсы экрана роадмапа. */
@@ -1774,10 +1847,6 @@ interface IProps {
 export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
   const roadmap = useQueryRoadmap(projectId);
   const sections = useQuerySections(projectId);
-  const publicLink = useQueryPublicLink(projectId);
-  const createVersion = useMutationCreateVersion(projectId);
-  const publish = useMutationPublishRoadmap(projectId);
-  const unpublish = useMutationUnpublishRoadmap(projectId);
 
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -1838,27 +1907,19 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
         />
       )}
 
-      <Drawer isOpen={isCreating} onClose={() => setIsCreating(false)} title="Новая версия">
-        <VersionForm
-          isSubmitting={createVersion.isPending}
-          error={createVersion.error?.message}
-          onSubmit={(input) => createVersion.mutate(input, { onSuccess: () => setIsCreating(false) })}
-        />
-      </Drawer>
+      <CreateVersionPanel
+        projectId={projectId}
+        isOpen={isCreating}
+        onClose={() => setIsCreating(false)}
+      />
 
-      {canRead && (
-        <PublicLinkPanel
-          link={publicLink.data ?? null}
-          isSuperadmin={isSuperadmin}
-          isPending={publish.isPending || unpublish.isPending}
-          onPublish={() => publish.mutate()}
-          onUnpublish={() => unpublish.mutate()}
-        />
-      )}
+      {canRead && <RoadmapPublicLink projectId={projectId} isSuperadmin={isSuperadmin} />}
     </div>
   );
 }
 ```
+
+Итоговый `RoadmapScreen.tsx` — ~92 строки, в лимите 100.
 
 - [ ] **Step 4: Прогнать тесты**
 
@@ -2030,3 +2091,12 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 клики и клавиатура, Drawer, режимы VersionDrawer, уровень «метаданные»,
 экран, публичная страница, удаление VersionCard. Расхождения — доработать
 до объявления работы завершённой (@superpowers:verification-before-completion).
+
+Два сознательных отступления от спеки, не считающихся расхождениями:
+
+- соединительная линия рисуется сегментами внутри SVG каждой колонки,
+  а не абсолютно позиционированным элементом (раздел 2 спеки) — визуальный
+  результат тот же, сегменты не требуют подгонки к ширине колонок;
+- тест взаимного вытеснения панелей заменён на «после закрытия панели
+  версии открывается панель создания»: панель модальна, второй
+  одновременно открытой панели не бывает по построению (Task 10, Step 1).
