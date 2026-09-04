@@ -34,6 +34,15 @@ const config: Config = {
         // Единственная тень темы: мягкая, нейтральная (спека, раздел 3 — без ореолов).
         surface: '0 8px 24px rgba(0, 0, 0, 0.35)',
       },
+      keyframes: {
+        'drawer-in': {
+          from: { transform: 'translateX(100%)' },
+          to: { transform: 'translateX(0)' },
+        },
+      },
+      animation: {
+        'drawer-in': 'drawer-in 0.2s ease-out',
+      },
     },
   },
   plugins: [],
