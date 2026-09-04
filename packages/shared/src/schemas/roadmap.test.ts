@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { RoadmapVersionState } from '../enums';
 import {
   roadmapCheckpointCreateSchema,
   roadmapVersionCreateSchema,
+  roadmapVersionMetadataSchema,
   roadmapVersionUpdateSchema,
 } from './roadmap';
 
@@ -28,6 +30,35 @@ describe('схема версии роадмапа', () => {
     expect(() =>
       roadmapVersionCreateSchema.parse({ label: 'v1', plannedDate: '01.12.2026' }),
     ).toThrow();
+  });
+
+  it('принимает дату релиза при создании', () => {
+    expect(
+      roadmapVersionCreateSchema.parse({ label: 'v1', releasedDate: '2026-09-01' }).releasedDate,
+    ).toBe('2026-09-01');
+    expect(
+      roadmapVersionCreateSchema.parse({ label: 'v1', releasedDate: null }).releasedDate,
+    ).toBeNull();
+  });
+
+  it('отклоняет дату релиза не в формате ГГГГ-ММ-ДД', () => {
+    expect(() =>
+      roadmapVersionCreateSchema.parse({ label: 'v1', releasedDate: '01.09.2026' }),
+    ).toThrow();
+  });
+
+  it('метаданные версии содержат дату релиза', () => {
+    const version = roadmapVersionMetadataSchema.parse({
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      label: 'v1',
+      state: RoadmapVersionState.Released,
+      plannedDate: null,
+      releasedDate: '2026-09-01',
+      position: 1,
+      progress: { done: 0, total: 0 },
+    });
+
+    expect(version.releasedDate).toBe('2026-09-01');
   });
 
   it('правка частична', () => {

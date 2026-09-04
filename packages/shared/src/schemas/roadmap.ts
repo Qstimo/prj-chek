@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 import { RoadmapVersionState } from '../enums';
 
-/** Плановая дата: день без времени. */
-const plannedDateSchema = z
+/** Дата-день без времени: план и факт релиза. */
+const dayDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ожидается дата ГГГГ-ММ-ДД')
   .nullable();
@@ -33,7 +33,8 @@ export const roadmapVersionMetadataSchema = z.object({
   id: z.string().uuid(),
   label: z.string(),
   state: z.nativeEnum(RoadmapVersionState),
-  plannedDate: plannedDateSchema,
+  plannedDate: dayDateSchema,
+  releasedDate: dayDateSchema,
   position: z.number().int().positive(),
   progress: roadmapProgressSchema,
 });
@@ -59,7 +60,8 @@ export const roadmapResponseSchema = z.object({
 export const roadmapVersionCreateSchema = z
   .object({
     label: z.string().trim().min(1).max(100),
-    plannedDate: plannedDateSchema.optional(),
+    plannedDate: dayDateSchema.optional(),
+    releasedDate: dayDateSchema.optional(),
     state: z.nativeEnum(RoadmapVersionState).optional(),
   })
   .strict();
@@ -68,7 +70,8 @@ export const roadmapVersionCreateSchema = z
 export const roadmapVersionUpdateSchema = z
   .object({
     label: z.string().trim().min(1).max(100).optional(),
-    plannedDate: plannedDateSchema.optional(),
+    plannedDate: dayDateSchema.optional(),
+    releasedDate: dayDateSchema.optional(),
     state: z.nativeEnum(RoadmapVersionState).optional(),
     position: z.number().int().positive().optional(),
   })
