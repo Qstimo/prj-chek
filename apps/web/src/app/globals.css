@@ -61,6 +61,14 @@
     @apply bg-surface;
   }
 
+  /* Выпадающий список нативного select наследует полупрозрачный фон поля:
+     Chrome рисует попап светлым, и светлые опции на нём не читаются.
+     Опциям — непрозрачный фон темы. */
+  select option {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
   /* Кольцо клавиатурного фокуса — у всех интерактивных элементов (спека, раздел 3). */
   a:focus-visible,
   button:focus-visible,
