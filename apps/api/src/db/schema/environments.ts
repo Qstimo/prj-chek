@@ -2,6 +2,7 @@ import { EnvironmentKind } from '@cairn/shared';
 import { index, pgEnum, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 import { projects } from './projects';
+import { servers } from './servers';
 
 /** Вид окружения. Значения совпадают с контрактом. */
 export const environmentKindEnum = pgEnum('environment_kind', [
@@ -30,10 +31,18 @@ export const environments = pgTable(
       .references(() => projects.id, { onDelete: 'restrict' }),
     name: text('name').notNull(),
     kind: environmentKindEnum('kind').notNull(),
+    /**
+     * Собственный адрес окружения. Перекрывает адрес машины: окружение
+     * может жить на поддомене или нестандартном порту.
+     */
     host: text('host'),
-    ip: text('ip'),
-    provider: text('provider'),
-    specs: text('specs'),
+    /**
+     * Машина, на которой живёт окружение.
+     *
+     * `restrict`, а не каскад: удаление сервера должно быть осознанным
+     * переносом окружений, а не тихим обрывом связи.
+     */
+    serverId: uuid('server_id').references(() => servers.id, { onDelete: 'restrict' }),
     healthCheckUrl: text('health_check_url'),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -42,6 +51,7 @@ export const environments = pgTable(
   (table) => [
     unique('environments_project_name').on(table.projectId, table.name),
     index('environments_project_idx').on(table.projectId),
+    index('environments_server_idx').on(table.serverId),
   ],
 );
 

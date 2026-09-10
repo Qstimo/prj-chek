@@ -10,6 +10,7 @@ import { grants } from './grants';
 import { invitations } from './invitations';
 import { projects } from './projects';
 import { roadmapCheckpoints, roadmapPublicLinks, roadmapVersions } from './roadmap';
+import { servers } from './servers';
 import { sessions } from './sessions';
 import { domainStatuses, environmentStatuses } from './status';
 import { subjects } from './subjects';
@@ -25,6 +26,7 @@ const ALL_TABLES = [
   { name: 'subjects', table: subjects },
   { name: 'users', table: users },
   { name: 'projects', table: projects },
+  { name: 'servers', table: servers },
   { name: 'environments', table: environments },
   { name: 'environment_domains', table: environmentDomains },
   { name: 'chronicle_entries', table: chronicleEntries },

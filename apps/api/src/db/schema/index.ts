@@ -7,6 +7,7 @@ export * from './grants';
 export * from './invitations';
 export * from './projects';
 export * from './roadmap';
+export * from './servers';
 export * from './sessions';
 export * from './status';
 export * from './subjects';

@@ -63,7 +63,7 @@ export async function startTestDatabase(): Promise<TestDatabase> {
                        roadmap_public_links, roadmap_checkpoints, roadmap_versions,
                        variable_versions, variables,
                        doc_pages, chronicle_entries, environment_domains, environments,
-                       projects, users, subjects
+                       servers, projects, users, subjects
         RESTART IDENTITY CASCADE
       `);
     },
