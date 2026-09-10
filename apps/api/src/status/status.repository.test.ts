@@ -4,8 +4,10 @@ import {
   HealthState,
   Section,
   StatusIndicator,
+  StatusWarningKind,
   SubjectKind,
 } from '@cairn/shared';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessService } from '../access/access.service';
@@ -17,6 +19,7 @@ import {
   environments,
   grants,
   projects,
+  servers,
   subjects,
   users,
 } from '../db/schema';
@@ -184,5 +187,85 @@ describe('репозиторий статусов', () => {
     const summary = await repository.summary(member());
     expect(summary).toHaveLength(1);
     expect(summary[0]).toMatchObject({ projectId, projectName: 'Проект' });
+  });
+
+  describe('срок оплаты сервера в статусе проекта', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    /** Календарный день через `days` суток от сегодня в формате контракта. */
+    function inDays(days: number): string {
+      return new Date(Date.now() + days * DAY_MS).toISOString().slice(0, 10);
+    }
+
+    /** Ставит окружение проекта на новый сервер с заданным сроком оплаты. */
+    async function placeOnServer(name: string, paidUntil: string | null): Promise<void> {
+      const [server] = await testDb.db.insert(servers).values({ name, paidUntil }).returning();
+
+      await testDb.db
+        .update(environments)
+        .set({ serverId: server!.id })
+        .where(eq(environments.id, environmentId));
+    }
+
+    it('предупреждает о близком сроке и поднимает индикатор', async () => {
+      await placeOnServer('hetzner-fsn-1', inDays(3));
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(status.warnings).toContainEqual(
+        expect.objectContaining({
+          kind: StatusWarningKind.ServerExpiring,
+          subject: 'hetzner-fsn-1',
+        }),
+      );
+      expect(status.indicator).toBe(StatusIndicator.Warning);
+    });
+
+    it('не раскрывает соседей по машине', async () => {
+      // В предупреждении только имя машины: список её проектов не должен
+      // просачиваться в статус чужого проекта.
+      await placeOnServer('hetzner-fsn-1', inDays(3));
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+      const serverWarning = status.warnings.find(
+        (warning) => warning.kind === StatusWarningKind.ServerExpiring,
+      );
+
+      expect(Object.keys(serverWarning ?? {})).toEqual(['kind', 'subject', 'detail']);
+    });
+
+    it('молчит, когда срок далёк или сервера нет', async () => {
+      await placeOnServer('hetzner-fsn-1', inDays(60));
+      await grantInfra(AccessLevel.Metadata);
+
+      const withFarDate = await repository.statusForProject(member(), projectId);
+
+      expect(
+        withFarDate.warnings.some(
+          (warning) => warning.kind === StatusWarningKind.ServerExpiring,
+        ),
+      ).toBe(false);
+    });
+
+    it('даёт одно предупреждение на машину, а не на каждое её окружение', async () => {
+      await placeOnServer('hetzner-fsn-1', inDays(3));
+
+      const [server] = await testDb.db.select().from(servers);
+      await testDb.db.insert(environments).values({
+        projectId,
+        name: 'Стейдж',
+        kind: EnvironmentKind.Staging,
+        serverId: server!.id,
+      });
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(
+        status.warnings.filter((warning) => warning.kind === StatusWarningKind.ServerExpiring),
+      ).toHaveLength(1);
+    });
   });
 });

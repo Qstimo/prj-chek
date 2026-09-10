@@ -71,12 +71,17 @@ export function warningsOf(
 /**
  * Индикатор проекта (спека 5): приостановлен → авария → предупреждение →
  * в порядке → неизвестно. Порядок правил и есть приоритет.
+ *
+ * `extraWarnings` — предупреждения, собранные не из проверок окружений
+ * и доменов: сегодня это сроки оплаты серверов проекта. Они приходят
+ * готовыми, потому что считаются от машин, а не от окружений.
  */
 export function indicatorOf(
   lifecycle: ProjectLifecycle,
   environments: EnvironmentStatus[],
   domains: DomainStatus[],
   now: Date,
+  extraWarnings: StatusWarning[] = [],
 ): StatusIndicator {
   if (lifecycle === ProjectLifecycle.Paused) {
     return StatusIndicator.Paused;
@@ -86,7 +91,7 @@ export function indicatorOf(
     return StatusIndicator.Down;
   }
 
-  if (warningsOf(environments, domains, now).length > 0) {
+  if (warningsOf(environments, domains, now).length + extraWarnings.length > 0) {
     return StatusIndicator.Warning;
   }
 

@@ -6,6 +6,7 @@ import {
   type EnvironmentStatus,
   type ProjectStatus,
   type StatusSummaryRow,
+  type StatusWarning,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { asc, eq, inArray, isNotNull } from 'drizzle-orm';
@@ -20,8 +21,9 @@ import {
   environmentStatuses,
   environments,
   projects,
+  servers,
 } from '../db/schema';
-import { indicatorOf, warningsOf } from './indicator';
+import { indicatorOf, serverWarningsOf, warningsOf } from './indicator';
 
 /** Результат health-проверки для записи. */
 export interface EnvironmentStatusInput {
@@ -147,6 +149,39 @@ export class StatusRepository {
     return rows;
   }
 
+  /**
+   * Предупреждения о сроках оплаты машин, на которых стоят окружения проекта.
+   *
+   * По одному на машину, а не на окружение: два окружения одного проекта на
+   * одном сервере — это одна оплата и одно предупреждение. В текст попадает
+   * только имя машины: список её проектов не должен просачиваться в статус
+   * чужого проекта.
+   */
+  private async serverWarningsFor(
+    environmentRows: { environment: { serverId: string | null } }[],
+    now: Date,
+  ): Promise<StatusWarning[]> {
+    const serverIds = [
+      ...new Set(
+        environmentRows
+          .map((row) => row.environment.serverId)
+          .filter((serverId): serverId is string => serverId !== null),
+      ),
+    ];
+
+    if (serverIds.length === 0) {
+      return [];
+    }
+
+    const machines = await this.db
+      .select({ name: servers.name, paidUntil: servers.paidUntil })
+      .from(servers)
+      .where(inArray(servers.id, serverIds))
+      .orderBy(asc(servers.name));
+
+    return machines.flatMap((machine) => serverWarningsOf(machine.name, machine.paidUntil, now));
+  }
+
   /** Собирает агрегат проекта из таблиц статусов. */
   private async buildStatus(projectId: string): Promise<ProjectStatus> {
     const [project] = await this.db
@@ -192,12 +227,19 @@ export class StatusRepository {
     }));
 
     const now = new Date();
+    const serverWarnings = await this.serverWarningsFor(environmentRows, now);
 
     return {
-      indicator: indicatorOf(project!.lifecycle, environmentStatusesView, domainStatusesView, now),
+      indicator: indicatorOf(
+        project!.lifecycle,
+        environmentStatusesView,
+        domainStatusesView,
+        now,
+        serverWarnings,
+      ),
       environments: environmentStatusesView,
       domains: domainStatusesView,
-      warnings: warningsOf(environmentStatusesView, domainStatusesView, now),
+      warnings: [...warningsOf(environmentStatusesView, domainStatusesView, now), ...serverWarnings],
     };
   }
 }
