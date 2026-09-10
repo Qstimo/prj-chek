@@ -839,6 +839,56 @@ async function runServerScenario(admin, guest, { projectId, environmentId }) {
   check('освобождённый сервер удаляется', removed.status === 204, `статус ${removed.status}`);
 }
 
+/** Реестр доменов: корень заводится сам, срок продления предупреждает. */
+async function runDomainScenario(admin, guest, { projectId, environmentId }) {
+  const forbidden = await guest('/api/domains');
+  check('реестр доменов закрыт от подрядчика', forbidden.status === 403, `статус ${forbidden.status}`);
+
+  const named = await admin(`/api/projects/${projectId}/environments/${environmentId}`, {
+    method: 'PATCH',
+    body: { domains: ['stage.e2e-domain.example'] },
+  });
+  check('домен вписан в окружение', named.status === 200, `статус ${named.status}`);
+
+  const registry = await admin('/api/domains');
+  const root = registry.json?.find((row) => row.name === 'e2e-domain.example');
+  checkCritical('корень появился в реестре сам', Boolean(root), JSON.stringify(registry.json));
+
+  check('корень знает свои поддомены', root.subdomainCount === 1, `${root.subdomainCount}`);
+
+  const paidUntil = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const dated = await admin(`/api/domains/${root.id}`, {
+    method: 'PATCH',
+    body: { owner: 'ООО Ромашка', registrar: 'REG.RU', paidUntil },
+  });
+  check('срок продления задан', dated.status === 200, `статус ${dated.status}`);
+
+  const status = await admin(`/api/projects/${projectId}/status`);
+  check(
+    'срок продления предупреждает в статусе проекта',
+    status.json?.warnings?.some((warning) => warning.kind === 'domain_renewal_expiring'),
+    JSON.stringify(status.json?.warnings),
+  );
+
+  const map = await admin('/api/domains/map');
+  check(
+    'карта показывает ребро между корнем и проектом',
+    map.json?.edges?.some((edge) => edge.domainId === root.id && edge.projectId === projectId),
+    JSON.stringify(map.json?.edges),
+  );
+
+  const occupied = await admin(`/api/domains/${root.id}`, { method: 'DELETE' });
+  check('занятый корень не удаляется', occupied.status === 409, `статус ${occupied.status}`);
+
+  await admin(`/api/projects/${projectId}/environments/${environmentId}`, {
+    method: 'PATCH',
+    body: { domains: [] },
+  });
+
+  const removed = await admin(`/api/domains/${root.id}`, { method: 'DELETE' });
+  check('освобождённый корень удаляется', removed.status === 204, `статус ${removed.status}`);
+}
+
 /** Печатает итог и возвращает число провалов. */
 function report() {
   const failed = results.filter((result) => !result.ok);
@@ -863,6 +913,7 @@ await runGuestScenario(guest, context);
 await runAgentScenario(admin, context);
 await runPublicRoadmapScenario(admin, context);
 await runServerScenario(admin, guest, context);
+await runDomainScenario(admin, guest, context);
 await runIntakeRevocationScenario(admin, context);
 await runRevocationScenario(admin, guest, context);
 
