@@ -1,0 +1,3 @@
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  domains
+TO cairn_app;

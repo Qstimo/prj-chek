@@ -25,6 +25,10 @@ describe('права роли приложения на окружения', () 
     ).resolves.toBeDefined();
   });
 
+  it('роль приложения читает и пишет корневые домены', async () => {
+    await expect(testDb.appDb.execute(sql`SELECT count(*) FROM domains`)).resolves.toBeDefined();
+  });
+
   it('роль приложения читает и пишет серверы', async () => {
     await expect(testDb.appDb.execute(sql`SELECT count(*) FROM servers`)).resolves.toBeDefined();
   });
