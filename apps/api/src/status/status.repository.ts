@@ -19,11 +19,12 @@ import {
   domainStatuses,
   environmentDomains,
   environmentStatuses,
+  domains,
   environments,
   projects,
   servers,
 } from '../db/schema';
-import { indicatorOf, serverWarningsOf, warningsOf } from './indicator';
+import { domainRenewalWarningsOf, indicatorOf, serverWarningsOf, warningsOf } from './indicator';
 
 /** Результат health-проверки для записи. */
 export interface EnvironmentStatusInput {
@@ -182,6 +183,30 @@ export class StatusRepository {
     return machines.flatMap((machine) => serverWarningsOf(machine.name, machine.paidUntil, now));
   }
 
+  /**
+   * Предупреждения о продлении корней, из которых растут домены проекта.
+   *
+   * По одному на корень: три поддомена одного домена — это одна оплата.
+   * В тексте только имя корня, соседей по нему проекту знать незачем.
+   */
+  private async domainWarningsFor(
+    environmentIds: string[],
+    now: Date,
+  ): Promise<StatusWarning[]> {
+    if (environmentIds.length === 0) {
+      return [];
+    }
+
+    const roots = await this.db
+      .selectDistinct({ name: domains.name, paidUntil: domains.paidUntil })
+      .from(environmentDomains)
+      .innerJoin(domains, eq(domains.id, environmentDomains.domainId))
+      .where(inArray(environmentDomains.environmentId, environmentIds))
+      .orderBy(asc(domains.name));
+
+    return roots.flatMap((root) => domainRenewalWarningsOf(root.name, root.paidUntil, now));
+  }
+
   /** Собирает агрегат проекта из таблиц статусов. */
   private async buildStatus(projectId: string): Promise<ProjectStatus> {
     const [project] = await this.db
@@ -228,6 +253,8 @@ export class StatusRepository {
 
     const now = new Date();
     const serverWarnings = await this.serverWarningsFor(environmentRows, now);
+    const domainWarnings = await this.domainWarningsFor(environmentIds, now);
+    const registryWarnings = [...serverWarnings, ...domainWarnings];
 
     return {
       indicator: indicatorOf(
@@ -235,11 +262,14 @@ export class StatusRepository {
         environmentStatusesView,
         domainStatusesView,
         now,
-        serverWarnings,
+        registryWarnings,
       ),
       environments: environmentStatusesView,
       domains: domainStatusesView,
-      warnings: [...warningsOf(environmentStatusesView, domainStatusesView, now), ...serverWarnings],
+      warnings: [
+        ...warningsOf(environmentStatusesView, domainStatusesView, now),
+        ...registryWarnings,
+      ],
     };
   }
 }
