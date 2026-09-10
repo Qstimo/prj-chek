@@ -6,7 +6,7 @@ import {
   type EnvironmentMetadata,
   type EnvironmentUpdate,
 } from '@cairn/shared';
-import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import { SectionNotVisibleError } from '../access/access.errors';
@@ -19,8 +19,10 @@ import {
   environmentDomains,
   environmentStatuses,
   environments,
+  servers,
   variables,
   type Environment,
+  type Server,
 } from '../db/schema';
 import { environmentProjection } from './environment.projection';
 
@@ -67,8 +69,16 @@ export class EnvironmentsRepository {
       .orderBy(asc(environments.kind), asc(environments.name));
 
     const domains = await this.domainsOf(rows.map((row) => row.id));
+    const machines = await this.serversOf(rows);
 
-    return rows.map((row) => environmentProjection(row, domains.get(row.id) ?? [], level));
+    return rows.map((row) =>
+      environmentProjection(
+        row,
+        domains.get(row.id) ?? [],
+        level,
+        row.serverId ? (machines.get(row.serverId) ?? null) : null,
+      ),
+    );
   }
 
   /** Возвращает окружение проекта в проекции, соответствующей уровню. */
@@ -86,8 +96,14 @@ export class EnvironmentsRepository {
 
     const environment = await this.requireEnvironment(this.db, projectId, environmentId);
     const domains = await this.domainsOf([environmentId]);
+    const machines = await this.serversOf([environment]);
 
-    return environmentProjection(environment, domains.get(environmentId) ?? [], level);
+    return environmentProjection(
+      environment,
+      domains.get(environmentId) ?? [],
+      level,
+      environment.serverId ? (machines.get(environment.serverId) ?? null) : null,
+    );
   }
 
   /** Создаёт окружение вместе с его доменами. */
@@ -104,6 +120,8 @@ export class EnvironmentsRepository {
       AccessLevel.Write,
       tx,
     );
+
+    requireServerAssignmentAllowed(subject, input);
 
     const { domains, ...fields } = input;
 
@@ -139,6 +157,7 @@ export class EnvironmentsRepository {
     );
 
     await this.requireEnvironment(tx, projectId, environmentId);
+    requireServerAssignmentAllowed(subject, input);
 
     const { domains, ...fields } = input;
 
@@ -213,6 +232,19 @@ export class EnvironmentsRepository {
     await tx.delete(environments).where(eq(environments.id, environmentId));
 
     return environment;
+  }
+
+  /** Возвращает машины перечисленных окружений, сгруппированные по идентификатору. */
+  private async serversOf(rows: { serverId: string | null }[]): Promise<Map<string, Server>> {
+    const ids = [...new Set(rows.map((row) => row.serverId).filter(isPresent))];
+
+    if (ids.length === 0) {
+      return new Map();
+    }
+
+    const machines = await this.db.select().from(servers).where(inArray(servers.id, ids));
+
+    return new Map(machines.map((machine) => [machine.id, machine]));
   }
 
   /** Возвращает домены окружений, сгруппированные по окружению. */
@@ -292,4 +324,26 @@ export class EnvironmentsRepository {
 
     return environment;
   }
+}
+
+/**
+ * Привязку окружения к серверу задаёт только суперадмин.
+ *
+ * Выпадающий список машин межпроектен: показать его подрядчику значило бы
+ * раскрыть чужую инфраструктуру именами серверов. Отказ именно `403`, а не
+ * `404`: доступ к секции у него есть, недостаточен только уровень для
+ * конкретной операции.
+ */
+function requireServerAssignmentAllowed(
+  subject: RequestSubject,
+  input: { serverId?: string | null },
+): void {
+  if (input.serverId !== undefined && !subject.isSuperadmin) {
+    throw new ForbiddenException('Привязку окружения к серверу задаёт суперадмин.');
+  }
+}
+
+/** Отсеивает пустые ссылки, сохраняя тип. */
+function isPresent(value: string | null): value is string {
+  return value !== null;
 }

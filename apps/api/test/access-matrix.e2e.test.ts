@@ -8,7 +8,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
 import { DATABASE } from '../src/db/db.module';
-import { chronicleEntries, environments, grants, projects, subjects, users } from '../src/db/schema';
+import {
+  chronicleEntries,
+  environments,
+  grants,
+  projects,
+  servers,
+  subjects,
+  users,
+} from '../src/db/schema';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
 
 /** Ожидаемый ответ для уровня доступа. */
@@ -198,19 +206,24 @@ describe('матрица доступа', () => {
    * объект, а его часть: список окружений виден, серверные параметры — нет.
    */
   describe.each([
-    { level: null, list: 404, create: 404, seesIp: false },
-    { level: AccessLevel.Metadata, list: 200, create: 403, seesIp: false },
-    { level: AccessLevel.Read, list: 200, create: 403, seesIp: true },
-    { level: AccessLevel.Write, list: 200, create: 201, seesIp: true },
-  ])('инфраструктура на уровне $level', ({ level, list, create, seesIp }) => {
+    { level: null, list: 404, create: 404, seesServer: false },
+    { level: AccessLevel.Metadata, list: 200, create: 403, seesServer: false },
+    { level: AccessLevel.Read, list: 200, create: 403, seesServer: true },
+    { level: AccessLevel.Write, list: 200, create: 201, seesServer: true },
+  ])('инфраструктура на уровне $level', ({ level, list, create, seesServer }) => {
     beforeEach(async () => {
       // Окружение заводится напрямую до выдачи уровня: проверяется
       // видимость существующих данных, а не право их создать.
+      const [server] = await testDb.db
+        .insert(servers)
+        .values({ name: 'hetzner-fsn-1', ip: '203.0.113.10' })
+        .returning();
+
       await testDb.db.insert(environments).values({
         projectId,
         name: 'Прод',
         kind: EnvironmentKind.Production,
-        ip: '203.0.113.10',
+        serverId: server!.id,
       });
     });
 
@@ -220,18 +233,19 @@ describe('матрица доступа', () => {
       await agent.get(`/projects/${projectId}/environments`).expect(list);
     });
 
-    it(`${seesIp ? 'показывает' : 'скрывает'} серверные параметры`, async () => {
+    it(`${seesServer ? 'показывает' : 'скрывает'} машину окружения`, async () => {
       const agent = await signInAsInfrastructure(level);
 
       const response = await agent.get(`/projects/${projectId}/environments`);
 
       if (list !== 200) {
-        expect(response.body.ip).toBeUndefined();
+        expect(response.body.server).toBeUndefined();
 
         return;
       }
 
-      expect(response.body[0]?.ip !== undefined).toBe(seesIp);
+      expect(response.body[0]?.server !== undefined).toBe(seesServer);
+      expect(response.body[0]?.server?.ip).toBe(seesServer ? '203.0.113.10' : undefined);
     });
 
     it(`создание отвечает кодом ${create}`, async () => {
