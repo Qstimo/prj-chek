@@ -9,13 +9,16 @@ const initial = {
   name: '',
   kind: EnvironmentKind.Production,
   host: null,
-  ip: null,
-  provider: null,
-  specs: null,
+  serverId: null,
   healthCheckUrl: null,
   notes: null,
   domains: [],
 };
+
+const SERVERS = [
+  { id: '11111111-1111-1111-1111-111111111111', name: 'hetzner-fsn-1' },
+  { id: '22222222-2222-2222-2222-222222222222', name: 'selectel-msk-1' },
+];
 
 describe('EnvironmentForm', () => {
   it('не отправляет форму без имени', async () => {
@@ -32,11 +35,11 @@ describe('EnvironmentForm', () => {
     render(<EnvironmentForm initial={initial} onSubmit={onSubmit} />);
 
     await userEvent.type(screen.getByLabelText('Название'), 'Прод');
-    await userEvent.type(screen.getByLabelText('IP-адрес'), '203.0.113.10');
+    await userEvent.type(screen.getByLabelText('Адрес окружения'), 'prod.example.com');
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'Прод', ip: '203.0.113.10' }),
+      expect.objectContaining({ name: 'Прод', host: 'prod.example.com' }),
     );
   });
 
@@ -48,12 +51,71 @@ describe('EnvironmentForm', () => {
     await userEvent.type(screen.getByLabelText('Название'), 'Прод');
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: null }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ notes: null }));
   });
 
   it('показывает ошибку сервера', () => {
     render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} error="Имя занято" />);
 
     expect(screen.getByRole('alert')).toHaveTextContent('Имя занято');
+  });
+
+  describe('привязка к серверу', () => {
+    it('без права выбора список машин не показывается', () => {
+      // Список серверов межпроектен: показать его подрядчику значило бы
+      // раскрыть чужую инфраструктуру именами машин.
+      render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} servers={SERVERS} />);
+
+      expect(screen.queryByLabelText('Сервер')).not.toBeInTheDocument();
+    });
+
+    it('привязанный сервер виден текстом и без права выбора', () => {
+      render(
+        <EnvironmentForm
+          initial={{ ...initial, serverId: SERVERS[0]!.id }}
+          onSubmit={vi.fn()}
+          servers={SERVERS}
+        />,
+      );
+
+      expect(screen.getByText('Сервер: hetzner-fsn-1')).toBeInTheDocument();
+    });
+
+    it('суперадмин выбирает сервер из списка', async () => {
+      const onSubmit = vi.fn();
+      render(
+        <EnvironmentForm
+          initial={initial}
+          onSubmit={onSubmit}
+          servers={SERVERS}
+          canAssignServer
+        />,
+      );
+
+      await userEvent.type(screen.getByLabelText('Название'), 'Прод');
+      await userEvent.selectOptions(screen.getByLabelText('Сервер'), SERVERS[1]!.id);
+      await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ serverId: SERVERS[1]!.id }),
+      );
+    });
+
+    it('без выбранной машины отправляет отсутствие привязки', async () => {
+      const onSubmit = vi.fn();
+      render(
+        <EnvironmentForm
+          initial={initial}
+          onSubmit={onSubmit}
+          servers={SERVERS}
+          canAssignServer
+        />,
+      );
+
+      await userEvent.type(screen.getByLabelText('Название'), 'Прод');
+      await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ serverId: null }));
+    });
   });
 });

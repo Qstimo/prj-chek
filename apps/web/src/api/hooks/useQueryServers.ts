@@ -12,10 +12,16 @@ export const SERVER_KEYS = {
   map: ['servers', 'map'] as const,
 };
 
-/** Реестр серверов. Доступен только суперадмину. */
-export function useQueryServers() {
+/**
+ * Реестр серверов. Доступен только суперадмину.
+ *
+ * `enabled` нужен экранам проекта: там хук вызывается всегда, но запрос
+ * имеет смысл лишь для суперадмина — остальным API ответит отказом.
+ */
+export function useQueryServers({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: SERVER_KEYS.all,
+    enabled,
     queryFn: () => apiClient<ServerRow[]>('/servers'),
   });
 }

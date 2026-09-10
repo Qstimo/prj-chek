@@ -5,12 +5,20 @@ import { useState, type FormEvent } from 'react';
 
 import { DomainsField } from '../DomainsField';
 import { TextField } from '../TextField';
-import { FIELD_LABELS } from './constants';
+import { FIELD_LABELS, HOST_HINT } from './constants';
 import { KindField } from './KindField';
+import { ServerField } from './ServerField';
 import type { EnvironmentFormValues, IProps } from './types';
 
 /** Форма окружения: создание и правка (ТЗ 3.2). */
-export function EnvironmentForm({ initial, onSubmit, error, isSubmitting = false }: IProps) {
+export function EnvironmentForm({
+  initial,
+  onSubmit,
+  servers = [],
+  canAssignServer = false,
+  error,
+  isSubmitting = false,
+}: IProps) {
   const [values, setValues] = useState<EnvironmentFormValues>(initial);
 
   const canSubmit = values.name.trim().length > 0 && !isSubmitting;
@@ -33,12 +41,12 @@ export function EnvironmentForm({ initial, onSubmit, error, isSubmitting = false
       name: values.name.trim(),
       kind: values.kind,
       host: emptyToNull(values.host),
-      ip: emptyToNull(values.ip),
-      provider: emptyToNull(values.provider),
-      specs: emptyToNull(values.specs),
       healthCheckUrl: emptyToNull(values.healthCheckUrl),
       notes: emptyToNull(values.notes),
       domains: values.domains,
+      // Привязку принимает только суперадмин: у остальных API ответит 403,
+      // и отправлять поле без права выбора незачем.
+      ...(canAssignServer ? { serverId: values.serverId } : {}),
     } satisfies EnvironmentCreate);
   }
 
@@ -53,30 +61,23 @@ export function EnvironmentForm({ initial, onSubmit, error, isSubmitting = false
 
       <KindField value={values.kind} onChange={(value) => change('kind', value)} />
 
-      <TextField
-        id="host"
-        label={FIELD_LABELS.host}
-        value={values.host ?? ''}
-        onChange={(value) => change('host', value)}
+      <ServerField
+        value={values.serverId}
+        servers={servers}
+        canAssign={canAssignServer}
+        onChange={(value) => change('serverId', value)}
       />
-      <TextField
-        id="ip"
-        label={FIELD_LABELS.ip}
-        value={values.ip ?? ''}
-        onChange={(value) => change('ip', value)}
-      />
-      <TextField
-        id="provider"
-        label={FIELD_LABELS.provider}
-        value={values.provider ?? ''}
-        onChange={(value) => change('provider', value)}
-      />
-      <TextField
-        id="specs"
-        label={FIELD_LABELS.specs}
-        value={values.specs ?? ''}
-        onChange={(value) => change('specs', value)}
-      />
+
+      <div className="space-y-1">
+        <TextField
+          id="host"
+          label={FIELD_LABELS.host}
+          value={values.host ?? ''}
+          onChange={(value) => change('host', value)}
+        />
+        <p className="text-xs text-muted-foreground">{HOST_HINT}</p>
+      </div>
+
       <TextField
         id="healthCheckUrl"
         label={FIELD_LABELS.healthCheckUrl}

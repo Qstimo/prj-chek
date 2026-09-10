@@ -1,4 +1,10 @@
-import { EnvironmentKind, ProjectLifecycle, StatusIndicator, type ServerMap as ServerMapData } from '@cairn/shared';
+import {
+  EnvironmentKind,
+  ProjectLifecycle,
+  StatusIndicator,
+  StatusWarningKind,
+  type ServerMap as ServerMapData,
+} from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -17,7 +23,11 @@ const MAP: ServerMapData = {
       indicator: StatusIndicator.Warning,
       paidUntil: '2027-01-12',
       warnings: [
-        { kind: 'server_expiring', subject: 'hetzner-fsn-1', detail: 'оплачен до 2027-01-12' },
+        {
+          kind: StatusWarningKind.ServerExpiring,
+          subject: 'hetzner-fsn-1',
+          detail: 'оплачен до 2027-01-12',
+        },
       ],
     },
   ],
