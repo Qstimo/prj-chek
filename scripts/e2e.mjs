@@ -783,6 +783,62 @@ async function runRevocationScenario(admin, guest, { guestUser }) {
   );
 }
 
+/** Реестр серверов: карта размещения, срок оплаты и запрет удаления занятой машины. */
+async function runServerScenario(admin, guest, { projectId, environmentId }) {
+  const forbidden = await guest('/api/servers');
+  check('реестр серверов закрыт от подрядчика', forbidden.status === 403, `статус ${forbidden.status}`);
+
+  const paidUntil = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const created = await admin('/api/servers', {
+    method: 'POST',
+    body: { name: 'e2e-server-1', owner: 'ООО Ромашка', ip: '203.0.113.10', paidUntil },
+  });
+  checkCritical('сервер заведён', created.status === 201 && created.json?.id, `статус ${created.status}`);
+
+  const serverId = created.json.id;
+
+  const assigned = await admin(`/api/projects/${projectId}/environments/${environmentId}`, {
+    method: 'PATCH',
+    body: { serverId },
+  });
+  check('окружение привязано к серверу', assigned.status === 200, `статус ${assigned.status}`);
+
+  const selfAssign = await guest(`/api/projects/${projectId}/environments/${environmentId}`, {
+    method: 'PATCH',
+    body: { serverId },
+  });
+  check(
+    'подрядчик не привязывает окружение к серверу сам',
+    selfAssign.status === 403 || selfAssign.status === 404,
+    `статус ${selfAssign.status}`,
+  );
+
+  const status = await admin(`/api/projects/${projectId}/status`);
+  check(
+    'срок оплаты сервера предупреждает в статусе проекта',
+    status.json?.warnings?.some((warning) => warning.kind === 'server_expiring'),
+    JSON.stringify(status.json?.warnings),
+  );
+
+  const map = await admin('/api/servers/map');
+  check(
+    'карта показывает ребро между машиной и проектом',
+    map.json?.edges?.some((edge) => edge.serverId === serverId && edge.projectId === projectId),
+    JSON.stringify(map.json?.edges),
+  );
+
+  const occupied = await admin(`/api/servers/${serverId}`, { method: 'DELETE' });
+  check('занятый сервер не удаляется', occupied.status === 409, `статус ${occupied.status}`);
+
+  await admin(`/api/projects/${projectId}/environments/${environmentId}`, {
+    method: 'PATCH',
+    body: { serverId: null },
+  });
+
+  const removed = await admin(`/api/servers/${serverId}`, { method: 'DELETE' });
+  check('освобождённый сервер удаляется', removed.status === 204, `статус ${removed.status}`);
+}
+
 /** Печатает итог и возвращает число провалов. */
 function report() {
   const failed = results.filter((result) => !result.ok);
@@ -806,6 +862,7 @@ const context = await runAdminScenario(admin);
 await runGuestScenario(guest, context);
 await runAgentScenario(admin, context);
 await runPublicRoadmapScenario(admin, context);
+await runServerScenario(admin, guest, context);
 await runIntakeRevocationScenario(admin, context);
 await runRevocationScenario(admin, guest, context);
 

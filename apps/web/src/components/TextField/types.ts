@@ -7,5 +7,5 @@ export interface IProps {
   /** Многострочное поле вместо однострочного. */
   multiline?: boolean;
   /** Тип поля. Игнорируется для многострочного. */
-  type?: 'text' | 'email';
+  type?: 'text' | 'email' | 'date';
 }

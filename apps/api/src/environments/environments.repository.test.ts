@@ -1,5 +1,5 @@
 import { AccessLevel, EnvironmentKind, HealthState, Section, SubjectKind } from '@cairn/shared';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -13,6 +13,7 @@ import {
   environments,
   grants,
   projects,
+  servers,
   subjects,
   users,
   variables,
@@ -109,7 +110,7 @@ describe('репозиторий окружений', () => {
       repository.create(admin(), tx, projectId, {
         name: 'Прод',
         kind: EnvironmentKind.Production,
-        ip: '203.0.113.10',
+        host: 'prod.example.com',
         domains: ['example.com'],
       }),
     );
@@ -193,13 +194,32 @@ describe('репозиторий окружений', () => {
       expect('ip' in environment!).toBe(false);
     });
 
-    it('на уровне чтения отдаёт IP', async () => {
+    it('на уровне чтения отдаёт машину вложенным объектом', async () => {
+      const id = await createProd();
+      const [server] = await testDb.db
+        .insert(servers)
+        .values({ name: 'hetzner-fsn-1', ip: '203.0.113.10' })
+        .returning();
+      await testDb.db
+        .update(environments)
+        .set({ serverId: server!.id })
+        .where(eq(environments.id, id));
+      await grant(AccessLevel.Read);
+
+      const [environment] = await repository.findForProject(member(), projectId);
+
+      expect(environment).toMatchObject({
+        server: expect.objectContaining({ name: 'hetzner-fsn-1', ip: '203.0.113.10' }),
+      });
+    });
+
+    it('на уровне чтения отдаёт пустую машину, когда окружение не привязано', async () => {
       await createProd();
       await grant(AccessLevel.Read);
 
       const [environment] = await repository.findForProject(member(), projectId);
 
-      expect(environment).toMatchObject({ ip: '203.0.113.10' });
+      expect(environment).toMatchObject({ server: null });
     });
 
     it('скрывает секцию от субъекта без выдачи', async () => {
@@ -269,11 +289,45 @@ describe('репозиторий окружений', () => {
       const id = await createProd();
 
       const updated = await testDb.db.transaction((tx) =>
-        repository.update(admin(), tx, projectId, id, { provider: 'Hetzner' }),
+        repository.update(admin(), tx, projectId, id, { notes: 'Заметка' }),
       );
 
-      expect(updated.provider).toBe('Hetzner');
-      expect(updated.ip).toBe('203.0.113.10');
+      expect(updated.notes).toBe('Заметка');
+      expect(updated.host).toBe('prod.example.com');
+    });
+
+    it('привязку к серверу задаёт только суперадмин', async () => {
+      // Выпадающий список машин межпроектен: показать его подрядчику значило
+      // бы раскрыть чужую инфраструктуру именами серверов.
+      const id = await createProd();
+      const [server] = await testDb.db.insert(servers).values({ name: 'srv' }).returning();
+      await grant(AccessLevel.Write);
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.update(member(), tx, projectId, id, { serverId: server!.id }),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      const updated = await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { serverId: server!.id }),
+      );
+
+      expect(updated.serverId).toBe(server!.id);
+    });
+
+    it('суперадмин отвязывает окружение от сервера', async () => {
+      const id = await createProd();
+      const [server] = await testDb.db.insert(servers).values({ name: 'srv' }).returning();
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { serverId: server!.id }),
+      );
+      const updated = await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { serverId: null }),
+      );
+
+      expect(updated.serverId).toBeNull();
     });
 
     it('заменяет набор доменов целиком', async () => {
@@ -317,11 +371,11 @@ describe('репозиторий окружений', () => {
     });
 
     it('не трогает домены, если поле не передано', async () => {
-      // Иначе правка одного лишь провайдера стирала бы адреса.
+      // Иначе правка одной лишь заметки стирала бы адреса.
       const id = await createProd();
 
       await testDb.db.transaction((tx) =>
-        repository.update(admin(), tx, projectId, id, { provider: 'Hetzner' }),
+        repository.update(admin(), tx, projectId, id, { notes: 'Заметка' }),
       );
 
       const domains = await testDb.db
@@ -338,7 +392,7 @@ describe('репозиторий окружений', () => {
 
       await expect(
         testDb.db.transaction((tx) =>
-          repository.update(member(), tx, projectId, id, { provider: 'Hetzner' }),
+          repository.update(member(), tx, projectId, id, { notes: 'Заметка' }),
         ),
       ).rejects.toBeInstanceOf(InsufficientLevelError);
     });
@@ -347,7 +401,7 @@ describe('репозиторий окружений', () => {
       const id = await createProd();
 
       const updated = await testDb.db.transaction((tx) =>
-        repository.update(admin(), tx, projectId, id, { provider: 'Hetzner' }),
+        repository.update(admin(), tx, projectId, id, { notes: 'Заметка' }),
       );
 
       expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(updated.createdAt.getTime());

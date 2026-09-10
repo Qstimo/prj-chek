@@ -114,6 +114,8 @@ export enum StatusWarningKind {
   TlsExpiring = 'tls_expiring',
   TlsError = 'tls_error',
   DomainExpiring = 'domain_expiring',
+  /** Близок или прошёл срок оплаты сервера. */
+  ServerExpiring = 'server_expiring',
 }
 
 /** Состояние версии роадмапа. Намерение, задаётся вручную (ТЗ 3.5). */

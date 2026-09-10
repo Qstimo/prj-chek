@@ -23,10 +23,9 @@ describe('окружения', () => {
     expect(environments.kind.notNull).toBe(true);
   });
 
-  it('допускает окружение без серверных параметров', () => {
+  it('допускает окружение без адреса и проверки', () => {
     // Реестр заполняется постепенно, пустое поле честнее выдуманного.
     expect(environments.host.notNull).toBe(false);
-    expect(environments.ip.notNull).toBe(false);
     expect(environments.healthCheckUrl.notNull).toBe(false);
   });
 });

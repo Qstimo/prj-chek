@@ -1,0 +1,3 @@
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  servers
+TO cairn_app;

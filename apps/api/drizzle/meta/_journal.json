@@ -120,6 +120,20 @@
       "when": 1788541450130,
       "tag": "0016_bouncy_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789044193192,
+      "tag": "0017_servers",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789044193193,
+      "tag": "0018_server_privileges",
+      "breakpoints": true
     }
   ]
 }

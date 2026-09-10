@@ -12,14 +12,22 @@ const metadata = {
   domains: ['example.com'],
 };
 
-const detail = {
-  ...metadata,
+const server = {
+  id: '22222222-2222-2222-2222-222222222222',
+  name: 'hetzner-fsn-1',
+  owner: 'ООО Ромашка',
   host: 'srv-1.example.com',
   ip: '203.0.113.10',
   provider: 'Hetzner',
   specs: '2 vCPU, 4 ГБ',
+};
+
+const detail = {
+  ...metadata,
+  host: null,
   healthCheckUrl: 'https://example.com/health',
   notes: 'Заметка',
+  server,
   createdAt: '2026-08-27T10:00:00.000Z',
   updatedAt: '2026-08-27T10:00:00.000Z',
 };
@@ -41,11 +49,27 @@ describe('EnvironmentCard', () => {
     expect(screen.queryByText(/203\.0\.113\.10/)).not.toBeInTheDocument();
   });
 
-  it('на уровне чтения показывает серверные параметры', () => {
+  it('на уровне чтения показывает машину, её владельца и параметры', () => {
     render(<EnvironmentCard environment={detail} />);
 
+    expect(screen.getByText('hetzner-fsn-1')).toBeInTheDocument();
+    expect(screen.getByText('ООО Ромашка')).toBeInTheDocument();
     expect(screen.getByText('203.0.113.10')).toBeInTheDocument();
     expect(screen.getByText('Hetzner')).toBeInTheDocument();
+  });
+
+  it('окружение без машины показывает это прямо', () => {
+    render(<EnvironmentCard environment={{ ...detail, server: null }} />);
+
+    expect(screen.getByText('Сервер не привязан')).toBeInTheDocument();
+  });
+
+  it('собственный адрес окружения перекрывает адрес машины', () => {
+    // Окружение может жить на поддомене или нестандартном порту.
+    render(<EnvironmentCard environment={{ ...detail, host: 'stage.example.com' }} />);
+
+    expect(screen.getByText('stage.example.com')).toBeInTheDocument();
+    expect(screen.queryByText('srv-1.example.com')).not.toBeInTheDocument();
   });
 
   it('без права записи не показывает кнопок', () => {

@@ -82,12 +82,12 @@ describe('сервис окружений', () => {
       kind: EnvironmentKind.Production,
     });
 
-    await service.update(admin(), projectId, created.id, { ip: '203.0.113.10' });
+    await service.update(admin(), projectId, created.id, { host: 'prod.example.com' });
 
     const [entry] = await entriesOf(AuditAction.EnvironmentUpdated);
 
-    expect(entry?.metadata).toMatchObject({ fields: ['ip'] });
-    expect(JSON.stringify(entry?.metadata)).not.toContain('203.0.113.10');
+    expect(entry?.metadata).toMatchObject({ fields: ['host'] });
+    expect(JSON.stringify(entry?.metadata)).not.toContain('prod.example.com');
   });
 
   it('пишет удаление вместе с именем', async () => {

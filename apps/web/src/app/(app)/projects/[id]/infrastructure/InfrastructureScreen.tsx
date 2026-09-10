@@ -16,6 +16,7 @@ import {
   useMutationUpdateEnvironment,
   useQueryEnvironments,
   useQuerySections,
+  useQueryServers,
 } from '@/api/hooks';
 import { EnvironmentForm, type EnvironmentFormValues } from '@/components/EnvironmentForm';
 import { EnvironmentList } from '@/components/EnvironmentList';
@@ -23,15 +24,20 @@ import { EnvironmentList } from '@/components/EnvironmentList';
 /** Пропсы экрана инфраструктуры. */
 interface IProps {
   projectId: string;
+  /** Привязку окружения к машине задаёт только суперадмин (спека этапа 9, раздел 3). */
+  isSuperadmin: boolean;
 }
 
 /** Окружения проекта: просмотр и правка (спека 8). */
-export function InfrastructureScreen({ projectId }: IProps) {
+export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
   const environments = useQueryEnvironments(projectId);
   const sections = useQuerySections(projectId);
   const create = useMutationCreateEnvironment(projectId);
   const update = useMutationUpdateEnvironment(projectId);
   const remove = useMutationDeleteEnvironment(projectId);
+  // Реестр машин запрашивается только суперадмином: остальным API ответит
+  // отказом, а список ему всё равно не показывается.
+  const servers = useQueryServers({ enabled: isSuperadmin });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
@@ -75,6 +81,8 @@ export function InfrastructureScreen({ projectId }: IProps) {
       {(isCreating || editing) && (
         <EnvironmentForm
           initial={formValuesOf(editing)}
+          servers={servers.data ?? []}
+          canAssignServer={isSuperadmin}
           isSubmitting={create.isPending || update.isPending}
           error={(create.error ?? update.error)?.message}
           onSubmit={submit}
@@ -98,16 +106,15 @@ export function InfrastructureScreen({ projectId }: IProps) {
 function formValuesOf(
   editing: EnvironmentMetadata | EnvironmentDetail | undefined,
 ): EnvironmentFormValues {
+  const detail = editing && 'server' in editing ? editing : null;
+
   return {
     name: editing?.name ?? '',
     kind: editing?.kind ?? EnvironmentKind.Production,
-    host: null,
-    ip: null,
-    provider: null,
-    specs: null,
-    healthCheckUrl: null,
-    notes: null,
+    host: detail?.host ?? null,
+    serverId: detail?.server?.id ?? null,
+    healthCheckUrl: detail?.healthCheckUrl ?? null,
+    notes: detail?.notes ?? null,
     domains: editing?.domains ?? [],
-    ...(editing && 'ip' in editing ? editing : {}),
   };
 }

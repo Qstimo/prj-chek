@@ -29,10 +29,14 @@ export function EnvironmentCard({ environment, canWrite = false, onEdit, onDelet
 
       {detail && (
         <dl className="grid gap-2 sm:grid-cols-2">
-          <Field label={FIELD_LABELS.host} value={detail.host} />
-          <Field label={FIELD_LABELS.ip} value={detail.ip} />
-          <Field label={FIELD_LABELS.provider} value={detail.provider} />
-          <Field label={FIELD_LABELS.specs} value={detail.specs} />
+          {/* Адрес окружения перекрывает адрес машины: окружение может жить
+              на поддомене или нестандартном порту (спека этапа 9, раздел 2). */}
+          <Field label={FIELD_LABELS.host} value={detail.host ?? detail.server?.host ?? null} />
+          <Field label={FIELD_LABELS.server} value={detail.server?.name ?? 'Сервер не привязан'} />
+          <Field label={FIELD_LABELS.owner} value={detail.server?.owner ?? null} />
+          <Field label={FIELD_LABELS.ip} value={detail.server?.ip ?? null} />
+          <Field label={FIELD_LABELS.provider} value={detail.server?.provider ?? null} />
+          <Field label={FIELD_LABELS.specs} value={detail.server?.specs ?? null} />
           <Field label={FIELD_LABELS.healthCheckUrl} value={detail.healthCheckUrl} />
           <Field label={FIELD_LABELS.notes} value={detail.notes} />
         </dl>
@@ -61,5 +65,5 @@ function Field({ label, value }: { label: string; value: string | null }) {
 function isDetailed(
   environment: EnvironmentMetadata | EnvironmentDetail,
 ): environment is EnvironmentDetail {
-  return 'ip' in environment;
+  return 'server' in environment;
 }

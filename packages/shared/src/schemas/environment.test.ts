@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { EnvironmentKind } from '../enums';
-import { environmentCreateSchema, environmentUpdateSchema } from './environment';
+import {
+  environmentCreateSchema,
+  environmentDetailSchema,
+  environmentUpdateSchema,
+} from './environment';
 
 describe('схема создания окружения', () => {
   it('принимает минимальное окружение', () => {
@@ -51,21 +55,48 @@ describe('домены окружения', () => {
   });
 });
 
-describe('серверные параметры', () => {
-  it('принимает адрес IPv4 и IPv6', () => {
-    expect(environmentUpdateSchema.parse({ ip: '203.0.113.10' }).ip).toBe('203.0.113.10');
-    expect(environmentUpdateSchema.parse({ ip: '2001:db8::1' }).ip).toBe('2001:db8::1');
+describe('привязка окружения к серверу', () => {
+  it('принимает идентификатор сервера', () => {
+    const parsed = environmentUpdateSchema.parse({
+      serverId: '11111111-1111-1111-1111-111111111111',
+    });
+
+    expect(parsed.serverId).toBe('11111111-1111-1111-1111-111111111111');
   });
 
-  it('отвергает произвольную строку вместо адреса', () => {
-    expect(() => environmentUpdateSchema.parse({ ip: 'сервер в углу' })).toThrow();
+  it('принимает null как отвязку от сервера', () => {
+    expect(environmentUpdateSchema.parse({ serverId: null }).serverId).toBeNull();
+  });
+
+  it('отвергает не-идентификатор', () => {
+    expect(() => environmentUpdateSchema.parse({ serverId: 'нет' })).toThrow();
+  });
+
+  it('больше не принимает серверные поля машины', () => {
+    // Они переехали на сервер: у машины они одни, и хранение их в каждом
+    // окружении неизбежно разошлось бы.
+    const parsed = environmentUpdateSchema.parse({
+      ip: '203.0.113.10',
+      provider: 'Hetzner',
+      specs: '4 vCPU',
+    });
+
+    expect(parsed).toEqual({});
+  });
+});
+
+describe('адрес окружения', () => {
+  it('принимает собственный адрес окружения', () => {
+    expect(environmentUpdateSchema.parse({ host: 'stage.example.com' }).host).toBe(
+      'stage.example.com',
+    );
   });
 
   it('принимает пустые значения как отсутствие', () => {
-    // Реестр заполняется постепенно: «провайдер неизвестен» — рабочее состояние.
-    const parsed = environmentUpdateSchema.parse({ ip: null, provider: null, notes: null });
+    // Реестр заполняется постепенно: «адрес неизвестен» — рабочее состояние.
+    const parsed = environmentUpdateSchema.parse({ host: null, notes: null });
 
-    expect(parsed.ip).toBeNull();
+    expect(parsed.host).toBeNull();
   });
 
   it('требует адрес health-check в виде ссылки', () => {
@@ -74,5 +105,43 @@ describe('серверные параметры', () => {
       environmentUpdateSchema.parse({ healthCheckUrl: 'https://example.com/health' })
         .healthCheckUrl,
     ).toBe('https://example.com/health');
+  });
+});
+
+describe('схема деталей окружения', () => {
+  const BASE = {
+    id: '11111111-1111-1111-1111-111111111111',
+    name: 'Прод',
+    kind: EnvironmentKind.Production,
+    domains: ['example.com'],
+    host: null,
+    healthCheckUrl: null,
+    notes: null,
+    createdAt: '2026-09-10T10:00:00.000Z',
+    updatedAt: '2026-09-10T10:00:00.000Z',
+  };
+
+  it('собирается без сервера', () => {
+    const parsed = environmentDetailSchema.parse({ ...BASE, server: null });
+
+    expect(parsed.server).toBeNull();
+  });
+
+  it('несёт параметры машины вложенным объектом', () => {
+    const parsed = environmentDetailSchema.parse({
+      ...BASE,
+      server: {
+        id: '22222222-2222-2222-2222-222222222222',
+        name: 'hetzner-fsn-1',
+        owner: 'ООО Ромашка',
+        host: 'fsn1.example.com',
+        ip: '203.0.113.10',
+        provider: 'Hetzner',
+        specs: '4 vCPU, 8 ГБ',
+      },
+    });
+
+    expect(parsed.server?.owner).toBe('ООО Ромашка');
+    expect(parsed).not.toHaveProperty('ip');
   });
 });

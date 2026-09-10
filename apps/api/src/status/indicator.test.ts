@@ -8,7 +8,7 @@ import {
 } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
-import { indicatorOf, warningsOf } from './indicator';
+import { indicatorOf, serverIndicatorOf, serverWarningsOf, warningsOf } from './indicator';
 
 const NOW = new Date('2026-08-28T12:00:00Z');
 
@@ -126,5 +126,73 @@ describe('indicatorOf', () => {
       StatusIndicator.Unknown,
     );
     expect(indicatorOf(ProjectLifecycle.Active, [], [], NOW)).toBe(StatusIndicator.Unknown);
+  });
+});
+
+describe('предупреждения о сроке оплаты сервера', () => {
+  it('молчит, когда срок не задан', () => {
+    expect(serverWarningsOf('hetzner-fsn-1', null, NOW)).toEqual([]);
+  });
+
+  it('молчит, когда до срока больше двух недель', () => {
+    expect(serverWarningsOf('hetzner-fsn-1', '2026-09-12', NOW)).toEqual([]);
+  });
+
+  it('предупреждает ровно за две недели', () => {
+    // Граница включительная: за 14 дней предупредить ещё не поздно.
+    const [warning] = serverWarningsOf('hetzner-fsn-1', '2026-09-11', NOW);
+
+    expect(warning).toEqual({
+      kind: StatusWarningKind.ServerExpiring,
+      subject: 'hetzner-fsn-1',
+      detail: 'оплачен до 2026-09-11',
+    });
+  });
+
+  it('предупреждает в день окончания оплаты', () => {
+    const [warning] = serverWarningsOf('hetzner-fsn-1', '2026-08-28', NOW);
+
+    expect(warning?.detail).toBe('оплачен до 2026-08-28');
+  });
+
+  it('сообщает о просрочке и её длительности', () => {
+    const [warning] = serverWarningsOf('hetzner-fsn-1', '2026-08-27', NOW);
+
+    expect(warning?.detail).toBe('оплата истекла 1 день назад');
+    expect(serverWarningsOf('srv', '2026-08-23', NOW)[0]?.detail).toBe(
+      'оплата истекла 5 дней назад',
+    );
+  });
+});
+
+describe('индикатор сервера', () => {
+  it('без окружений и без срока — неизвестно', () => {
+    expect(serverIndicatorOf([], null, NOW)).toBe(StatusIndicator.Unknown);
+  });
+
+  it('живое окружение и далёкий срок — в порядке', () => {
+    expect(serverIndicatorOf([env()], '2026-12-01', NOW)).toBe(StatusIndicator.Ok);
+  });
+
+  it('все проверяемые окружения лежат — авария', () => {
+    expect(
+      serverIndicatorOf([env({ health: HealthState.Down }), env({ health: null })], null, NOW),
+    ).toBe(StatusIndicator.Down);
+  });
+
+  it('лежит часть окружений — предупреждение', () => {
+    expect(serverIndicatorOf([env(), env({ health: HealthState.Down })], null, NOW)).toBe(
+      StatusIndicator.Warning,
+    );
+  });
+
+  it('близкий срок оплаты при живых окружениях — предупреждение', () => {
+    expect(serverIndicatorOf([env()], '2026-09-05', NOW)).toBe(StatusIndicator.Warning);
+  });
+
+  it('просроченная оплата — предупреждение, а не авария', () => {
+    // Авария означает наблюдаемую недоступность, а неоплаченная машина
+    // может работать ещё неделю.
+    expect(serverIndicatorOf([env()], '2026-08-01', NOW)).toBe(StatusIndicator.Warning);
   });
 });

@@ -8,9 +8,11 @@ export const KIND_LABELS: Record<EnvironmentKind, string> = {
   [EnvironmentKind.Other]: 'Иное',
 };
 
-/** Подписи серверных параметров. */
+/** Подписи полей окружения и его машины. */
 export const FIELD_LABELS = {
-  host: 'Хост',
+  host: 'Адрес',
+  server: 'Сервер',
+  owner: 'Владелец',
   ip: 'IP-адрес',
   provider: 'Провайдер',
   specs: 'Характеристики',
