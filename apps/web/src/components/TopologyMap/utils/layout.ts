@@ -1,6 +1,6 @@
 import type { StatusIndicator } from '@cairn/shared';
 
-import { COLUMN_X, NODE_STEP_Y, PADDING } from '../constants';
+import { COLUMN_X, NODE_STEP_Y, NODE_WIDTH, PADDING } from '../constants';
 import type { TopologyGraph } from '../types';
 
 /** Узел карты с посчитанными координатами. */
@@ -54,6 +54,9 @@ export function layoutTopology(graph: TopologyGraph): Layout {
 
   const rightNodes: LayoutNode[] = [];
   const rightY = new Map<string, number>();
+  // Сколько узлов уже стоит на этой высоте: два проекта на одной машине
+  // получили бы один и тот же Y, и нижняя кнопка стала бы недостижима.
+  const taken = new Map<number, number>();
 
   for (const node of graph.right) {
     const owners = graph.edges
@@ -65,7 +68,11 @@ export function layoutTopology(graph: TopologyGraph): Layout {
       continue;
     }
 
-    const y = owners.reduce((sum, value) => sum + value, 0) / owners.length;
+    const anchor = owners.reduce((sum, value) => sum + value, 0) / owners.length;
+    const shift = taken.get(anchor) ?? 0;
+    taken.set(anchor, shift + 1);
+
+    const y = anchor + shift * NODE_STEP_Y;
     rightY.set(node.id, y);
 
     rightNodes.push({ ...node, side: 'right', x: COLUMN_X.right, y });
@@ -95,7 +102,7 @@ export function layoutTopology(graph: TopologyGraph): Layout {
   return {
     nodes,
     edges,
-    width: nodes.length === 0 ? 0 : COLUMN_X.right + PADDING,
+    width: nodes.length === 0 ? 0 : COLUMN_X.right + NODE_WIDTH / 2 + PADDING,
     height: nodes.length === 0 ? 0 : Math.max(...nodes.map((node) => node.y)) + PADDING,
   };
 }

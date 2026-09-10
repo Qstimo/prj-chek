@@ -63,6 +63,7 @@ export function EnvironmentForm({
 
       <ServerField
         value={values.serverId}
+        valueName={values.serverName}
         servers={servers}
         canAssign={canAssignServer}
         onChange={(value) => change('serverId', value)}

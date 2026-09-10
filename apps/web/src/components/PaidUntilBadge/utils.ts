@@ -1,5 +1,7 @@
 import { SERVER_WARN_DAYS } from '@cairn/shared';
 
+import { pluralize } from '@/utils';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Состояние срока оплаты. */
@@ -56,22 +58,7 @@ function formatDay(isoDay: string): string {
   return `${day}.${month}.${year}`;
 }
 
-/** Склоняет дни. */
+/** Склоняет дни общим правилом: своя копия была бы третьей в проекте. */
 function pluralDays(days: number): string {
-  const lastTwo = days % 100;
-  const last = days % 10;
-
-  if (lastTwo >= 11 && lastTwo <= 14) {
-    return `${days} дней`;
-  }
-
-  if (last === 1) {
-    return `${days} день`;
-  }
-
-  if (last >= 2 && last <= 4) {
-    return `${days} дня`;
-  }
-
-  return `${days} дней`;
+  return pluralize(days, 'день', 'дня', 'дней');
 }

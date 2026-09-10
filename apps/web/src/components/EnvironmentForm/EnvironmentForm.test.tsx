@@ -10,6 +10,7 @@ const initial = {
   kind: EnvironmentKind.Production,
   host: null,
   serverId: null,
+  serverName: null,
   healthCheckUrl: null,
   notes: null,
   domains: [],
@@ -70,15 +71,23 @@ describe('EnvironmentForm', () => {
     });
 
     it('привязанный сервер виден текстом и без права выбора', () => {
+      // Боевой путь: реестр машин подрядчику не отдаётся вовсе, поэтому
+      // список пуст — имя приходит вместе с самим окружением.
       render(
         <EnvironmentForm
-          initial={{ ...initial, serverId: SERVERS[0]!.id }}
+          initial={{ ...initial, serverId: SERVERS[0]!.id, serverName: 'hetzner-fsn-1' }}
           onSubmit={vi.fn()}
-          servers={SERVERS}
+          servers={[]}
         />,
       );
 
       expect(screen.getByText('Сервер: hetzner-fsn-1')).toBeInTheDocument();
+    });
+
+    it('без привязки говорит об этом прямо', () => {
+      render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} servers={[]} />);
+
+      expect(screen.getByText('Сервер не привязан')).toBeInTheDocument();
     });
 
     it('суперадмин выбирает сервер из списка', async () => {

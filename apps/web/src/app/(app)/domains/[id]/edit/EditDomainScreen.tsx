@@ -24,9 +24,11 @@ export function EditDomainScreen({ domain }: { domain: DomainDetail }) {
         isNameLocked
         isSubmitting={mutation.isPending}
         error={mutation.error?.message}
-        onSubmit={(input) =>
+        onSubmit={({ name: _unused, ...input }) =>
+          // Имя в правку не уходит: за корнем висят поддомены, вычисленные
+          // из него же, и переименование оставило бы их на чужом родителе.
           mutation.mutate(
-            { id: domain.id, input: { ...input, name: undefined } },
+            { id: domain.id, input },
             {
               onSuccess: () => {
                 router.push('/domains');

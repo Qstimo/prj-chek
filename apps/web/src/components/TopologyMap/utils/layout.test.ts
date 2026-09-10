@@ -1,6 +1,7 @@
 import { StatusIndicator } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
+import { NODE_STEP_Y, NODE_WIDTH } from '../constants';
 import type { TopologyGraph } from '../types';
 import { layoutTopology } from './layout';
 
@@ -100,6 +101,35 @@ describe('раскладка карты топологии', () => {
     };
 
     expect(layoutTopology(graph)).toEqual(layoutTopology(graph));
+  });
+
+  it('два узла на одном владельце не налезают друг на друга', () => {
+    // Обычный случай маленького реестра: два проекта на единственной
+    // машине. Совпади их Y — нижняя кнопка была бы недостижима.
+    const layout = layoutTopology({
+      left: [node(LEFT_A, 'альфа')],
+      right: [node(RIGHT_A, 'Витрина'), node(RIGHT_B, 'Портал')],
+      edges: [edge(LEFT_A, RIGHT_A), edge(LEFT_A, RIGHT_B)],
+    });
+
+    const right = layout.nodes.filter((item) => item.side === 'right');
+
+    expect(right[0]!.y).not.toBe(right[1]!.y);
+    expect(Math.abs(right[0]!.y - right[1]!.y)).toBeGreaterThanOrEqual(NODE_STEP_Y);
+  });
+
+  it('полотно вмещает узлы целиком', () => {
+    // Узел рисуется по центру своей точки, поэтому половина его ширины
+    // выступает за колонку — полотно обязано это учитывать.
+    const layout = layoutTopology({
+      left: [node(LEFT_A, 'альфа')],
+      right: [node(RIGHT_A, 'Витрина')],
+      edges: [edge(LEFT_A, RIGHT_A)],
+    });
+
+    const right = layout.nodes.find((item) => item.side === 'right')!;
+
+    expect(layout.width).toBeGreaterThanOrEqual(right.x + NODE_WIDTH / 2);
   });
 
   it('правый узел без рёбер в раскладку не попадает', () => {

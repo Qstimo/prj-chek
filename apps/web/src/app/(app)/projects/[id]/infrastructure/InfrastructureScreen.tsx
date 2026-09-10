@@ -113,6 +113,7 @@ function formValuesOf(
     kind: editing?.kind ?? EnvironmentKind.Production,
     host: detail?.host ?? null,
     serverId: detail?.server?.id ?? null,
+    serverName: detail?.server?.name ?? null,
     healthCheckUrl: detail?.healthCheckUrl ?? null,
     notes: detail?.notes ?? null,
     domains: editing?.domains ?? [],

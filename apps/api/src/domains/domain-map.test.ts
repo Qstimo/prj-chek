@@ -92,6 +92,36 @@ describe('сборка карты доменов', () => {
     expect(map.projects[0]?.indicator).toBe(StatusIndicator.Warning);
   });
 
+  it('проект на корнях без срока — неизвестно, а не в порядке', () => {
+    // Сразу после переноса срок у корней пуст: зелёный проект здесь
+    // означал бы «оплата проверена», чего никто не проверял.
+    const map = buildDomainMap(
+      {
+        domains: [root(ROOT_A, 'example.com')],
+        subdomains: [subdomain(ROOT_A, 's1', 'stage.example.com')],
+      },
+      NOW,
+    );
+
+    expect(map.domains[0]?.indicator).toBe(StatusIndicator.Unknown);
+    expect(map.projects[0]?.indicator).toBe(StatusIndicator.Unknown);
+  });
+
+  it('известный срок хотя бы на одном корне снимает неизвестность', () => {
+    const map = buildDomainMap(
+      {
+        domains: [root(ROOT_A, 'example.com'), root(ROOT_B, 'example.org', '2027-09-20')],
+        subdomains: [
+          subdomain(ROOT_A, 's1', 'stage.example.com'),
+          subdomain(ROOT_B, 's2', 'stage.example.org'),
+        ],
+      },
+      NOW,
+    );
+
+    expect(map.projects[0]?.indicator).toBe(StatusIndicator.Ok);
+  });
+
   it('далёкий срок оставляет всё в порядке', () => {
     const map = buildDomainMap(
       {

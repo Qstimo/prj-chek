@@ -80,6 +80,13 @@ describe('схема правки домена', () => {
   it('принимает пустой объект', () => {
     expect(domainUpdateSchema.parse({})).toEqual({});
   });
+
+  it('не принимает имя', () => {
+    // Переименование корня осиротило бы его поддомены.
+    expect(domainUpdateSchema.parse({ name: 'other.com', owner: 'ООО Ромашка' })).toEqual({
+      owner: 'ООО Ромашка',
+    });
+  });
 });
 
 describe('схема строки реестра доменов', () => {

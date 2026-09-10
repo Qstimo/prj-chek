@@ -104,18 +104,28 @@ export class DomainsRepository {
       return existing;
     }
 
-    const [created] = await tx.insert(domains).values({ name: root }).returning();
+    // `onConflictDoNothing` вместо голой вставки: два одновременных
+    // сохранения окружений с поддоменами одного нового корня оба минуют
+    // выборку выше, и второй получил бы сырое нарушение ключа — то есть
+    // 500 и откат всей правки окружения.
+    const [created] = await tx
+      .insert(domains)
+      .values({ name: root })
+      .onConflictDoNothing({ target: domains.name })
+      .returning();
 
-    return created!;
+    if (created) {
+      return created;
+    }
+
+    const [raced] = await tx.select().from(domains).where(eq(domains.name, root)).limit(1);
+
+    return raced!;
   }
 
   /** Меняет свойства корня. */
   async update(tx: Transaction, id: string, input: DomainUpdate): Promise<Domain> {
     await this.requireDomain(tx, id);
-
-    if (input.name !== undefined) {
-      await this.requireFreeName(tx, input.name, id);
-    }
 
     const [updated] = await tx
       .update(domains)
@@ -215,14 +225,14 @@ export class DomainsRepository {
    * Ограничение уникальности есть и в базе, но человеку нужен внятный
    * отказ, а не 500 от сырого нарушения ключа.
    */
-  private async requireFreeName(tx: Transaction, name: string, exceptId?: string): Promise<void> {
+  private async requireFreeName(tx: Transaction, name: string): Promise<void> {
     const [taken] = await tx
       .select({ id: domains.id })
       .from(domains)
       .where(eq(domains.name, name))
       .limit(1);
 
-    if (taken && taken.id !== exceptId) {
+    if (taken) {
       throw new ConflictException('Домен с таким именем уже есть в реестре.');
     }
   }
