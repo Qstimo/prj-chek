@@ -116,6 +116,14 @@ export enum StatusWarningKind {
   DomainExpiring = 'domain_expiring',
   /** Близок или прошёл срок оплаты сервера. */
   ServerExpiring = 'server_expiring',
+  /**
+   * Близок или прошёл срок продления домена по данным реестра CAIRN.
+   *
+   * Отдельно от {@link StatusWarningKind.DomainExpiring}: тот приходит из
+   * RDAP и говорит о регистрации в зоне, этот — о нашей оплате. Зоны без
+   * RDAP молчат, и ручная дата для них единственный источник.
+   */
+  DomainRenewalExpiring = 'domain_renewal_expiring',
 }
 
 /** Состояние версии роадмапа. Намерение, задаётся вручную (ТЗ 3.5). */
