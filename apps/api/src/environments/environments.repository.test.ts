@@ -1,7 +1,7 @@
 import { AccessLevel, EnvironmentKind, HealthState, Section, SubjectKind } from '@cairn/shared';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccessService } from '../access/access.service';
 import { DomainsRepository } from '../domains/domains.repository';
@@ -521,6 +521,29 @@ describe('репозиторий окружений', () => {
       );
 
       expect(await testDb.db.select().from(domains)).toHaveLength(1);
+    });
+
+    it('корень одной зоны разрешается один раз на все свои поддомены', async () => {
+      // Домены окружения могут исчисляться десятками, а корень у них
+      // обычно один: разрешать его на каждое имя — лишние запросы
+      // в транзакции, которая держит окружение.
+      const domainsRepository = new DomainsRepository(testDb.db);
+      const ensureRoot = vi.spyOn(domainsRepository, 'ensureRoot');
+      const counting = new EnvironmentsRepository(
+        testDb.db,
+        new AccessService(testDb.db),
+        domainsRepository,
+      );
+
+      await testDb.db.transaction((tx) =>
+        counting.create(admin(), tx, projectId, {
+          name: 'Стейдж',
+          kind: EnvironmentKind.Staging,
+          domains: ['stage.example.com', 'api.example.com', 'www.example.com'],
+        }),
+      );
+
+      expect(ensureRoot).toHaveBeenCalledTimes(1);
     });
 
     it('домены разных зон дают разные корни', async () => {

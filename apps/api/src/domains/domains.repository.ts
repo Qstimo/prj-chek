@@ -1,6 +1,5 @@
 import {
   rootDomainOf,
-  StatusIndicator,
   type DomainCreate,
   type DomainDetail,
   type DomainMap,
@@ -19,7 +18,7 @@ import {
   projects,
   type Domain,
 } from '../db/schema';
-import { domainRenewalWarningsOf } from '../status/indicator';
+import { domainIndicatorOf, domainRenewalWarningsOf } from '../status/indicator';
 import { buildDomainMap, type DomainMapSubdomain } from './domain-map';
 
 /**
@@ -166,8 +165,7 @@ export class DomainsRepository {
       registrar: root.registrar,
       paidUntil: root.paidUntil,
       notes: root.notes,
-      // Домен не «падает»: у него нет наблюдаемой доступности, только оплата.
-      indicator: indicatorOfRenewal(root.paidUntil, warnings.length),
+      indicator: domainIndicatorOf(root.name, root.paidUntil, now),
       warnings,
       subdomainCount: subdomains.length,
       projectCount: new Set(subdomains.map((subdomain) => subdomain.projectId)).size,
@@ -236,13 +234,4 @@ export class DomainsRepository {
       throw new ConflictException('Домен с таким именем уже есть в реестре.');
     }
   }
-}
-
-/** Индикатор корня: срок оплаты — единственное, что о нём известно. */
-function indicatorOfRenewal(paidUntil: string | null, warningCount: number): StatusIndicator {
-  if (!paidUntil) {
-    return StatusIndicator.Unknown;
-  }
-
-  return warningCount > 0 ? StatusIndicator.Warning : StatusIndicator.Ok;
 }

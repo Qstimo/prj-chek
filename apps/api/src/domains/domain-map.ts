@@ -1,6 +1,6 @@
 import { StatusIndicator, type DomainMap, type EnvironmentKind } from '@cairn/shared';
 
-import { domainRenewalWarningsOf } from '../status/indicator';
+import { domainIndicatorOf, domainRenewalWarningsOf } from '../status/indicator';
 
 /** Корень реестра в объёме, нужном карте. */
 export interface DomainMapRoot {
@@ -63,7 +63,7 @@ export function buildDomainMap(input: DomainMapInput, now: Date): DomainMap {
         id: root.id,
         name: root.name,
         owner: root.owner,
-        indicator: indicatorOf(root.paidUntil, warnings.length),
+        indicator: domainIndicatorOf(root.name, root.paidUntil, now),
         paidUntil: root.paidUntil,
         warnings,
       };
@@ -109,15 +109,6 @@ function projectIndicatorOf(
   return subdomains.some((subdomain) => datedRoots.has(subdomain.domainId))
     ? StatusIndicator.Ok
     : StatusIndicator.Unknown;
-}
-
-/** Индикатор корня: срок оплаты — единственное, что о нём известно. */
-function indicatorOf(paidUntil: string | null, warningCount: number): StatusIndicator {
-  if (!paidUntil) {
-    return StatusIndicator.Unknown;
-  }
-
-  return warningCount > 0 ? StatusIndicator.Warning : StatusIndicator.Ok;
 }
 
 /** Группирует строки по ключу, сохраняя порядок появления. */

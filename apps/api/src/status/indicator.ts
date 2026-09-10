@@ -155,6 +155,27 @@ export function domainRenewalWarningsOf(
   );
 }
 
+/**
+ * Индикатор корневого домена.
+ *
+ * У домена нет наблюдаемой доступности — он не «падает», — поэтому
+ * `Down` здесь не бывает вовсе, а `Unknown` означает, что срок продления
+ * не задан и оплата не отслеживается.
+ */
+export function domainIndicatorOf(
+  name: string,
+  paidUntil: string | null,
+  now: Date,
+): StatusIndicator {
+  if (!paidUntil) {
+    return StatusIndicator.Unknown;
+  }
+
+  return domainRenewalWarningsOf(name, paidUntil, now).length > 0
+    ? StatusIndicator.Warning
+    : StatusIndicator.Ok;
+}
+
 /** Общая машинка сроков оплаты: близкий срок и просрочка звучат одинаково. */
 function paymentWarningsOf(
   kind: StatusWarningKind,

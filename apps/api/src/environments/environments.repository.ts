@@ -1,5 +1,6 @@
 import {
   AccessLevel,
+  rootDomainOf,
   Section,
   type EnvironmentCreate,
   type EnvironmentDetail,
@@ -301,16 +302,24 @@ export class EnvironmentsRepository {
     // Корень заводится здесь, а не суперадмином заранее: адрес стенда —
     // рабочая мелочь, ради которой нельзя дёргать владельца реестра
     // (спека этапа 10, раздел 3). Свойства корня остаются пустыми.
-    const roots = new Map<string, string>();
+    //
+    // Разрешается по одному корню, а не по одному имени: у двух десятков
+    // поддоменов корень обычно один, и разрешать его на каждое имя значило
+    // бы держать транзакцию окружения лишними запросами.
+    const rootIds = new Map<string, string>();
 
-    for (const name of domains) {
-      const root = await this.domainsRepository.ensureRoot(tx, name);
-      roots.set(name, root.id);
+    for (const root of new Set(domains.map((name) => rootDomainOf(name)))) {
+      const created = await this.domainsRepository.ensureRoot(tx, root);
+      rootIds.set(root, created.id);
     }
 
-    await tx
-      .insert(environmentDomains)
-      .values(domains.map((name) => ({ environmentId, name, domainId: roots.get(name)! })));
+    await tx.insert(environmentDomains).values(
+      domains.map((name) => ({
+        environmentId,
+        name,
+        domainId: rootIds.get(rootDomainOf(name))!,
+      })),
+    );
   }
 
   /**
