@@ -1,13 +1,15 @@
 import { AccessLevel, EnvironmentKind, HealthState, Section, SubjectKind } from '@cairn/shared';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessService } from '../access/access.service';
+import { DomainsRepository } from '../domains/domains.repository';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import {
   domainStatuses,
+  domains,
   environmentDomains,
   environmentStatuses,
   environments,
@@ -31,7 +33,7 @@ describe('репозиторий окружений', () => {
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
-    repository = new EnvironmentsRepository(testDb.db, new AccessService(testDb.db));
+    repository = new EnvironmentsRepository(testDb.db, new AccessService(testDb.db), new DomainsRepository(testDb.db));
   });
 
   afterAll(async () => {
@@ -486,6 +488,69 @@ describe('репозиторий окружений', () => {
       await expect(
         testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id)),
       ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    });
+  });
+
+  describe('корень домена', () => {
+    it('подрядчик заводит домен окружения, а корень появляется сам', async () => {
+      // Адрес стенда — рабочая мелочь, ради которой нельзя дёргать
+      // владельца реестра (спека этапа 10, раздел 3).
+      await grant(AccessLevel.Write);
+
+      await testDb.db.transaction((tx) =>
+        repository.create(member(), tx, projectId, {
+          name: 'Стейдж',
+          kind: EnvironmentKind.Staging,
+          domains: ['stage.example.com'],
+        }),
+      );
+
+      const roots = await testDb.db.select().from(domains);
+
+      expect(roots).toHaveLength(1);
+      expect(roots[0]).toMatchObject({ name: 'example.com', owner: null, paidUntil: null });
+    });
+
+    it('поддомены одного корня не плодят записей реестра', async () => {
+      await testDb.db.transaction((tx) =>
+        repository.create(admin(), tx, projectId, {
+          name: 'Стейдж',
+          kind: EnvironmentKind.Staging,
+          domains: ['stage.example.com', 'api.example.com', 'example.com'],
+        }),
+      );
+
+      expect(await testDb.db.select().from(domains)).toHaveLength(1);
+    });
+
+    it('домены разных зон дают разные корни', async () => {
+      await testDb.db.transaction((tx) =>
+        repository.create(admin(), tx, projectId, {
+          name: 'Стейдж',
+          kind: EnvironmentKind.Staging,
+          domains: ['stage.example.com', 'api.shop.co.uk'],
+        }),
+      );
+
+      const roots = await testDb.db.select().from(domains).orderBy(asc(domains.name));
+
+      expect(roots.map((root) => root.name)).toEqual(['example.com', 'shop.co.uk']);
+    });
+
+    it('правка не сбрасывает свойства уже заведённого корня', async () => {
+      const id = await createProd();
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { domains: ['example.com'] }),
+      );
+      await testDb.db.update(domains).set({ owner: 'ООО Ромашка' });
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { domains: ['stage.example.com'] }),
+      );
+
+      const [root] = await testDb.db.select().from(domains);
+
+      expect(root?.owner).toBe('ООО Ромашка');
     });
   });
 });

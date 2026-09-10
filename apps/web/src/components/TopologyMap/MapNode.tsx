@@ -6,6 +6,8 @@ import type { LayoutNode } from './utils';
 /** Пропсы узла карты. */
 interface IProps {
   node: LayoutNode;
+  /** Как называется вид узла в доступном имени: «Сервер», «Домен», «Проект». */
+  kindLabel: string;
   isSelected: boolean;
   isDimmed: boolean;
   onSelect: (id: string) => void;
@@ -17,8 +19,7 @@ interface IProps {
  * Обычная кнопка поверх SVG, а не текст внутри `foreignObject`: только так
  * узел получает фокус, читается скринридером и оформляется токенами.
  */
-export function MapNode({ node, isSelected, isDimmed, onSelect }: IProps) {
-  const kindLabel = node.kind === 'server' ? 'Сервер' : 'Проект';
+export function MapNode({ node, kindLabel, isSelected, isDimmed, onSelect }: IProps) {
 
   return (
     <button

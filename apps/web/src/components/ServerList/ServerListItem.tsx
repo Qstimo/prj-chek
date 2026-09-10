@@ -5,7 +5,7 @@ import Link from 'next/link';
 
 import { PaidUntilBadge } from '../PaidUntilBadge';
 import { StatusIndicator } from '../StatusIndicator';
-import { pluralProjects } from './utils';
+import { pluralProjects } from '@/utils';
 
 /** Пропсы строки реестра. */
 interface IProps {

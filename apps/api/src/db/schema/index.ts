@@ -2,6 +2,7 @@ export * from './agent-tokens';
 export * from './audit-log';
 export * from './chronicle';
 export * from './docs';
+export * from './domains';
 export * from './environments';
 export * from './grants';
 export * from './invitations';

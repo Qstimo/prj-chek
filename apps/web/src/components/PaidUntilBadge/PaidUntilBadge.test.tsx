@@ -47,4 +47,10 @@ describe('плашка срока оплаты', () => {
     rerender(<PaidUntilBadge paidUntil={inDays(90)} />);
     expect(screen.getByTestId('paid-until')).toHaveAttribute('data-state', 'ok');
   });
+
+  it('с порогом домена загорается раньше', () => {
+    render(<PaidUntilBadge paidUntil={inDays(25)} warnDays={30} />);
+
+    expect(screen.getByTestId('paid-until')).toHaveAttribute('data-state', 'soon');
+  });
 });

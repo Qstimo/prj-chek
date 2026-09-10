@@ -4,6 +4,7 @@ export * from './schemas/audit';
 export * from './schemas/auth';
 export * from './schemas/chronicle';
 export * from './schemas/doc';
+export * from './schemas/domain';
 export * from './schemas/environment';
 export * from './schemas/grant';
 export * from './schemas/intake';

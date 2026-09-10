@@ -14,6 +14,7 @@ import { AccessService } from '../access/access.service';
 import { SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import {
+  domains,
   environmentDomains,
   environmentStatuses,
   environments,
@@ -88,9 +89,10 @@ describe('репозиторий статусов', () => {
       .returning();
     environmentId = environment!.id;
 
+    const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
     const [domain] = await testDb.db
       .insert(environmentDomains)
-      .values({ environmentId, name: 'example.com' })
+      .values({ environmentId, domainId: root!.id, name: 'example.com' })
       .returning();
     domainId = domain!.id;
   });
@@ -266,6 +268,60 @@ describe('репозиторий статусов', () => {
       expect(
         status.warnings.filter((warning) => warning.kind === StatusWarningKind.ServerExpiring),
       ).toHaveLength(1);
+    });
+  });
+
+  describe('срок продления домена в статусе проекта', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    /** Календарный день через `days` суток от сегодня в формате контракта. */
+    function inDays(days: number): string {
+      return new Date(Date.now() + days * DAY_MS).toISOString().slice(0, 10);
+    }
+
+    it('предупреждает о близком продлении и поднимает индикатор', async () => {
+      await testDb.db.update(domains).set({ paidUntil: inDays(5) });
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(status.warnings).toContainEqual(
+        expect.objectContaining({
+          kind: StatusWarningKind.DomainRenewalExpiring,
+          subject: 'example.com',
+        }),
+      );
+      expect(status.indicator).toBe(StatusIndicator.Warning);
+    });
+
+    it('даёт одно предупреждение на корень, а не на каждый поддомен', async () => {
+      const [root] = await testDb.db.select().from(domains);
+      await testDb.db.update(domains).set({ paidUntil: inDays(5) });
+      await testDb.db
+        .insert(environmentDomains)
+        .values({ environmentId, domainId: root!.id, name: 'stage.example.com' });
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(
+        status.warnings.filter(
+          (warning) => warning.kind === StatusWarningKind.DomainRenewalExpiring,
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('молчит, когда срок далёк', async () => {
+      await testDb.db.update(domains).set({ paidUntil: inDays(90) });
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(
+        status.warnings.some(
+          (warning) => warning.kind === StatusWarningKind.DomainRenewalExpiring,
+        ),
+      ).toBe(false);
     });
   });
 });
