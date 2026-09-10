@@ -1,4 +1,5 @@
 import {
+  DOMAIN_RENEWAL_WARN_DAYS,
   HealthState,
   SERVER_WARN_DAYS,
   ProjectLifecycle,
@@ -123,6 +124,45 @@ export function serverWarningsOf(
   paidUntil: string | null,
   now: Date,
 ): StatusWarning[] {
+  return paymentWarningsOf(
+    StatusWarningKind.ServerExpiring,
+    name,
+    paidUntil,
+    SERVER_WARN_DAYS,
+    now,
+  );
+}
+
+/**
+ * Предупреждения о продлении домена по данным реестра CAIRN.
+ *
+ * Отдельно от RDAP-предупреждения: то говорит о регистрации в зоне, это —
+ * о нашей оплате. Зоны без RDAP молчат, и ручная дата для них единственный
+ * источник. Порог месяц, а не две недели: неоплаченная машина продолжает
+ * работать, а освободившийся домен могут перехватить в тот же день.
+ */
+export function domainRenewalWarningsOf(
+  name: string,
+  paidUntil: string | null,
+  now: Date,
+): StatusWarning[] {
+  return paymentWarningsOf(
+    StatusWarningKind.DomainRenewalExpiring,
+    name,
+    paidUntil,
+    DOMAIN_RENEWAL_WARN_DAYS,
+    now,
+  );
+}
+
+/** Общая машинка сроков оплаты: близкий срок и просрочка звучат одинаково. */
+function paymentWarningsOf(
+  kind: StatusWarningKind,
+  subject: string,
+  paidUntil: string | null,
+  warnDays: number,
+  now: Date,
+): StatusWarning[] {
   if (!paidUntil) {
     return [];
   }
@@ -130,26 +170,14 @@ export function serverWarningsOf(
   const days = daysUntil(paidUntil, now);
 
   if (days < 0) {
-    return [
-      {
-        kind: StatusWarningKind.ServerExpiring,
-        subject: name,
-        detail: `оплата истекла ${daysAgoOf(-days)} назад`,
-      },
-    ];
+    return [{ kind, subject, detail: `оплата истекла ${daysAgoOf(-days)} назад` }];
   }
 
-  if (days > SERVER_WARN_DAYS) {
+  if (days > warnDays) {
     return [];
   }
 
-  return [
-    {
-      kind: StatusWarningKind.ServerExpiring,
-      subject: name,
-      detail: `оплачен до ${dayOf(paidUntil)}`,
-    },
-  ];
+  return [{ kind, subject, detail: `оплачен до ${dayOf(paidUntil)}` }];
 }
 
 /**

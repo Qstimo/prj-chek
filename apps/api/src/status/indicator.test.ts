@@ -8,7 +8,13 @@ import {
 } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
-import { indicatorOf, serverIndicatorOf, serverWarningsOf, warningsOf } from './indicator';
+import {
+  domainRenewalWarningsOf,
+  indicatorOf,
+  serverIndicatorOf,
+  serverWarningsOf,
+  warningsOf,
+} from './indicator';
 
 const NOW = new Date('2026-08-28T12:00:00Z');
 
@@ -194,5 +200,36 @@ describe('индикатор сервера', () => {
     // Авария означает наблюдаемую недоступность, а неоплаченная машина
     // может работать ещё неделю.
     expect(serverIndicatorOf([env()], '2026-08-01', NOW)).toBe(StatusIndicator.Warning);
+  });
+});
+
+describe('предупреждения о продлении домена', () => {
+  it('молчит, когда срок не задан', () => {
+    expect(domainRenewalWarningsOf('example.com', null, NOW)).toEqual([]);
+  });
+
+  it('молчит, когда до срока больше месяца', () => {
+    expect(domainRenewalWarningsOf('example.com', '2026-09-28', NOW)).toEqual([]);
+  });
+
+  it('предупреждает ровно за месяц', () => {
+    // Месяц, а не две недели как у сервера: освободившийся домен могут
+    // перехватить в тот же день.
+    const [warning] = domainRenewalWarningsOf('example.com', '2026-09-27', NOW);
+
+    expect(warning).toEqual({
+      kind: StatusWarningKind.DomainRenewalExpiring,
+      subject: 'example.com',
+      detail: 'оплачен до 2026-09-27',
+    });
+  });
+
+  it('сообщает о просрочке со склонением дней', () => {
+    expect(domainRenewalWarningsOf('example.com', '2026-08-27', NOW)[0]?.detail).toBe(
+      'оплата истекла 1 день назад',
+    );
+    expect(domainRenewalWarningsOf('example.com', '2026-08-25', NOW)[0]?.detail).toBe(
+      'оплата истекла 3 дня назад',
+    );
   });
 });
