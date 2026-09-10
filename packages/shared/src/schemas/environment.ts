@@ -24,14 +24,33 @@ export const environmentMetadataSchema = z.object({
   domains: z.array(z.string()),
 });
 
-/** Окружение на уровне чтения: серверные параметры и заметки. */
-export const environmentDetailSchema = environmentMetadataSchema.extend({
+/**
+ * Машина, на которой живёт окружение.
+ *
+ * Вложенный объект, а не поля окружения: у машины они одни, и хранение их
+ * в каждом окружении неизбежно разошлось бы. Список проектов сервера сюда
+ * не входит — иначе подрядчик увидел бы соседей по машине.
+ */
+export const environmentServerSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  owner: z.string().nullable(),
   host: z.string().nullable(),
   ip: z.string().nullable(),
   provider: z.string().nullable(),
   specs: z.string().nullable(),
+});
+
+/** Окружение на уровне чтения: адрес, машина и заметки. */
+export const environmentDetailSchema = environmentMetadataSchema.extend({
+  /**
+   * Собственный адрес окружения. Перекрывает адрес машины: окружение может
+   * жить на поддомене или нестандартном порту, а машина при этом одна.
+   */
+  host: z.string().nullable(),
   healthCheckUrl: z.string().nullable(),
   notes: z.string().nullable(),
+  server: environmentServerSchema.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -41,9 +60,8 @@ export const environmentUpdateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   kind: z.nativeEnum(EnvironmentKind).optional(),
   host: z.string().trim().max(253).nullable().optional(),
-  ip: z.string().ip().nullable().optional(),
-  provider: z.string().trim().max(200).nullable().optional(),
-  specs: z.string().trim().max(500).nullable().optional(),
+  /** Привязку к серверу задаёт суперадмин: список машин межпроектен. */
+  serverId: z.string().uuid().nullable().optional(),
   healthCheckUrl: z.string().url().max(500).nullable().optional(),
   notes: z.string().max(10_000).nullable().optional(),
   domains: z
@@ -64,6 +82,9 @@ export type EnvironmentMetadata = z.infer<typeof environmentMetadataSchema>;
 
 /** Окружение на уровне чтения. */
 export type EnvironmentDetail = z.infer<typeof environmentDetailSchema>;
+
+/** Машина, на которой живёт окружение. */
+export type EnvironmentServer = z.infer<typeof environmentServerSchema>;
 
 /** Данные для правки окружения. */
 export type EnvironmentUpdate = z.infer<typeof environmentUpdateSchema>;
