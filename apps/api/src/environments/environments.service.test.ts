@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessService } from '../access/access.service';
+import { DomainsRepository } from '../domains/domains.repository';
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
@@ -22,7 +23,7 @@ describe('сервис окружений', () => {
 
     service = new EnvironmentsService(
       testDb.db,
-      new EnvironmentsRepository(testDb.db, new AccessService(testDb.db)),
+      new EnvironmentsRepository(testDb.db, new AccessService(testDb.db), new DomainsRepository(testDb.db)),
       new AuditService(),
     );
   });

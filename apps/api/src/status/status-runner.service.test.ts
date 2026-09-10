@@ -9,6 +9,7 @@ import { AuditAction } from '../audit/audit.types';
 import {
   auditLog,
   domainStatuses,
+  domains,
   environmentDomains,
   environmentStatuses,
   environments,
@@ -76,9 +77,10 @@ describe('runner статусов', () => {
         healthCheckUrl: 'https://example.com/health',
       })
       .returning();
+    const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
     await testDb.db
       .insert(environmentDomains)
-      .values({ environmentId: environment!.id, name: 'example.com' });
+      .values({ environmentId: environment!.id, domainId: root!.id, name: 'example.com' });
   }
 
   it('прогон пишет статусы окружений и доменов', async () => {

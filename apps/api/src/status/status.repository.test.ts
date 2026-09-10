@@ -14,6 +14,7 @@ import { AccessService } from '../access/access.service';
 import { SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import {
+  domains,
   environmentDomains,
   environmentStatuses,
   environments,
@@ -88,9 +89,10 @@ describe('репозиторий статусов', () => {
       .returning();
     environmentId = environment!.id;
 
+    const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
     const [domain] = await testDb.db
       .insert(environmentDomains)
-      .values({ environmentId, name: 'example.com' })
+      .values({ environmentId, domainId: root!.id, name: 'example.com' })
       .returning();
     domainId = domain!.id;
   });

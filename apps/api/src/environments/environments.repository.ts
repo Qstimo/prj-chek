@@ -24,6 +24,7 @@ import {
   type Environment,
   type Server,
 } from '../db/schema';
+import { DomainsRepository } from '../domains/domains.repository';
 import { environmentProjection } from './environment.projection';
 
 /**
@@ -40,6 +41,7 @@ export class EnvironmentsRepository {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly access: AccessService,
+    private readonly domainsRepository: DomainsRepository,
   ) {}
 
   /**
@@ -296,9 +298,19 @@ export class EnvironmentsRepository {
       return;
     }
 
+    // Корень заводится здесь, а не суперадмином заранее: адрес стенда —
+    // рабочая мелочь, ради которой нельзя дёргать владельца реестра
+    // (спека этапа 10, раздел 3). Свойства корня остаются пустыми.
+    const roots = new Map<string, string>();
+
+    for (const name of domains) {
+      const root = await this.domainsRepository.ensureRoot(tx, name);
+      roots.set(name, root.id);
+    }
+
     await tx
       .insert(environmentDomains)
-      .values(domains.map((name) => ({ environmentId, name })));
+      .values(domains.map((name) => ({ environmentId, name, domainId: roots.get(name)! })));
   }
 
   /**
