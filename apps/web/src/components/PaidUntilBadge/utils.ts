@@ -16,8 +16,13 @@ export interface PaidUntilView {
  *
  * Порог берётся из контракта — тем же числом, что и предупреждение
  * в статусе: плашка и предупреждение обязаны загораться одновременно.
+ * У машин это две недели, у доменов месяц, поэтому порог — аргумент.
  */
-export function paidUntilView(paidUntil: string | null, now: Date): PaidUntilView {
+export function paidUntilView(
+  paidUntil: string | null,
+  now: Date,
+  warnDays: number = SERVER_WARN_DAYS,
+): PaidUntilView {
   if (!paidUntil) {
     return { state: 'unknown', text: 'Срок оплаты не указан' };
   }
@@ -29,7 +34,7 @@ export function paidUntilView(paidUntil: string | null, now: Date): PaidUntilVie
     return { state: 'expired', text: `Оплата истекла ${pluralDays(-days)} назад` };
   }
 
-  if (days <= SERVER_WARN_DAYS) {
+  if (days <= warnDays) {
     return { state: 'soon', text: `Оплачен до ${date} — через ${pluralDays(days)}` };
   }
 

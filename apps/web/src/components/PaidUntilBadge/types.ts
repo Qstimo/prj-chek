@@ -2,4 +2,6 @@
 export interface IProps {
   /** Календарная дата `YYYY-MM-DD` либо её отсутствие. */
   paidUntil: string | null;
+  /** За сколько дней загорается предупреждение. По умолчанию — порог машин. */
+  warnDays?: number;
 }

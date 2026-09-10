@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { DOMAIN_RENEWAL_WARN_DAYS } from '@cairn/shared';
+
 import { paidUntilView } from './utils';
 
 const NOW = new Date('2026-09-10T12:00:00Z');
@@ -30,5 +32,12 @@ describe('вид срока оплаты', () => {
 
   it('дату показывает по русской локали', () => {
     expect(paidUntilView('2027-01-12', NOW).text).toBe('Оплачен до 12.01.2027');
+  });
+
+  it('порог задаётся аргументом: у доменов месяц, у машин две недели', () => {
+    // Плашка и предупреждение в статусе обязаны загораться одновременно,
+    // а пороги у сущностей разные.
+    expect(paidUntilView('2026-09-25', NOW).state).toBe('ok');
+    expect(paidUntilView('2026-09-25', NOW, DOMAIN_RENEWAL_WARN_DAYS).state).toBe('soon');
   });
 });
