@@ -111,6 +111,8 @@ serverIndicatorOf(environmentStatuses, paidUntil, now)
 
 Просроченная оплата даёт `warning`, а не `down`, намеренно: `down` в CAIRN означает наблюдаемую недоступность, а неоплаченная машина может работать ещё неделю. Смешивать бухгалтерию с наблюдением значит обесценить красный индикатор.
 
+`SERVER_WARN_DAYS` лежит в `packages/shared`, а не рядом с `TLS_WARN_DAYS` в API: тот же порог нужен плашке срока в интерфейсе, а из веба в `apps/api` импортировать нечего.
+
 Новый `StatusWarningKind.ServerExpiring` собирается в `warningsOf` рядом с `TlsExpiring` и `DomainExpiring`: `subject` — имя сервера, `detail` — «оплачен до 12.10.2026» либо «оплата истекла 5 дней назад». Предупреждение попадает:
 
 - в статус сервера (реестр и карта);
@@ -166,7 +168,7 @@ serverIndicatorOf(environmentStatuses, paidUntil, now)
 ## 11. Структура файлов
 
 ```
-packages/shared/src/schemas/server.ts            + .test.ts
+packages/shared/src/schemas/server.ts            + .test.ts  (в т.ч. SERVER_WARN_DAYS)
 apps/api/src/db/schema/servers.ts                + .test.ts
 apps/api/src/servers/servers.controller.ts
 apps/api/src/servers/servers.service.ts          + .test.ts
