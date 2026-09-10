@@ -1,6 +1,7 @@
 import { EnvironmentKind } from '@cairn/shared';
 import { index, pgEnum, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
+import { domains } from './domains';
 import { projects } from './projects';
 import { servers } from './servers';
 
@@ -69,12 +70,21 @@ export const environmentDomains = pgTable(
     environmentId: uuid('environment_id')
       .notNull()
       .references(() => environments.id, { onDelete: 'restrict' }),
+    /**
+     * Корень, за который платят. Обязателен: домен без корня некому
+     * продлевать, и такое состояние бессмысленно. Заполняется
+     * репозиторием автоматически по имени (спека этапа 10, раздел 3).
+     */
+    domainId: uuid('domain_id')
+      .notNull()
+      .references(() => domains.id, { onDelete: 'restrict' }),
     name: text('name').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique('environment_domains_environment_name').on(table.environmentId, table.name),
     index('environment_domains_environment_idx').on(table.environmentId),
+    index('environment_domains_domain_idx').on(table.domainId),
   ],
 );
 

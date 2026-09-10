@@ -5,6 +5,7 @@ import { agentTokens } from './agent-tokens';
 import { auditLog } from './audit-log';
 import { chronicleEntries } from './chronicle';
 import { docPages } from './docs';
+import { domains } from './domains';
 import { environmentDomains, environments } from './environments';
 import { grants } from './grants';
 import { invitations } from './invitations';
@@ -28,6 +29,7 @@ const ALL_TABLES = [
   { name: 'projects', table: projects },
   { name: 'servers', table: servers },
   { name: 'environments', table: environments },
+  { name: 'domains', table: domains },
   { name: 'environment_domains', table: environmentDomains },
   { name: 'chronicle_entries', table: chronicleEntries },
   { name: 'doc_pages', table: docPages },
