@@ -1,5 +1,6 @@
 import {
   HealthState,
+  SERVER_WARN_DAYS,
   ProjectLifecycle,
   StatusIndicator,
   StatusWarningKind,
@@ -104,4 +105,100 @@ function expiresWithin(isoDate: string, days: number, now: Date): boolean {
 /** День без времени для человеческого текста предупреждения. */
 function dayOf(isoDate: string): string {
   return isoDate.slice(0, 10);
+}
+
+/**
+ * Предупреждения сервера: срок оплаты близок либо уже прошёл.
+ *
+ * Порог берётся из контракта: то же число нужно плашке срока в интерфейсе,
+ * а второе объявление неизбежно разошлось бы с первым.
+ */
+export function serverWarningsOf(
+  name: string,
+  paidUntil: string | null,
+  now: Date,
+): StatusWarning[] {
+  if (!paidUntil) {
+    return [];
+  }
+
+  const days = daysUntil(paidUntil, now);
+
+  if (days < 0) {
+    return [
+      {
+        kind: StatusWarningKind.ServerExpiring,
+        subject: name,
+        detail: `оплата истекла ${daysAgoOf(-days)} назад`,
+      },
+    ];
+  }
+
+  if (days > SERVER_WARN_DAYS) {
+    return [];
+  }
+
+  return [
+    {
+      kind: StatusWarningKind.ServerExpiring,
+      subject: name,
+      detail: `оплачен до ${dayOf(paidUntil)}`,
+    },
+  ];
+}
+
+/**
+ * Индикатор сервера: агрегат health его окружений плюс срок оплаты.
+ *
+ * Просрочка даёт предупреждение, а не аварию: авария означает наблюдаемую
+ * недоступность, а неоплаченная машина может работать ещё неделю.
+ * Смешивать бухгалтерию с наблюдением значит обесценить красный индикатор.
+ */
+export function serverIndicatorOf(
+  environments: EnvironmentStatus[],
+  paidUntil: string | null,
+  now: Date,
+): StatusIndicator {
+  const checked = environments.filter((environment) => environment.health !== null);
+  const warnings = serverWarningsOf('', paidUntil, now);
+
+  if (checked.length === 0 && !paidUntil) {
+    return StatusIndicator.Unknown;
+  }
+
+  if (checked.length > 0 && checked.every((environment) => environment.health === HealthState.Down)) {
+    return StatusIndicator.Down;
+  }
+
+  const hasDown = checked.some((environment) => environment.health === HealthState.Down);
+
+  return hasDown || warnings.length > 0 ? StatusIndicator.Warning : StatusIndicator.Ok;
+}
+
+/** Полных суток от начала сегодняшнего дня до даты срока; отрицательное — просрочка. */
+function daysUntil(isoDay: string, now: Date): number {
+  const target = Date.parse(`${isoDay}T00:00:00Z`);
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+
+  return Math.round((target - today) / DAY_MS);
+}
+
+/** Склоняет дни для текста о просрочке. */
+function daysAgoOf(days: number): string {
+  const lastTwo = days % 100;
+  const last = days % 10;
+
+  if (lastTwo >= 11 && lastTwo <= 14) {
+    return `${days} дней`;
+  }
+
+  if (last === 1) {
+    return `${days} день`;
+  }
+
+  if (last >= 2 && last <= 4) {
+    return `${days} дня`;
+  }
+
+  return `${days} дней`;
 }
