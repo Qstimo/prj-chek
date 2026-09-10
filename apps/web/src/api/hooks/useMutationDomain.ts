@@ -1,18 +1,23 @@
 'use client';
 
-import type { DomainCreate, DomainRow, DomainUpdate } from '@cairn/shared';
+import type { DomainCreate, DomainUpdate } from '@cairn/shared';
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
 import { DOMAIN_KEYS } from './useQueryDomains';
 
-/** Заводит корневой домен. */
+/**
+ * Заводит корневой домен.
+ *
+ * Тип ответа не объявляется: API отдаёт сырую строку таблицы без
+ * индикатора и счётчиков. Результат нужен только для инвалидации.
+ */
 export function useMutationCreateDomain() {
   const client = useQueryClient();
 
   return useMutation({
     mutationFn: (input: DomainCreate) =>
-      apiClient<DomainRow>('/domains', { method: 'POST', body: input }),
+      apiClient('/domains', { method: 'POST', body: input }),
     onSuccess: () => invalidateDomainViews(client),
   });
 }
@@ -23,7 +28,7 @@ export function useMutationUpdateDomain() {
 
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: DomainUpdate }) =>
-      apiClient<DomainRow>(`/domains/${id}`, { method: 'PATCH', body: input }),
+      apiClient(`/domains/${id}`, { method: 'PATCH', body: input }),
     onSuccess: () => invalidateDomainViews(client),
   });
 }

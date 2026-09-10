@@ -1,18 +1,25 @@
 'use client';
 
-import type { ServerCreate, ServerRow, ServerUpdate } from '@cairn/shared';
+import type { ServerCreate, ServerUpdate } from '@cairn/shared';
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
 import { SERVER_KEYS } from './useQueryServers';
 
-/** Заводит сервер. */
+/**
+ * Заводит сервер.
+ *
+ * Тип ответа не объявляется: API отдаёт сырую строку таблицы без
+ * индикатора и счётчиков, и обещать здесь `ServerRow` значило бы соврать
+ * первому же, кто прочитает `data.indicator`. Результат нужен только
+ * для инвалидации.
+ */
 export function useMutationCreateServer() {
   const client = useQueryClient();
 
   return useMutation({
     mutationFn: (input: ServerCreate) =>
-      apiClient<ServerRow>('/servers', { method: 'POST', body: input }),
+      apiClient('/servers', { method: 'POST', body: input }),
     onSuccess: () => invalidateServerViews(client),
   });
 }
@@ -23,7 +30,7 @@ export function useMutationUpdateServer() {
 
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: ServerUpdate }) =>
-      apiClient<ServerRow>(`/servers/${id}`, { method: 'PATCH', body: input }),
+      apiClient(`/servers/${id}`, { method: 'PATCH', body: input }),
     onSuccess: () => invalidateServerViews(client),
   });
 }

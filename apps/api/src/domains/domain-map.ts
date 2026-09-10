@@ -51,6 +51,10 @@ export function buildDomainMap(input: DomainMapInput, now: Date): DomainMap {
       .map((root) => root.id),
   );
 
+  const datedRoots = new Set(
+    input.domains.filter((root) => root.paidUntil !== null).map((root) => root.id),
+  );
+
   return {
     domains: input.domains.map((root) => {
       const warnings = domainRenewalWarningsOf(root.name, root.paidUntil, now);
@@ -66,12 +70,11 @@ export function buildDomainMap(input: DomainMapInput, now: Date): DomainMap {
     }),
     projects: [...byProject.values()].map((subdomains) => {
       const first = subdomains[0]!;
-      const isWarning = subdomains.some((subdomain) => warningRoots.has(subdomain.domainId));
 
       return {
         id: first.projectId,
         name: first.projectName,
-        indicator: isWarning ? StatusIndicator.Warning : StatusIndicator.Ok,
+        indicator: projectIndicatorOf(subdomains, warningRoots, datedRoots),
       };
     }),
     edges: [...byEdge.values()].map((subdomains) => {
@@ -84,6 +87,28 @@ export function buildDomainMap(input: DomainMapInput, now: Date): DomainMap {
       };
     }),
   };
+}
+
+/**
+ * Индикатор проекта на карте доменов.
+ *
+ * «Неизвестно», пока ни у одного корня проекта не задан срок: сразу после
+ * переноса он пуст у всех, и зелёный проект означал бы «оплата проверена»,
+ * чего никто не проверял. Обе колонки карты обязаны говорить об одном
+ * факте одно и то же.
+ */
+function projectIndicatorOf(
+  subdomains: DomainMapSubdomain[],
+  warningRoots: Set<string>,
+  datedRoots: Set<string>,
+): StatusIndicator {
+  if (subdomains.some((subdomain) => warningRoots.has(subdomain.domainId))) {
+    return StatusIndicator.Warning;
+  }
+
+  return subdomains.some((subdomain) => datedRoots.has(subdomain.domainId))
+    ? StatusIndicator.Ok
+    : StatusIndicator.Unknown;
 }
 
 /** Индикатор корня: срок оплаты — единственное, что о нём известно. */

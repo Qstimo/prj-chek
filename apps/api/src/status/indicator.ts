@@ -195,17 +195,20 @@ export function serverIndicatorOf(
   const checked = environments.filter((environment) => environment.health !== null);
   const warnings = serverWarningsOf('', paidUntil, now);
 
-  if (checked.length === 0 && !paidUntil) {
-    return StatusIndicator.Unknown;
-  }
-
   if (checked.length > 0 && checked.every((environment) => environment.health === HealthState.Down)) {
     return StatusIndicator.Down;
   }
 
   const hasDown = checked.some((environment) => environment.health === HealthState.Down);
 
-  return hasDown || warnings.length > 0 ? StatusIndicator.Warning : StatusIndicator.Ok;
+  if (hasDown || warnings.length > 0) {
+    return StatusIndicator.Warning;
+  }
+
+  // Оплата — не наблюдение: машина, которую никто не проверяет, не может
+  // быть «в порядке», сколько бы вперёд она ни была оплачена. Так же
+  // поступает indicatorOf с проектом без единого результата проверки.
+  return checked.length === 0 ? StatusIndicator.Unknown : StatusIndicator.Ok;
 }
 
 /** Полных суток от начала сегодняшнего дня до даты срока; отрицательное — просрочка. */

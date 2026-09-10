@@ -61,8 +61,15 @@ export const domainCreateSchema = z.object({
   notes: z.string().max(10_000).nullable().optional(),
 });
 
-/** Поля, доступные для правки. */
-export const domainUpdateSchema = domainCreateSchema.partial();
+/**
+ * Поля, доступные для правки.
+ *
+ * Имя не правится намеренно: за ним висят поддомены, вычисленные из него
+ * же. Переименование корня оставило бы их на чужом родителе, а следующий
+ * поддомен старой зоны завёл бы вторую запись того же корня — и счётчики
+ * с предупреждениями разошлись бы у обеих.
+ */
+export const domainUpdateSchema = domainCreateSchema.omit({ name: true }).partial();
 
 /** Строка реестра доменов: поля корня, статус и счётчики. */
 export const domainRowSchema = z.object({

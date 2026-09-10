@@ -176,6 +176,19 @@ describe('индикатор сервера', () => {
     expect(serverIndicatorOf([], null, NOW)).toBe(StatusIndicator.Unknown);
   });
 
+  it('оплаченный сервер без единой проверки — неизвестно, а не в порядке', () => {
+    // Зелёный индикатор означает «работает», а не «оплачено»: машина,
+    // за которой никто не наблюдает, не может быть «в порядке».
+    expect(serverIndicatorOf([], '2027-01-01', NOW)).toBe(StatusIndicator.Unknown);
+    expect(serverIndicatorOf([env({ health: null })], '2027-01-01', NOW)).toBe(
+      StatusIndicator.Unknown,
+    );
+  });
+
+  it('близкий срок предупреждает даже без проверок', () => {
+    expect(serverIndicatorOf([], '2026-09-05', NOW)).toBe(StatusIndicator.Warning);
+  });
+
   it('живое окружение и далёкий срок — в порядке', () => {
     expect(serverIndicatorOf([env()], '2026-12-01', NOW)).toBe(StatusIndicator.Ok);
   });

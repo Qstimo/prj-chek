@@ -13,6 +13,13 @@ export interface EnvironmentFormValues {
   /** Собственный адрес окружения; перекрывает адрес машины. */
   host: string | null;
   serverId: string | null;
+  /**
+   * Имя привязанной машины.
+   *
+   * Приходит вместе с окружением, а не ищется в реестре: реестр машин
+   * подрядчику не отдаётся вовсе, и искать в нём было бы нечего.
+   */
+  serverName: string | null;
   healthCheckUrl: string | null;
   notes: string | null;
   domains: string[];

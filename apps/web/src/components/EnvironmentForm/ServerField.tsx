@@ -6,6 +6,8 @@ import type { ServerOption } from './types';
 /** Пропсы поля привязки к серверу. */
 interface IProps {
   value: string | null;
+  /** Имя привязанной машины: реестра у подрядчика нет, имя приходит с окружением. */
+  valueName: string | null;
   servers: ServerOption[];
   /** Право выбирать машину. Есть только у суперадмина. */
   canAssign: boolean;
@@ -19,13 +21,11 @@ interface IProps {
  * межпроектен, и подрядчик увидел бы в нём чужую инфраструктуру. Остальным
  * остаётся имя уже привязанной машины — про свой проект они его и так знают.
  */
-export function ServerField({ value, servers, canAssign, onChange }: IProps) {
+export function ServerField({ value, valueName, servers, canAssign, onChange }: IProps) {
   if (!canAssign) {
-    const assigned = servers.find((server) => server.id === value);
-
     return (
       <p className="text-sm text-muted-foreground">
-        {assigned ? `Сервер: ${assigned.name}` : 'Сервер не привязан'}
+        {valueName ? `Сервер: ${valueName}` : 'Сервер не привязан'}
       </p>
     );
   }
