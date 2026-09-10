@@ -11,7 +11,7 @@
 import { authenticator } from 'otplib';
 
 /** Адрес развёрнутой системы. */
-const BASE = process.env.CAIRN_BASE_URL ?? 'https://localhost';
+const BASE = process.env.CAIRN_BASE_URL ?? 'http://localhost';
 
 /** Ссылка приглашения суперадмина: выдаётся командой `create-superadmin`. */
 const ADMIN_INVITE = process.argv[2] ?? process.env.CAIRN_INVITE_URL;

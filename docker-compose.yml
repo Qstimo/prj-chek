@@ -57,6 +57,9 @@ services:
       - '${CAIRN_HTTPS_PORT:-443}:443'
     environment:
       CAIRN_DOMAIN: ${CAIRN_DOMAIN:-localhost}
+      # http по умолчанию: на localhost автоматический HTTPS дал бы
+      # самоподписанный сертификат и ошибку в браузере.
+      CAIRN_SCHEME: ${CAIRN_SCHEME:-http}
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
