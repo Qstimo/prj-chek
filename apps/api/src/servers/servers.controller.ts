@@ -3,6 +3,7 @@ import {
   serverUpdateSchema,
   type ServerCreate,
   type ServerDetail,
+  type ServerMap,
   type ServerRow,
   type ServerUpdate,
 } from '@cairn/shared';
@@ -44,6 +45,16 @@ export class ServersController {
   @Get()
   async list(): Promise<ServerRow[]> {
     return this.servers.list();
+  }
+
+  /**
+   * Данные карты размещения.
+   *
+   * Объявлен до `:id`: иначе «map» уйдёт в параметр и не пройдёт проверку uuid.
+   */
+  @Get('map')
+  async map(): Promise<ServerMap> {
+    return this.servers.map();
   }
 
   /** Сервер вместе с размещёнными окружениями. */

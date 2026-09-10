@@ -1,4 +1,11 @@
-import type { AuditSubjectKind, ServerCreate, ServerDetail, ServerRow, ServerUpdate } from '@cairn/shared';
+import type {
+  AuditSubjectKind,
+  ServerCreate,
+  ServerDetail,
+  ServerMap,
+  ServerRow,
+  ServerUpdate,
+} from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
 
 import type { RequestSubject } from '../access/access.types';
@@ -27,6 +34,11 @@ export class ServersService {
   /** Реестр серверов. */
   async list(): Promise<ServerRow[]> {
     return this.repository.list();
+  }
+
+  /** Данные карты размещения. */
+  async map(): Promise<ServerMap> {
+    return this.repository.map();
   }
 
   /** Сервер вместе с размещёнными окружениями. */

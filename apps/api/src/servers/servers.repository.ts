@@ -1,11 +1,12 @@
 import {
   type ServerCreate,
+  type ServerMap,
   type ServerDetail,
   type ServerRow,
   type ServerUpdate,
 } from '@cairn/shared';
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { asc, eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray, isNotNull } from 'drizzle-orm';
 
 import { DATABASE } from '../db/db.module';
 import type { Database, Transaction } from '../db/db.types';
@@ -17,6 +18,7 @@ import {
   type Server,
 } from '../db/schema';
 import { serverIndicatorOf, serverWarningsOf } from '../status/indicator';
+import { buildServerMap } from './server-map';
 
 /** Строка размещения: окружение на сервере вместе с проектом и здоровьем. */
 interface PlacementRow {
@@ -66,6 +68,41 @@ export class ServersRepository {
         health: placement.health,
       })),
     };
+  }
+
+  /**
+   * Данные карты размещения.
+   *
+   * Один запрос за размещениями и один за машинами: узлов десятки,
+   * и усложнять выборку ради них незачем.
+   */
+  async map(): Promise<ServerMap> {
+    const machines = await this.db.select().from(servers).orderBy(asc(servers.name));
+
+    const placements = await this.db
+      .select({
+        serverId: environments.serverId,
+        environmentId: environments.id,
+        environmentName: environments.name,
+        environmentKind: environments.kind,
+        projectId: projects.id,
+        projectName: projects.name,
+        projectLifecycle: projects.lifecycle,
+        health: environmentStatuses.health,
+      })
+      .from(environments)
+      .innerJoin(projects, eq(projects.id, environments.projectId))
+      .leftJoin(environmentStatuses, eq(environmentStatuses.environmentId, environments.id))
+      .where(isNotNull(environments.serverId))
+      .orderBy(asc(projects.name), asc(environments.name));
+
+    return buildServerMap(
+      {
+        servers: machines,
+        placements: placements.map((placement) => ({ ...placement, serverId: placement.serverId! })),
+      },
+      new Date(),
+    );
   }
 
   /** Заводит сервер. */
