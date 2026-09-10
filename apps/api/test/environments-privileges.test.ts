@@ -25,6 +25,10 @@ describe('права роли приложения на окружения', () 
     ).resolves.toBeDefined();
   });
 
+  it('роль приложения читает и пишет серверы', async () => {
+    await expect(testDb.appDb.execute(sql`SELECT count(*) FROM servers`)).resolves.toBeDefined();
+  });
+
   it('роль приложения читает и пишет хронику', async () => {
     await expect(
       testDb.appDb.execute(sql`SELECT count(*) FROM chronicle_entries`),
