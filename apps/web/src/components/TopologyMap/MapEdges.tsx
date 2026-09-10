@@ -12,7 +12,7 @@ interface IProps {
 }
 
 /**
- * Слой связей между машинами и проектами.
+ * Слой связей между узлами колонок.
  *
  * Кривая Безье, а не прямая: при нескольких проектах на одной машине
  * прямые сливались бы в веер, в котором не видно отдельных связей.
@@ -22,13 +22,13 @@ export function MapEdges({ edges, width, height, selectedId }: IProps) {
     <svg width={width} height={height} className="absolute left-0 top-0" aria-hidden>
       {edges.map((edge) => {
         const isActive =
-          selectedId === null || selectedId === edge.serverId || selectedId === edge.projectId;
+          selectedId === null || selectedId === edge.leftId || selectedId === edge.rightId;
         const middle = (edge.from.x + edge.to.x) / 2;
 
         return (
           <path
-            key={`${edge.serverId}-${edge.projectId}`}
-            data-testid={`edge-${edge.serverId}-${edge.projectId}`}
+            key={`${edge.leftId}-${edge.rightId}`}
+            data-testid={`edge-${edge.leftId}-${edge.rightId}`}
             data-active={String(selectedId !== null && isActive)}
             d={`M ${edge.from.x} ${edge.from.y} C ${middle} ${edge.from.y}, ${middle} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`}
             fill="none"
