@@ -1,0 +1,74 @@
+# Автоматическое развёртывание: push в main → пересборка на сервере.
+#
+# Раннер ничего не собирает — он подключается по ssh и запускает на сервере
+# scripts/deploy.sh. Сборка идёт там же, где система работает, поэтому минуты
+# GitHub тратятся только на ожидание (1–2 минуты на прогон).
+#
+# Что нужно завести в репозитории (Settings → Secrets and variables → Actions):
+#   секрет SSH_PRIVATE_KEY — закрытая часть отдельного ключа для CI
+#   секрет SSH_KNOWN_HOSTS — отпечаток сервера, `ssh-keyscan <ip>`
+#   секрет SSH_USER        — пользователь на сервере (cairn)
+#   секрет SSH_HOST        — адрес сервера
+#   переменная CAIRN_BASE_URL — необязательно: адрес для проверки снаружи
+#
+# Ключ должен быть отдельным, не личным: он лежит у GitHub, и его отзыв не
+# должен лишать тебя доступа к серверу.
+name: Развернуть на сервере
+
+on:
+  push:
+    branches: [main]
+  # Ручной запуск: кнопка Run workflow на вкладке Actions.
+  workflow_dispatch:
+
+# Два деплоя одновременно недопустимы: они столкнутся на миграциях и сборке.
+# Новый ждёт окончания предыдущего, а не отменяет его — прерванный деплой
+# оставил бы систему с применёнными миграциями и старым кодом.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Проверка типов
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Полные тесты сюда не включены намеренно: интеграционные поднимают
+      # PostgreSQL через Testcontainers и идут минутами. Если нужен полный
+      # заслон перед развёртыванием — добавь `pnpm test` следующей строкой.
+      - run: pnpm typecheck
+
+  deploy:
+    name: Развернуть
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Настроить ssh
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ci
+          chmod 600 ~/.ssh/id_ci
+          # Отпечаток закреплён заранее: с StrictHostKeyChecking=no раннер
+          # доверился бы любому хосту, который ответит по этому адресу.
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Развернуть на сервере
+        run: |
+          ssh -i ~/.ssh/id_ci -o ConnectTimeout=15 \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            'cd /opt/cairn && git pull --ff-only && ./scripts/deploy.sh'
+
+      - name: Проверить снаружи
+        # Раннер проверяет систему из интернета — то, чего серверная проверка
+        # в deploy.sh увидеть не может: доступность адреса и сертификат.
+        if: vars.CAIRN_BASE_URL != ''
+        run: curl -fsS --max-time 20 "${{ vars.CAIRN_BASE_URL }}/api/health"
