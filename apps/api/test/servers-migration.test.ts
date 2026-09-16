@@ -8,6 +8,15 @@ import postgres from 'postgres';
 /** Миграция, переносящая серверные поля окружений в таблицу серверов. */
 const SERVERS_MIGRATION = '0017_servers';
 
+/**
+ * Последняя миграция этапа 9.
+ *
+ * Цепочка применяется не до конца намеренно: проверяется перенос этапа 9,
+ * а более поздние миграции меняют схему дальше — этап 11, например, убирает
+ * из окружений колонку адреса, и проверка переноса в неё упиралась бы.
+ */
+const LAST_STAGE_MIGRATION = '0018_server_privileges';
+
 const DRIZZLE_DIR = resolve(__dirname, '../drizzle');
 
 interface JournalEntry {
@@ -46,7 +55,9 @@ describe('перенос серверных полей окружений в с�
 
     // Всё, начиная с переноса: следом идёт выдача прав на серверы, и без
     // неё проверка привилегий проверяла бы не миграцию, а её отсутствие.
-    for (const entry of journal.entries.slice(boundary)) {
+    const end = journal.entries.findIndex((entry) => entry.tag === LAST_STAGE_MIGRATION) + 1;
+
+    for (const entry of journal.entries.slice(boundary, end)) {
       await applyMigration(client, entry.tag);
     }
   });

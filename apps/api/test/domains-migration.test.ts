@@ -8,6 +8,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 /** Миграция, привязывающая домены окружений к корням реестра. */
 const DOMAINS_MIGRATION = '0019_domains';
 
+/** Последняя миграция этапа 10: дальше схема живёт своей жизнью. */
+const LAST_STAGE_MIGRATION = '0020_domain_privileges';
+
 const DRIZZLE_DIR = resolve(__dirname, '../drizzle');
 
 interface JournalEntry {
@@ -44,7 +47,9 @@ describe('привязка доменов окружений к корням', (
 
     await seedLegacyDomains(client);
 
-    for (const entry of journal.entries.slice(boundary)) {
+    const end = journal.entries.findIndex((entry) => entry.tag === LAST_STAGE_MIGRATION) + 1;
+
+    for (const entry of journal.entries.slice(boundary, end)) {
       await applyMigration(client, entry.tag);
     }
   });
