@@ -52,19 +52,46 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Пустой секрет иначе проявляется мгновенным падением ssh без объяснений:
+      # выражение подставляет пустоту, и команда превращается в `ssh ... "@"`.
+      # Частая причина — значения заведены во вкладке Variables вместо Secrets.
+      - name: Проверить секреты
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          missing=''
+          for name in SSH_PRIVATE_KEY SSH_KNOWN_HOSTS SSH_USER SSH_HOST; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "Не заданы секреты:$missing"
+            echo "Заводятся в Settings → Secrets and variables → Actions, вкладка Secrets (не Variables)."
+            exit 1
+          fi
+          echo "все четыре секрета на месте"
+
       - name: Настроить ssh
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
           install -d -m 700 ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ci
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ci
           chmod 600 ~/.ssh/id_ci
           # Отпечаток закреплён заранее: с StrictHostKeyChecking=no раннер
           # доверился бы любому хосту, который ответит по этому адресу.
-          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Развернуть на сервере
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
-          ssh -i ~/.ssh/id_ci -o ConnectTimeout=15 \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+          ssh -i ~/.ssh/id_ci -o ConnectTimeout=15 -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" \
             'cd /opt/cairn && git pull --ff-only && ./scripts/deploy.sh'
 
       - name: Проверить снаружи
