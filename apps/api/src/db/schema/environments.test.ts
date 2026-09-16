@@ -23,10 +23,13 @@ describe('окружения', () => {
     expect(environments.kind.notNull).toBe(true);
   });
 
-  it('допускает окружение без адреса и проверки', () => {
+  it('допускает окружение без проверки', () => {
     // Реестр заполняется постепенно, пустое поле честнее выдуманного.
-    expect(environments.host.notNull).toBe(false);
     expect(environments.healthCheckUrl.notNull).toBe(false);
+  });
+
+  it('не хранит отдельного адреса: адрес окружения — его домены', () => {
+    expect(environments).not.toHaveProperty('host');
   });
 });
 

@@ -112,7 +112,6 @@ describe('репозиторий окружений', () => {
       repository.create(admin(), tx, projectId, {
         name: 'Прод',
         kind: EnvironmentKind.Production,
-        host: 'prod.example.com',
         domains: ['example.com'],
       }),
     );
@@ -295,7 +294,13 @@ describe('репозиторий окружений', () => {
       );
 
       expect(updated.notes).toBe('Заметка');
-      expect(updated.host).toBe('prod.example.com');
+      expect(updated.name).toBe('Прод');
+
+      // Домены живут отдельной таблицей: правка других полей не должна их
+      // трогать, иначе заметка стирала бы адрес окружения.
+      const environment = await repository.findById(admin(), projectId, id);
+
+      expect(environment).toMatchObject({ domains: ['example.com'] });
     });
 
     it('привязку к серверу задаёт только суперадмин', async () => {

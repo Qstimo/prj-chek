@@ -10,7 +10,7 @@ export const KIND_LABELS: Record<EnvironmentKind, string> = {
 
 /** Подписи полей окружения и его машины. */
 export const FIELD_LABELS = {
-  host: 'Адрес',
+  host: 'Адрес машины',
   server: 'Сервер',
   owner: 'Владелец',
   ip: 'IP-адрес',

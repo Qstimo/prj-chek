@@ -24,7 +24,6 @@ const server = {
 
 const detail = {
   ...metadata,
-  host: null,
   healthCheckUrl: 'https://example.com/health',
   notes: 'Заметка',
   server,
@@ -64,12 +63,10 @@ describe('EnvironmentCard', () => {
     expect(screen.getByText('Сервер не привязан')).toBeInTheDocument();
   });
 
-  it('собственный адрес окружения перекрывает адрес машины', () => {
-    // Окружение может жить на поддомене или нестандартном порту.
-    render(<EnvironmentCard environment={{ ...detail, host: 'stage.example.com' }} />);
+  it('адрес окружения показывают его домены', () => {
+    render(<EnvironmentCard environment={{ ...detail, domains: ['stage.example.com'] }} />);
 
     expect(screen.getByText('stage.example.com')).toBeInTheDocument();
-    expect(screen.queryByText('srv-1.example.com')).not.toBeInTheDocument();
   });
 
   it('без права записи не показывает кнопок', () => {

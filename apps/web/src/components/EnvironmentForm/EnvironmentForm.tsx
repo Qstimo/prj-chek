@@ -5,7 +5,7 @@ import { useState, type FormEvent } from 'react';
 
 import { DomainsField } from '../DomainsField';
 import { TextField } from '../TextField';
-import { FIELD_LABELS, HOST_HINT } from './constants';
+import { DOMAINS_HINT, FIELD_LABELS } from './constants';
 import { KindField } from './KindField';
 import { ServerField } from './ServerField';
 import type { EnvironmentFormValues, IProps } from './types';
@@ -40,7 +40,6 @@ export function EnvironmentForm({
     onSubmit({
       name: values.name.trim(),
       kind: values.kind,
-      host: emptyToNull(values.host),
       healthCheckUrl: emptyToNull(values.healthCheckUrl),
       notes: emptyToNull(values.notes),
       domains: values.domains,
@@ -69,16 +68,6 @@ export function EnvironmentForm({
         onChange={(value) => change('serverId', value)}
       />
 
-      <div className="space-y-1">
-        <TextField
-          id="host"
-          label={FIELD_LABELS.host}
-          value={values.host ?? ''}
-          onChange={(value) => change('host', value)}
-        />
-        <p className="text-xs text-muted-foreground">{HOST_HINT}</p>
-      </div>
-
       <TextField
         id="healthCheckUrl"
         label={FIELD_LABELS.healthCheckUrl}
@@ -93,7 +82,10 @@ export function EnvironmentForm({
         multiline
       />
 
-      <DomainsField value={values.domains} onChange={(value) => change('domains', value)} />
+      <div className="space-y-1">
+        <DomainsField value={values.domains} onChange={(value) => change('domains', value)} />
+        <p className="text-xs text-muted-foreground">{DOMAINS_HINT}</p>
+      </div>
 
       {error && (
         <p role="alert" className="text-sm text-destructive">

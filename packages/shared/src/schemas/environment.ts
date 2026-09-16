@@ -16,7 +16,14 @@ export const domainSchema = z
   .max(253)
   .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, 'Ожидается домен');
 
-/** Окружение на уровне метаданных: видно, что оно есть, и его публичный адрес. */
+/**
+ * Окружение на уровне метаданных: видно, что оно есть, и его публичный адрес.
+ *
+ * Адрес окружения — это его домены, отдельного поля адреса нет. Пока полей
+ * было два, они расходились по смыслу: домены попадали в реестр корней и под
+ * проверки сертификата и срока продления, а «адрес окружения» не попадал
+ * никуда — и вписанный туда стенд система не видела.
+ */
 export const environmentMetadataSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -41,13 +48,8 @@ export const environmentServerSchema = z.object({
   specs: z.string().nullable(),
 });
 
-/** Окружение на уровне чтения: адрес, машина и заметки. */
+/** Окружение на уровне чтения: машина, проверка и заметки. */
 export const environmentDetailSchema = environmentMetadataSchema.extend({
-  /**
-   * Собственный адрес окружения. Перекрывает адрес машины: окружение может
-   * жить на поддомене или нестандартном порту, а машина при этом одна.
-   */
-  host: z.string().nullable(),
   healthCheckUrl: z.string().nullable(),
   notes: z.string().nullable(),
   server: environmentServerSchema.nullable(),
@@ -59,7 +61,6 @@ export const environmentDetailSchema = environmentMetadataSchema.extend({
 export const environmentUpdateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   kind: z.nativeEnum(EnvironmentKind).optional(),
-  host: z.string().trim().max(253).nullable().optional(),
   /** Привязку к серверу задаёт суперадмин: список машин межпроектен. */
   serverId: z.string().uuid().nullable().optional(),
   healthCheckUrl: z.string().url().max(500).nullable().optional(),

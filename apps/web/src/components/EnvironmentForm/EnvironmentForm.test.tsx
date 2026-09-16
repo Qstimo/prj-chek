@@ -8,7 +8,6 @@ import { EnvironmentForm } from './EnvironmentForm';
 const initial = {
   name: '',
   kind: EnvironmentKind.Production,
-  host: null,
   serverId: null,
   serverName: null,
   healthCheckUrl: null,
@@ -31,17 +30,21 @@ describe('EnvironmentForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('отправляет заполненные поля', async () => {
+  it('отправляет заполненные поля, а адрес — доменом', async () => {
+    // Отдельного поля адреса нет: домен и есть адрес, и только он попадает
+    // в реестр корней и под проверки сертификата и срока продления.
     const onSubmit = vi.fn();
     render(<EnvironmentForm initial={initial} onSubmit={onSubmit} />);
 
     await userEvent.type(screen.getByLabelText('Название'), 'Прод');
-    await userEvent.type(screen.getByLabelText('Адрес окружения'), 'prod.example.com');
+    await userEvent.type(screen.getByLabelText('Домены'), 'prod.example.com');
+    await userEvent.click(screen.getByRole('button', { name: 'Добавить домен' }));
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'Прод', host: 'prod.example.com' }),
+      expect.objectContaining({ name: 'Прод', domains: ['prod.example.com'] }),
     );
+    expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty('host');
   });
 
   it('превращает пустые поля в отсутствие значения', async () => {

@@ -10,8 +10,6 @@ export interface ServerOption {
 export interface EnvironmentFormValues {
   name: string;
   kind: EnvironmentKind;
-  /** Собственный адрес окружения; перекрывает адрес машины. */
-  host: string | null;
   serverId: string | null;
   /**
    * Имя привязанной машины.
@@ -22,6 +20,7 @@ export interface EnvironmentFormValues {
   serverName: string | null;
   healthCheckUrl: string | null;
   notes: string | null;
+  /** Домены окружения. Они же его адрес: отдельного поля адреса нет. */
   domains: string[];
 }
 

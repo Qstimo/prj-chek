@@ -9,7 +9,6 @@ const row: Environment = {
   projectId: '22222222-2222-2222-2222-222222222222',
   name: 'Прод',
   kind: EnvironmentKind.Production,
-  host: null,
   serverId: '33333333-3333-3333-3333-333333333333',
   healthCheckUrl: 'https://example.com/health',
   notes: 'Заметка',
@@ -96,15 +95,18 @@ describe('проекция окружения', () => {
     expect(projected.server).toBeNull();
   });
 
-  it('собственный адрес окружения остаётся при нём', () => {
+  it('не несёт отдельного адреса окружения: адрес — это домены', () => {
     const projected = environmentProjection(
-      { ...row, host: 'stage.example.com' },
-      domains,
+      row,
+      ['stage.example.com'],
       AccessLevel.Read,
       server,
     ) as EnvironmentDetail;
 
-    expect(projected.host).toBe('stage.example.com');
+    expect(projected).not.toHaveProperty('host');
+    expect(projected.domains).toEqual(['stage.example.com']);
+    // Адрес машины при этом остаётся: это свойство сервера, а не окружения.
+    expect(projected.server?.host).toBe('srv-1.example.com');
   });
 
   it('отдаёт время строками', () => {

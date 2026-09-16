@@ -86,17 +86,24 @@ describe('привязка окружения к серверу', () => {
 });
 
 describe('адрес окружения', () => {
-  it('принимает собственный адрес окружения', () => {
-    expect(environmentUpdateSchema.parse({ host: 'stage.example.com' }).host).toBe(
-      'stage.example.com',
-    );
+  it('задаётся доменами и только ими', () => {
+    // Отдельного поля адреса нет намеренно: пока их было два, домены
+    // попадали в реестр корней и под проверки сроков, а «адрес окружения» —
+    // никуда, и подрядчик вписывал стенд в поле, которое система не смотрит.
+    const parsed = environmentUpdateSchema.parse({
+      host: 'stage.example.com',
+      domains: ['stage.example.com'],
+    });
+
+    expect(parsed).not.toHaveProperty('host');
+    expect(parsed.domains).toEqual(['stage.example.com']);
   });
 
   it('принимает пустые значения как отсутствие', () => {
     // Реестр заполняется постепенно: «адрес неизвестен» — рабочее состояние.
-    const parsed = environmentUpdateSchema.parse({ host: null, notes: null });
+    const parsed = environmentUpdateSchema.parse({ notes: null });
 
-    expect(parsed.host).toBeNull();
+    expect(parsed.notes).toBeNull();
   });
 
   it('требует адрес health-check в виде ссылки', () => {
@@ -114,7 +121,6 @@ describe('схема деталей окружения', () => {
     name: 'Прод',
     kind: EnvironmentKind.Production,
     domains: ['example.com'],
-    host: null,
     healthCheckUrl: null,
     notes: null,
     createdAt: '2026-09-10T10:00:00.000Z',

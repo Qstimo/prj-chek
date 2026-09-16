@@ -83,11 +83,11 @@ describe('сервис окружений', () => {
       kind: EnvironmentKind.Production,
     });
 
-    await service.update(admin(), projectId, created.id, { host: 'prod.example.com' });
+    await service.update(admin(), projectId, created.id, { domains: ['prod.example.com'] });
 
     const [entry] = await entriesOf(AuditAction.EnvironmentUpdated);
 
-    expect(entry?.metadata).toMatchObject({ fields: ['host'] });
+    expect(entry?.metadata).toMatchObject({ fields: ['domains'] });
     expect(JSON.stringify(entry?.metadata)).not.toContain('prod.example.com');
   });
 

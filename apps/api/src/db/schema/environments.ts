@@ -33,11 +33,6 @@ export const environments = pgTable(
     name: text('name').notNull(),
     kind: environmentKindEnum('kind').notNull(),
     /**
-     * Собственный адрес окружения. Перекрывает адрес машины: окружение
-     * может жить на поддомене или нестандартном порту.
-     */
-    host: text('host'),
-    /**
      * Машина, на которой живёт окружение.
      *
      * `restrict`, а не каскад: удаление сервера должно быть осознанным
