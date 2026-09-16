@@ -10,6 +10,7 @@ import { DbModule } from './db/db.module';
 import { DocsModule } from './docs/docs.module';
 import { EnvironmentsModule } from './environments/environments.module';
 import { GrantsModule } from './grants/grants.module';
+import { HealthModule } from './health/health.module';
 import { IntakeModule } from './intake/intake.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -25,6 +26,7 @@ import { VariablesModule } from './variables/variables.module';
   imports: [
     DbModule,
     CryptoModule,
+    HealthModule,
     AuditModule,
     AccessModule,
     AuthModule,

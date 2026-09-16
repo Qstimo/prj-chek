@@ -8,6 +8,9 @@ coverage/
 .env.*
 !.env.example
 
+# Резервные копии базы: снимаются scripts/backup.sh на сервере.
+backups/
+
 .claude/settings.local.json
 
 *.log

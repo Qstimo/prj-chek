@@ -18,7 +18,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Перед реализацией читай ТЗ и дизайн. ТЗ отвечает на вопрос «что и почему», дизайн — «как именно на этапе 1».
 
-Команды разработки, проверок и развёртывания — в `README.md`. Коротко: `pnpm test` (Vitest во всех рабочих пространствах, интеграционные поднимают PostgreSQL через Testcontainers), `pnpm typecheck`, `pnpm build`. Линтера в проекте нет.
+Команды разработки, проверок и развёртывания — в `README.md`; развёртывание
+собрано в `scripts/`: основной путь — `git pull` на сервере и `deploy.sh` там же;
+запасные — `deploy-remote.sh` (rsync рабочей копии) и `deploy-image.sh` (сборка
+на рабочей машине, перенос образа), оба заканчиваются тем же `deploy.sh`. Рядом
+`preflight.sh`, `backup.sh`, `restore.sh`, `rollback.sh`. Коротко: `pnpm test` (Vitest во всех рабочих пространствах, интеграционные поднимают PostgreSQL через Testcontainers), `pnpm typecheck`, `pnpm build`. Линтера в проекте нет.
 
 Структура файлов задана разделом «Структура файлов» плана этапа 1 — новые файлы размещай по нему.
 
