@@ -10,7 +10,7 @@
   },
   "scripts": {
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm --filter @cairn/shared build && pnpm -r typecheck",
     "build": "pnpm -r build",
     "e2e": "node scripts/e2e.mjs"
   },
