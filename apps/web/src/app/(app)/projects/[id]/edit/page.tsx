@@ -27,7 +27,7 @@ export default async function EditProjectPage({ params }: { params: Promise<{ id
   }
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
+    <main className="space-y-6 pb-6">
       <h1 className="text-2xl font-semibold">Правка проекта</h1>
       <EditProjectScreen
         projectId={id}

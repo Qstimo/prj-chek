@@ -64,81 +64,12 @@ describe('ProjectSections', () => {
     expect(screen.queryByText('Стек')).not.toBeInTheDocument();
   });
 
-  it('показывает ссылку на инфраструктуру при доступе к секции', () => {
-    render(
-      <ProjectSections
-        project={metadataOnly}
-        sections={{ [Section.Infrastructure]: AccessLevel.Metadata }}
-      />,
-    );
-
-    expect(screen.getByRole('link', { name: 'Инфраструктура' })).toHaveAttribute(
-      'href',
-      `/projects/${metadataOnly.id}/infrastructure`,
-    );
-  });
-
-  it('не показывает недоступную секцию', () => {
-    // Недоступные секции отсутствуют, а не выглядят заблокированными (ТЗ 8).
-    render(<ProjectSections project={metadataOnly} sections={{}} />);
+  it('не дублирует навигацию по разделам', () => {
+    // Крошки и полоса разделов живут в каркасе экранов проекта (ProjectNav):
+    // здесь они давали вторую такую же полосу на той же странице.
+    render(<ProjectSections project={detailed} />);
 
     expect(screen.queryByRole('link', { name: 'Инфраструктура' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Хроника' })).not.toBeInTheDocument();
-  });
-
-  it('показывает ссылку на переменные при доступе к секции', () => {
-    render(
-      <ProjectSections
-        project={metadataOnly}
-        sections={{ [Section.Variables]: AccessLevel.Metadata }}
-      />,
-    );
-
-    expect(screen.getByRole('link', { name: 'Переменные' })).toHaveAttribute(
-      'href',
-      `/projects/${metadataOnly.id}/variables`,
-    );
-  });
-
-  it('показывает ссылку на роадмап при доступе к секции', () => {
-    render(
-      <ProjectSections
-        project={metadataOnly}
-        sections={{ [Section.Roadmap]: AccessLevel.Metadata }}
-      />,
-    );
-
-    expect(screen.getByRole('link', { name: 'Роадмап' })).toHaveAttribute(
-      'href',
-      `/projects/${metadataOnly.id}/roadmap`,
-    );
-  });
-
-  it('показывает ссылку на документацию при доступе к секции', () => {
-    render(
-      <ProjectSections
-        project={metadataOnly}
-        sections={{ [Section.Docs]: AccessLevel.Metadata }}
-      />,
-    );
-
-    expect(screen.getByRole('link', { name: 'Документация' })).toHaveAttribute(
-      'href',
-      `/projects/${metadataOnly.id}/docs`,
-    );
-  });
-
-  it('показывает ссылку на хронику при доступе к секции', () => {
-    render(
-      <ProjectSections
-        project={metadataOnly}
-        sections={{ [Section.Chronicle]: AccessLevel.Metadata }}
-      />,
-    );
-
-    expect(screen.getByRole('link', { name: 'Хроника' })).toHaveAttribute(
-      'href',
-      `/projects/${metadataOnly.id}/chronicle`,
-    );
+    expect(screen.queryByRole('link', { name: 'Переменные' })).not.toBeInTheDocument();
   });
 });

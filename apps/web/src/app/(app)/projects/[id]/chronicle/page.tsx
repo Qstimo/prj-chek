@@ -23,7 +23,7 @@ export default async function ChroniclePage({ params }: { params: Promise<{ id: 
   }
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
+    <main className="space-y-6 pb-6">
       <h1 className="text-2xl font-semibold">Хроника</h1>
       <ChronicleScreen projectId={id} isSuperadmin={subject.isSuperadmin} />
     </main>

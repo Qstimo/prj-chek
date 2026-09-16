@@ -28,7 +28,7 @@ export default async function InfrastructurePage({
   }
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
+    <main className="space-y-6 pb-6">
       <h1 className="text-2xl font-semibold">Инфраструктура</h1>
       <InfrastructureStatusPanel projectId={id} isSuperadmin={subject.isSuperadmin} />
       <InfrastructureScreen projectId={id} isSuperadmin={subject.isSuperadmin} />

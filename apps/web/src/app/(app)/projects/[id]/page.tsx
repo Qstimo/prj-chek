@@ -1,22 +1,23 @@
-import type { ProjectDetail, ProjectMetadata, SectionLevels } from '@cairn/shared';
+import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
 import { notFound, redirect } from 'next/navigation';
 
 import { ApiError } from '@/api';
 import { apiServer } from '@/api/server';
 import { ProjectSections } from '@/components/ProjectSections';
 
-/** Карточка проекта. */
+/**
+ * Карточка проекта: паспорт.
+ *
+ * Уровни доступа по секциям здесь не запрашиваются — их берёт каркас
+ * (`layout.tsx`), который и решает состав разделов.
+ */
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   let project: ProjectMetadata | ProjectDetail;
-  let sections: SectionLevels;
 
   try {
-    [project, sections] = await Promise.all([
-      apiServer<ProjectMetadata | ProjectDetail>(`/projects/${id}`),
-      apiServer<SectionLevels>(`/projects/${id}/sections`),
-    ]);
+    project = await apiServer<ProjectMetadata | ProjectDetail>(`/projects/${id}`);
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 401) {
       redirect('/login');
@@ -31,8 +32,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <ProjectSections project={project} sections={sections} />
+    <main className="space-y-6 pb-6">
+      <ProjectSections project={project} />
     </main>
   );
 }

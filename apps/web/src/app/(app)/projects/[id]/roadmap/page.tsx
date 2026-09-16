@@ -23,7 +23,7 @@ export default async function RoadmapPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
+    <main className="space-y-6 pb-6">
       <h1 className="text-2xl font-semibold">Роадмап</h1>
       <RoadmapScreen projectId={id} isSuperadmin={subject.isSuperadmin} />
     </main>

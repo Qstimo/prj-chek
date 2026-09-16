@@ -1,66 +1,22 @@
-import { Section, type ProjectDetail, type ProjectMetadata } from '@cairn/shared';
-import Link from 'next/link';
+import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
 
 import { FIELD_LABELS } from './constants';
 import type { IProps } from './types';
 
 /**
- * Секция «Инфо» карточки проекта.
+ * Секция «Инфо» карточки проекта: паспорт и ничего больше.
  *
  * Различает уровень доступа по составу пришедших полей: на уровне
  * метаданных API не присылает паспорт вовсе, и показывать нечего (спека 5.5).
- * Недоступные секции не приходят от API и потому здесь отсутствуют,
- * а не показываются заблокированными (ТЗ 8).
+ * Переходы по разделам сюда не входят: крошки и полоса разделов живут
+ * в каркасе экранов проекта, иначе на карточке было бы две одинаковых полосы.
  */
-export function ProjectSections({ project, sections = {} }: IProps) {
+export function ProjectSections({ project }: IProps) {
   const detail = isDetailed(project) ? project : null;
 
   return (
     <section className="space-y-4">
       <h1 className="text-2xl font-semibold">{project.name}</h1>
-
-      <nav className="flex flex-wrap gap-2">
-        {sections[Section.Infrastructure] && (
-          <Link
-            href={`/projects/${project.id}/infrastructure`}
-            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
-          >
-            Инфраструктура
-          </Link>
-        )}
-        {sections[Section.Variables] && (
-          <Link
-            href={`/projects/${project.id}/variables`}
-            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
-          >
-            Переменные
-          </Link>
-        )}
-        {sections[Section.Docs] && (
-          <Link
-            href={`/projects/${project.id}/docs`}
-            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
-          >
-            Документация
-          </Link>
-        )}
-        {sections[Section.Roadmap] && (
-          <Link
-            href={`/projects/${project.id}/roadmap`}
-            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
-          >
-            Роадмап
-          </Link>
-        )}
-        {sections[Section.Chronicle] && (
-          <Link
-            href={`/projects/${project.id}/chronicle`}
-            className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
-          >
-            Хроника
-          </Link>
-        )}
-      </nav>
 
       {detail ? (
         <dl className="grid gap-3">
