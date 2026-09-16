@@ -9,4 +9,6 @@ export interface IProps {
   onPublish: () => void;
   onUnpublish: () => void;
   isPending?: boolean;
+  /** Отказ сервера: показывается под содержимым панели. */
+  error?: string;
 }

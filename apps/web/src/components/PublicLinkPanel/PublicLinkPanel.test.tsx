@@ -45,4 +45,19 @@ describe('PublicLinkPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Подтвердить отключение' }));
     expect(onUnpublish).toHaveBeenCalled();
   });
+
+  it('показывает отказ сервера, а не молчит', () => {
+    // Без этого неудачная публикация выглядела как «ничего не произошло».
+    render(
+      <PublicLinkPanel
+        link={null}
+        isSuperadmin
+        onPublish={vi.fn()}
+        onUnpublish={vi.fn()}
+        error="Недостаточно прав для этого действия."
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Недостаточно прав');
+  });
 });

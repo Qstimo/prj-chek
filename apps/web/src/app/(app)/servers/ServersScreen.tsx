@@ -2,6 +2,7 @@
 
 import { useMutationDeleteServer, useQueryServers } from '@/api/hooks';
 import { ServerList } from '@/components/ServerList';
+import { describeApiError } from '@/api';
 
 /** Реестр серверов с удалением. */
 export function ServersScreen() {
@@ -24,7 +25,7 @@ export function ServersScreen() {
     <div className="space-y-4">
       {remove.isError && (
         <p role="alert" className="text-destructive">
-          {remove.error.message}
+          {describeApiError(remove.error)}
         </p>
       )}
 

@@ -81,4 +81,18 @@ describe('IntakeAddressPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Подтвердить отзыв' }));
     expect(onRevoke).toHaveBeenCalled();
   });
+
+  it('показывает отказ сервера, а не молчит', () => {
+    render(
+      <IntakeAddressPanel
+        address={null}
+        isSuperadmin
+        onCreate={vi.fn()}
+        onRevoke={vi.fn()}
+        error="Действие невозможно в текущем состоянии."
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Действие невозможно');
+  });
 });

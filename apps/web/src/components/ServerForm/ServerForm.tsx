@@ -6,6 +6,7 @@ import { useState, type FormEvent } from 'react';
 import { TextField } from '../TextField';
 import { FIELD_LABELS, TEXT_FIELDS } from './constants';
 import type { IProps, ServerFormValues } from './types';
+import { FormError } from '../FormError';
 
 /** Форма сервера: создание и правка (спека этапа 9, раздел 7). */
 export function ServerForm({ initial, onSubmit, error, isSubmitting = false }: IProps) {
@@ -71,11 +72,7 @@ export function ServerForm({ initial, onSubmit, error, isSubmitting = false }: I
         multiline
       />
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

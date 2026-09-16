@@ -10,4 +10,6 @@ export interface IProps {
   onToggleReveal: (tokenId: string, value: boolean) => void;
   onRevoke: (tokenId: string) => void;
   isPending?: boolean;
+  /** Отказ сервера: показывается под содержимым панели. */
+  error?: string;
 }

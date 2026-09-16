@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 
 import { useMutationTotpConfirm, useMutationTotpSetup } from '@/api/hooks';
 import { TotpSetup } from '@/components/TotpSetup';
+import { describeApiError } from '@/api';
 
 /** Привязка второго фактора для текущего пользователя. */
 export function SecurityScreen() {
@@ -23,7 +24,7 @@ export function SecurityScreen() {
   if (setup.isError) {
     return (
       <p role="alert" className="text-destructive">
-        {setup.error.message}
+        {describeApiError(setup.error)}
       </p>
     );
   }

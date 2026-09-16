@@ -10,4 +10,6 @@ export interface IProps {
   onRevoke: () => void;
   /** Действие в процессе. */
   isPending?: boolean;
+  /** Отказ сервера: показывается под содержимым панели. */
+  error?: string;
 }

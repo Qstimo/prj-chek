@@ -40,6 +40,23 @@ describe('ZodValidationPipe', () => {
     }
   });
 
+  it('называет вид ошибки, а не только текст zod', () => {
+    // Тексты zod английские; по виду интерфейс подбирает русскую
+    // формулировку, поэтому вид обязан доехать до клиента.
+    try {
+      pipe.transform({ email: 'не адрес', age: -1 });
+      expect.unreachable('ожидалось исключение');
+    } catch (error) {
+      const { issues } = (error as BadRequestException).getResponse() as {
+        issues: { path: string; code: string; message: string }[];
+      };
+
+      expect(issues).toHaveLength(2);
+      expect(issues[0]).toMatchObject({ path: 'email', code: 'invalid_string' });
+      expect(issues[1]).toMatchObject({ path: 'age', code: 'too_small' });
+    }
+  });
+
   it('отвергает значение, не являющееся объектом', () => {
     expect(() => pipe.transform('строка')).toThrow(BadRequestException);
   });

@@ -6,6 +6,7 @@ import { useState, type FormEvent } from 'react';
 import { TextField } from '../TextField';
 import { FIELD_LABELS, NAME_HINT } from './constants';
 import type { DomainFormValues, IProps } from './types';
+import { FormError } from '../FormError';
 
 /** Форма корневого домена: создание и правка (спека этапа 10, раздел 7). */
 export function DomainForm({
@@ -82,11 +83,7 @@ export function DomainForm({
         multiline
       />
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

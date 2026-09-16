@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 import { RevokeButton } from './RevokeButton';
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /**
@@ -17,6 +18,7 @@ export function IntakeAddressPanel({
   onCreate,
   onRevoke,
   isPending = false,
+  error,
 }: IProps) {
   const [isCopied, setIsCopied] = useState(false);
 
@@ -38,6 +40,8 @@ export function IntakeAddressPanel({
             Приёмного адреса нет. Его создаёт администратор.
           </p>
         )}
+
+        <FormError message={error} />
       </section>
     );
   }
@@ -66,6 +70,7 @@ export function IntakeAddressPanel({
       </p>
 
       {isSuperadmin && <RevokeButton onRevoke={onRevoke} disabled={isPending} />}
+      <FormError message={error} />
     </section>
   );
 }

@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 
 import { TextField } from '../TextField';
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /**
@@ -61,11 +62,7 @@ export function VariableForm({
         />
       </div>
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

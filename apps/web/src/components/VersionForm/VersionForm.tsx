@@ -8,6 +8,7 @@ import { TextField } from '../TextField';
 // VersionForm → VersionDrawer/index → VersionDrawer → VersionForm.
 import { STATE_LABELS } from '../VersionDrawer/constants';
 import { DateField } from './DateField';
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /** Форма версии роадмапа: обозначение, состояние, даты (ТЗ 3.5). */
@@ -75,11 +76,7 @@ export function VersionForm({ initial, onSubmit, error, isSubmitting = false }: 
         <DateField id="releasedDate" label="Дата релиза" value={releasedDate} onChange={setReleasedDate} />
       )}
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

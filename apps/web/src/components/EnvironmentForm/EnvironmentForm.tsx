@@ -9,6 +9,7 @@ import { DOMAINS_HINT, FIELD_LABELS } from './constants';
 import { KindField } from './KindField';
 import { ServerField } from './ServerField';
 import type { EnvironmentFormValues, IProps } from './types';
+import { FormError } from '../FormError';
 
 /** Форма окружения: создание и правка (ТЗ 3.2). */
 export function EnvironmentForm({
@@ -87,11 +88,7 @@ export function EnvironmentForm({
         <p className="text-xs text-muted-foreground">{DOMAINS_HINT}</p>
       </div>
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

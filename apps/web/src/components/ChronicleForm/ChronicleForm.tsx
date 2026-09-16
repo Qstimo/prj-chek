@@ -6,6 +6,7 @@ import { useState, type FormEvent } from 'react';
 import { TextField } from '../TextField';
 import { FIELD_LABELS } from './constants';
 import type { ChronicleFormValues, IProps } from './types';
+import { FormError } from '../FormError';
 
 /** Форма записи хроники: создание и правка (ТЗ 3.6). */
 export function ChronicleForm({ initial, onSubmit, error, isSubmitting = false }: IProps) {
@@ -64,11 +65,7 @@ export function ChronicleForm({ initial, onSubmit, error, isSubmitting = false }
         multiline
       />
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

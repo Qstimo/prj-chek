@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import { useMutationCreateProject } from '@/api/hooks';
 import { ProjectForm } from '@/components/ProjectForm';
+import { describeApiError } from '@/api';
 
 /** Создание проекта. */
 export function NewProjectScreen() {
@@ -22,7 +23,7 @@ export function NewProjectScreen() {
         lifecycle: ProjectLifecycle.Development,
       }}
       isSubmitting={mutation.isPending}
-      error={mutation.error?.message}
+      error={describeApiError(mutation.error)}
       onSubmit={(input) =>
         mutation.mutate(input as ProjectCreate, {
           onSuccess: (created) => {

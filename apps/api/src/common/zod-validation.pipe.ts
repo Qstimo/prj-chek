@@ -17,8 +17,11 @@ export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
     if (!result.success) {
       throw new BadRequestException({
         message: 'Неверные данные запроса',
+        // Вид ошибки (`code`) уезжает вместе с текстом: тексты zod английские,
+        // и по виду интерфейс подбирает формулировку на языке системы.
         issues: result.error.issues.map((issue) => ({
           path: issue.path.join('.'),
+          code: issue.code,
           message: issue.message,
         })),
       });

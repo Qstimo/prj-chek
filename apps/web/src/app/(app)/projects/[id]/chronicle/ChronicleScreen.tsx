@@ -27,6 +27,7 @@ import { ChronicleList } from '@/components/ChronicleList';
 import { IntakeAddressPanel } from '@/components/IntakeAddressPanel';
 import { PromoteToCheckpoint } from '@/components/PromoteToCheckpoint';
 import { PromoteToDoc } from '@/components/PromoteToDoc';
+import { describeApiError } from '@/api';
 
 /** Пропсы экрана хроники. */
 interface IProps {
@@ -97,7 +98,7 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
         <ChronicleForm
           initial={formValuesOf(editing)}
           isSubmitting={create.isPending || update.isPending}
-          error={(create.error ?? update.error)?.message}
+          error={describeApiError(create.error ?? update.error)}
           onSubmit={submit}
         />
       )}
@@ -153,6 +154,7 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
           isPending={createAddress.isPending || revokeAddress.isPending}
           onCreate={() => createAddress.mutate()}
           onRevoke={() => revokeAddress.mutate()}
+          error={describeApiError(createAddress.error ?? revokeAddress.error)}
         />
       )}
     </div>

@@ -4,6 +4,7 @@ import type { DocPageCreate } from '@cairn/shared';
 import { useState, type FormEvent } from 'react';
 
 import { TextField } from '../TextField';
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /** Форма страницы документации: заголовок и Markdown-содержимое (ТЗ 3.4). */
@@ -44,11 +45,7 @@ export function DocPageForm({ initial, onSubmit, error, isSubmitting = false }: 
         </p>
       </div>
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

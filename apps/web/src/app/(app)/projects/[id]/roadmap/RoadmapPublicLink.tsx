@@ -5,6 +5,7 @@ import {
   useMutationUnpublishRoadmap,
   useQueryPublicLink,
 } from '@/api/hooks';
+import { describeApiError } from '@/api';
 import { PublicLinkPanel } from '@/components/PublicLinkPanel';
 
 /** Пропсы блока публичной ссылки роадмапа. */
@@ -26,6 +27,7 @@ export function RoadmapPublicLink({ projectId, isSuperadmin }: IProps) {
       isPending={publish.isPending || unpublish.isPending}
       onPublish={() => publish.mutate()}
       onUnpublish={() => unpublish.mutate()}
+      error={describeApiError(publish.error ?? unpublish.error)}
     />
   );
 }

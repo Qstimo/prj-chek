@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /** Второй шаг входа: код из приложения-аутентификатора (спека 6.1). */
@@ -34,11 +35,7 @@ export function TotpForm({ onSubmit, error, isSubmitting = false }: IProps) {
         />
       </div>
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

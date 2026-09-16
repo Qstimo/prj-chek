@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /**
@@ -86,11 +87,7 @@ export function EnvTransferPanel({
         </div>
       )}
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
     </section>
   );
 }

@@ -3,7 +3,7 @@
 import type { ProjectUpdate } from '@cairn/shared';
 import { useRouter } from 'next/navigation';
 
-import { ApiError } from '@/api';
+import { ApiError, describeApiError } from '@/api';
 import { useMutationUpdateProject } from '@/api/hooks';
 import { ProjectForm, type ProjectFormValues } from '@/components/ProjectForm';
 
@@ -33,7 +33,7 @@ export function EditProjectScreen({ projectId, initial }: IProps) {
       onSubmit={submit}
       isSubmitting={mutation.isPending}
       error={
-        mutation.error instanceof ApiError ? mutation.error.message : mutation.error?.message
+        describeApiError(mutation.error)
       }
     />
   );

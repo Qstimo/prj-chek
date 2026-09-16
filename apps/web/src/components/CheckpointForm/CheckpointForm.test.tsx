@@ -31,4 +31,10 @@ describe('CheckpointForm', () => {
 
     expect(screen.getByLabelText('Формулировка')).toHaveValue('Из хроники');
   });
+
+  it('показывает отказ сервера, а не молчит', () => {
+    render(<CheckpointForm onSubmit={vi.fn()} error="Формулировка: заполните поле" />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('заполните поле');
+  });
 });

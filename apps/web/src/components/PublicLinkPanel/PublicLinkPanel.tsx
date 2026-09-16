@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /**
@@ -16,6 +17,7 @@ export function PublicLinkPanel({
   onPublish,
   onUnpublish,
   isPending = false,
+  error,
 }: IProps) {
   const [isCopied, setIsCopied] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -87,6 +89,7 @@ export function PublicLinkPanel({
       ) : (
         <p className="text-muted-foreground">Роадмап не опубликован.</p>
       )}
+      <FormError message={error} />
     </section>
   );
 }

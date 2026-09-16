@@ -2,10 +2,16 @@
 
 import { useState, type FormEvent } from 'react';
 
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /** Форма чекпоинта: одна формулировка — больше у чекпоинта ничего нет (ТЗ 3.5). */
-export function CheckpointForm({ initialTitle = '', onSubmit, isSubmitting = false }: IProps) {
+export function CheckpointForm({
+  initialTitle = '',
+  onSubmit,
+  isSubmitting = false,
+  error,
+}: IProps) {
   const [title, setTitle] = useState(initialTitle);
 
   const canSubmit = title.trim().length > 0 && !isSubmitting;
@@ -22,7 +28,8 @@ export function CheckpointForm({ initialTitle = '', onSubmit, isSubmitting = fal
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2">
+    <form onSubmit={handleSubmit} className="space-y-2">
+      <div className="flex gap-2">
       <div className="flex-1 space-y-1">
         <label htmlFor="checkpoint-title" className="block text-sm font-medium">
           Формулировка
@@ -40,7 +47,10 @@ export function CheckpointForm({ initialTitle = '', onSubmit, isSubmitting = fal
         className="self-end rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
       >
         Добавить
-      </button>
+        </button>
+      </div>
+
+      <FormError message={error} />
     </form>
   );
 }

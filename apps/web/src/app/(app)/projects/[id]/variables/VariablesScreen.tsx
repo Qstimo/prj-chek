@@ -25,6 +25,7 @@ import { VariableForm } from '@/components/VariableForm';
 import { VariableTable } from '@/components/VariableTable';
 
 import { VariableHistoryPanel } from './VariableHistoryPanel';
+import { describeApiError } from '@/api';
 
 /** Пропсы экрана переменных одного окружения. */
 interface IProps {
@@ -96,7 +97,7 @@ export function VariablesScreen({ projectId, environmentId }: IProps) {
           initial={editing ? { key: editing.key, description: editing.description } : undefined}
           isEditing={Boolean(editing)}
           isSubmitting={create.isPending || update.isPending}
-          error={(create.error ?? update.error)?.message}
+          error={describeApiError(create.error ?? update.error)}
           onSubmit={submit}
         />
       )}
@@ -130,7 +131,7 @@ export function VariablesScreen({ projectId, environmentId }: IProps) {
         canReveal={canReveal}
         isPending={importEnv.isPending || exportEnv.isPending}
         importResult={importEnv.data}
-        error={(importEnv.error ?? exportEnv.error)?.message}
+        error={describeApiError(importEnv.error ?? exportEnv.error)}
         onImport={(content) => importEnv.mutate(content)}
         onExport={() => exportEnv.mutateAsync()}
       />

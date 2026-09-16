@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /**
@@ -51,11 +52,7 @@ export function DomainsField({ value, onChange }: IProps) {
         </button>
       </div>
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error ?? undefined} />
 
       {value.length > 0 && (
         <ul className="flex flex-wrap gap-2">

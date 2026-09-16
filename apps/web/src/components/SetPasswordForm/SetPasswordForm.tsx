@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /** Установка пароля по одноразовой ссылке (спека 6.7). */
@@ -55,11 +56,7 @@ export function SetPasswordForm({ onSubmit, error, isSubmitting = false }: IProp
         {isMismatched && <p className="text-sm text-destructive">Пароли не совпадают</p>}
       </div>
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

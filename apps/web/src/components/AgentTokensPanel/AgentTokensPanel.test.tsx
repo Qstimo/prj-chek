@@ -86,4 +86,19 @@ describe('AgentTokensPanel', () => {
 
     expect(onToggleReveal).toHaveBeenCalledWith(token.id, true);
   });
+
+  it('показывает отказ сервера, а не молчит', () => {
+    render(
+      <AgentTokensPanel
+        tokens={[]}
+        createdToken={null}
+        onCreate={vi.fn()}
+        onToggleReveal={vi.fn()}
+        onRevoke={vi.fn()}
+        error="Название: слишком длинное значение"
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('слишком длинное значение');
+  });
 });

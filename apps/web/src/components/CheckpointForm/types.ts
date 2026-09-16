@@ -6,4 +6,6 @@ export interface IProps {
   initialTitle?: string;
   onSubmit: (input: RoadmapCheckpointCreate) => void;
   isSubmitting?: boolean;
+  /** Отказ сервера: показывается под полем. */
+  error?: string;
 }

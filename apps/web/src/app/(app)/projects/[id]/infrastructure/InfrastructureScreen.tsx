@@ -20,6 +20,7 @@ import {
 } from '@/api/hooks';
 import { EnvironmentForm, type EnvironmentFormValues } from '@/components/EnvironmentForm';
 import { EnvironmentList } from '@/components/EnvironmentList';
+import { describeApiError } from '@/api';
 
 /** Пропсы экрана инфраструктуры. */
 interface IProps {
@@ -84,7 +85,7 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
           servers={servers.data ?? []}
           canAssignServer={isSuperadmin}
           isSubmitting={create.isPending || update.isPending}
-          error={(create.error ?? update.error)?.message}
+          error={describeApiError(create.error ?? update.error)}
           onSubmit={submit}
         />
       )}

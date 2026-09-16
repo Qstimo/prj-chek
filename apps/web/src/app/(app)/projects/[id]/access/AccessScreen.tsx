@@ -1,5 +1,6 @@
 'use client';
 
+import { describeApiError } from '@/api';
 import {
   useMutationCreateAgentToken,
   useMutationRevokeAgentToken,
@@ -63,13 +64,9 @@ export function AccessScreen({ projectId }: IProps) {
   return (
     <div className="space-y-6">
       <AccessMatrix rows={rows} onChange={(change) => setGrant.mutate(change)} />
-      {createToken.isError && (
-        <p role="alert" className="text-destructive">
-          Не удалось создать токен агента.
-        </p>
-      )}
       <AgentTokensPanel
         tokens={tokens.data}
+        error={describeApiError(createToken.error ?? toggleReveal.error ?? revokeToken.error ?? setGrant.error)}
         createdToken={createToken.data ?? null}
         onCreate={(input) => createToken.mutate(input)}
         onToggleReveal={(tokenId, value) => toggleReveal.mutate({ tokenId, value })}

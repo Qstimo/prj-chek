@@ -2,6 +2,7 @@
 
 import { useMutationDeleteDomain, useQueryDomains } from '@/api/hooks';
 import { DomainList } from '@/components/DomainList';
+import { describeApiError } from '@/api';
 
 /** Реестр корневых доменов с удалением. */
 export function DomainsScreen() {
@@ -24,7 +25,7 @@ export function DomainsScreen() {
     <div className="space-y-4">
       {remove.isError && (
         <p role="alert" className="text-destructive">
-          {remove.error.message}
+          {describeApiError(remove.error)}
         </p>
       )}
 

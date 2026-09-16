@@ -7,6 +7,7 @@ import { TextField } from '../TextField';
 import { FIELD_LABELS } from './constants';
 import { LifecycleField } from './LifecycleField';
 import type { IProps, ProjectFormValues } from './types';
+import { FormError } from '../FormError';
 
 /** Форма паспорта проекта: создание и правка (спека 9.1). */
 export function ProjectForm({ initial, onSubmit, error, isSubmitting = false }: IProps) {
@@ -72,11 +73,7 @@ export function ProjectForm({ initial, onSubmit, error, isSubmitting = false }: 
 
       <LifecycleField value={values.lifecycle} onChange={(value) => change('lifecycle', value)} />
 
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <button
         type="submit"

@@ -3,6 +3,7 @@
 import { AgentTokenCreateForm } from './AgentTokenCreateForm';
 import { AgentTokenRow } from './AgentTokenRow';
 import { CreatedTokenNotice } from './CreatedTokenNotice';
+import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /**
@@ -18,6 +19,7 @@ export function AgentTokensPanel({
   onToggleReveal,
   onRevoke,
   isPending = false,
+  error,
 }: IProps) {
   return (
     <section className="space-y-4 rounded-md border border-border p-4">
@@ -42,6 +44,7 @@ export function AgentTokensPanel({
       )}
 
       <AgentTokenCreateForm onCreate={onCreate} isPending={isPending} />
+      <FormError message={error} />
     </section>
   );
 }

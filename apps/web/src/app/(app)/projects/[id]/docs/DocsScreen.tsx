@@ -14,6 +14,7 @@ import {
 import { DocPageForm } from '@/components/DocPageForm';
 import { DocPageList } from '@/components/DocPageList';
 import { Markdown } from '@/components/Markdown';
+import { describeApiError } from '@/api';
 
 /** Пропсы экрана документации. */
 interface IProps {
@@ -81,7 +82,7 @@ export function DocsScreen({ projectId }: IProps) {
               : undefined
           }
           isSubmitting={create.isPending || update.isPending}
-          error={(create.error ?? update.error)?.message}
+          error={describeApiError(create.error ?? update.error)}
           onSubmit={submit}
         />
       )}
