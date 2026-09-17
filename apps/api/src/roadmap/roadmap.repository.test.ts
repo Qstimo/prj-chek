@@ -1,4 +1,10 @@
-import { AccessLevel, RoadmapVersionState, Section, SubjectKind } from '@cairn/shared';
+import {
+  AccessLevel,
+  RoadmapVersionState,
+  Section,
+  SubjectKind,
+  type RoadmapVersionDetail,
+} from '@cairn/shared';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -238,7 +244,9 @@ describe('репозиторий роадмапа', () => {
 
       const roadmap = await repository.findForProject(member(), projectId);
 
-      expect(roadmap.versions[0]!.checkpoints[0]!.url).toBe('https://tracker.example.com/TASK-17');
+      const version = roadmap.versions[0] as RoadmapVersionDetail;
+
+      expect(version.checkpoints[0]!.url).toBe('https://tracker.example.com/TASK-17');
     });
 
     it('чекпоинт без ссылки отдаёт её пустой', async () => {
@@ -250,7 +258,9 @@ describe('репозиторий роадмапа', () => {
 
       const roadmap = await repository.findForProject(member(), projectId);
 
-      expect(roadmap.versions[0]!.checkpoints[0]!.url).toBeNull();
+      const version = roadmap.versions[0] as RoadmapVersionDetail;
+
+      expect(version.checkpoints[0]!.url).toBeNull();
     });
 
     it('чтение отдаёт формулировки', async () => {
