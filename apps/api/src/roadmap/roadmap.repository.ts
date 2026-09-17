@@ -3,6 +3,7 @@ import {
   RoadmapVersionState,
   Section,
   type PublicRoadmap,
+  type PublicVersion,
   type RoadmapCheckpointCreate,
   type RoadmapCheckpointUpdate,
   type RoadmapResponse,
@@ -170,6 +171,9 @@ export class RoadmapRepository {
       .values({
         versionId,
         title: input.title,
+        // `?? null`, а не `input.url`: поле необязательно в схеме создания,
+        // и `undefined` заставил бы Drizzle пропустить колонку молча.
+        url: input.url ?? null,
         position: Math.max(0, ...existing.map((row) => row.position)) + 1,
       })
       .returning();
@@ -285,11 +289,14 @@ export class RoadmapRepository {
       stage: stageOf(versions),
       versions: versions.map(
         (version) =>
+          // Без ссылок на задачи: страница открыта без авторизации, и адрес
+          // внутреннего трекера с номером задачи наружу уходить не должен.
           versionProjection(
             version,
             byVersion.get(version.id) ?? [],
             AccessLevel.Read,
-          ) as RoadmapVersionDetail,
+            false,
+          ) as PublicVersion,
       ),
     };
   }

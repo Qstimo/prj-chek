@@ -103,6 +103,7 @@ export class RoadmapController {
     return {
       id: created.id,
       title: created.title,
+      url: created.url,
       isDone: created.isDone,
       position: created.position,
     };
@@ -128,6 +129,7 @@ export class RoadmapController {
     return {
       id: updated.id,
       title: updated.title,
+      url: updated.url,
       isDone: updated.isDone,
       position: updated.position,
     };

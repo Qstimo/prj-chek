@@ -226,6 +226,33 @@ describe('репозиторий роадмапа', () => {
       expect(JSON.stringify(roadmap)).not.toContain('Секрет');
     });
 
+    it('сохраняет ссылку на задачу и отдаёт её при чтении', async () => {
+      const versionId = await createVersion();
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Со ссылкой',
+          url: 'https://tracker.example.com/TASK-17',
+        }),
+      );
+      await grant(AccessLevel.Read);
+
+      const roadmap = await repository.findForProject(member(), projectId);
+
+      expect(roadmap.versions[0]!.checkpoints[0]!.url).toBe('https://tracker.example.com/TASK-17');
+    });
+
+    it('чекпоинт без ссылки отдаёт её пустой', async () => {
+      const versionId = await createVersion();
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Без ссылки' }),
+      );
+      await grant(AccessLevel.Read);
+
+      const roadmap = await repository.findForProject(member(), projectId);
+
+      expect(roadmap.versions[0]!.checkpoints[0]!.url).toBeNull();
+    });
+
     it('чтение отдаёт формулировки', async () => {
       const versionId = await createVersion();
       await testDb.db.transaction((tx) =>
@@ -313,6 +340,24 @@ describe('репозиторий роадмапа', () => {
 
       expect(roadmap?.projectName).toBe('Проект');
       expect(JSON.stringify(roadmap)).toContain('Публичный');
+    });
+
+    it('публичная выдача не содержит ссылок на задачи', async () => {
+      // Страница открыта без авторизации: адрес внутреннего трекера вместе
+      // с номером задачи наружу уходить не должен.
+      const versionId = await createVersion();
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Публичный',
+          url: 'https://tracker.example.com/TASK-17',
+        }),
+      );
+      const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
+
+      const roadmap = await repository.publicRoadmap(token);
+
+      expect(roadmap?.versions[0]?.checkpoints[0]).not.toHaveProperty('url');
+      expect(JSON.stringify(roadmap)).not.toContain('tracker.example.com');
     });
 
     it('мусорный токен и отключённая публикация неразличимы', async () => {

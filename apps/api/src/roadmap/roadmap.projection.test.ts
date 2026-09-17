@@ -21,6 +21,7 @@ const checkpoints: RoadmapCheckpointRow[] = [
     id: '33333333-3333-3333-3333-333333333333',
     versionId: version.id,
     title: 'Готов вход',
+    url: 'https://tracker.example.com/TASK-17',
     isDone: true,
     position: 1,
     createdAt: new Date('2026-08-28T10:00:00Z'),
@@ -30,6 +31,7 @@ const checkpoints: RoadmapCheckpointRow[] = [
     id: '44444444-4444-4444-4444-444444444444',
     versionId: version.id,
     title: 'Готовы проекты',
+    url: null,
     isDone: false,
     position: 2,
     createdAt: new Date('2026-08-28T10:00:00Z'),
@@ -71,5 +73,42 @@ describe('проекция версии', () => {
       done: 0,
       total: 0,
     });
+  });
+});
+
+describe('ссылки на задачи в проекции', () => {
+  it('отдаёт ссылку чекпоинта при уровне чтения', () => {
+    const projected = versionProjection(
+      version,
+      checkpoints,
+      AccessLevel.Read,
+    ) as RoadmapVersionDetail;
+
+    expect(projected.checkpoints[0]?.url).toBe('https://tracker.example.com/TASK-17');
+  });
+
+  it('не отдаёт ссылку, когда просили без ссылок', () => {
+    const projected = versionProjection(
+      version,
+      checkpoints,
+      AccessLevel.Read,
+      false,
+    ) as RoadmapVersionDetail;
+
+    expect(projected.checkpoints[0]).not.toHaveProperty('url');
+  });
+
+  it('без ссылок формулировки остаются на месте', () => {
+    const projected = versionProjection(
+      version,
+      checkpoints,
+      AccessLevel.Read,
+      false,
+    ) as RoadmapVersionDetail;
+
+    expect(projected.checkpoints.map((checkpoint) => checkpoint.title)).toEqual([
+      'Готов вход',
+      'Готовы проекты',
+    ]);
   });
 });

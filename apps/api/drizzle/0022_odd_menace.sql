@@ -1,0 +1,1 @@
+ALTER TABLE "roadmap_checkpoints" ADD COLUMN "url" text;
