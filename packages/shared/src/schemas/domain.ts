@@ -77,7 +77,24 @@ export const domainCreateSchema = z.object({
  */
 export const domainUpdateSchema = domainCreateSchema.omit({ name: true }).partial();
 
-/** Строка реестра доменов: поля корня, статус и счётчики. */
+/** Поддомен: домен окружения вместе с его проектом. */
+export const domainSubdomainSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  environmentId: z.string().uuid(),
+  environmentName: z.string(),
+  environmentKind: z.nativeEnum(EnvironmentKind),
+  projectId: z.string().uuid(),
+  projectName: z.string(),
+});
+
+/**
+ * Строка реестра доменов: поля корня, статус, счётчики и поддомены.
+ *
+ * Поддомены приходят прямо в списке: реестр рисуется деревом, а данные
+ * всё равно подняты ради счётчиков — платить вторым запросом на каждый
+ * корень незачем.
+ */
 export const domainRowSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -90,25 +107,18 @@ export const domainRowSchema = z.object({
   subdomainCount: z.number().int().nonnegative(),
   /** Различных проектов на корне: считаем, кого затронет непродление. */
   projectCount: z.number().int().nonnegative(),
+  subdomains: z.array(domainSubdomainSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 
-/** Поддомен: домен окружения вместе с его проектом. */
-export const domainSubdomainSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string(),
-  environmentId: z.string().uuid(),
-  environmentName: z.string(),
-  environmentKind: z.nativeEnum(EnvironmentKind),
-  projectId: z.string().uuid(),
-  projectName: z.string(),
-});
-
-/** Детали корня: строка реестра плюс что из него растёт. */
-export const domainDetailSchema = domainRowSchema.extend({
-  subdomains: z.array(domainSubdomainSchema),
-});
+/**
+ * Детали корня.
+ *
+ * Те же поля, что в строке реестра: с тех пор как список отдаёт поддомены,
+ * различать проекции нечем. Имя оставлено — по нему зовут карточку корня.
+ */
+export const domainDetailSchema = domainRowSchema;
 
 /**
  * Данные карты доменов.

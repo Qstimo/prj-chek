@@ -1,26 +1,27 @@
 'use client';
 
-/** Пропсы подтверждения удаления домена. */
+/** Пропсы подтверждения удаления. */
 interface IProps {
-  name: string;
+  /** Вопрос целиком: у корня и у поддомена последствия разные. */
+  question: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
 /**
- * Подтверждение удаления корня.
+ * Подтверждение удаления.
  *
  * Своё, а не браузерный `confirm()`: модальный диалог браузера блокирует
  * страницу целиком и не поддаётся ни тестам, ни автоматизации.
  */
-export function DeleteConfirmDialog({ name, onConfirm, onCancel }: IProps) {
+export function DeleteConfirmDialog({ question, onConfirm, onCancel }: IProps) {
   return (
     <div
       role="dialog"
       aria-label="Подтверждение удаления"
       className="rounded-md border border-border p-4"
     >
-      <p>Удалить домен «{name}» из реестра? Срок продления перестанет отслеживаться.</p>
+      <p>{question}</p>
       <div className="mt-3 flex gap-2">
         <button
           type="button"
