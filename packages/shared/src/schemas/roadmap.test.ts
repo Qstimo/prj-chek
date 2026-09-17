@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { RoadmapVersionState } from '../enums';
 import {
+  publicRoadmapSchema,
   roadmapCheckpointCreateSchema,
+  roadmapCheckpointSchema,
   roadmapVersionCreateSchema,
   roadmapVersionMetadataSchema,
   roadmapVersionUpdateSchema,
@@ -79,5 +81,73 @@ describe('схема чекпоинта', () => {
     expect(() =>
       roadmapCheckpointCreateSchema.parse({ title: 'X', dueDate: '2026-01-01' }),
     ).toThrow();
+  });
+});
+
+describe('ссылка на задачу у чекпоинта', () => {
+  const checkpoint = {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 'Перевести биллинг',
+    isDone: false,
+    position: 1,
+  };
+
+  it('принимает ссылку на задачу', () => {
+    const parsed = roadmapCheckpointSchema.parse({
+      ...checkpoint,
+      url: 'https://tracker.example.com/TASK-17',
+    });
+
+    expect(parsed.url).toBe('https://tracker.example.com/TASK-17');
+  });
+
+  it('принимает отсутствие ссылки', () => {
+    expect(roadmapCheckpointSchema.parse({ ...checkpoint, url: null }).url).toBeNull();
+  });
+
+  it('отвергает то, что не адрес', () => {
+    expect(() => roadmapCheckpointSchema.parse({ ...checkpoint, url: 'TASK-17' })).toThrow();
+  });
+
+  it('не пускает ссылку в публичный роадмап', () => {
+    const version = {
+      id: '22222222-2222-4222-8222-222222222222',
+      label: 'v1',
+      state: RoadmapVersionState.Planned,
+      plannedDate: null,
+      releasedDate: null,
+      position: 1,
+      progress: { done: 0, total: 1 },
+      checkpoints: [{ ...checkpoint, url: 'https://tracker.example.com/TASK-17' }],
+    };
+
+    expect(() =>
+      publicRoadmapSchema.parse({
+        projectName: 'Лавка',
+        stage: { current: 1, total: 1 },
+        versions: [version],
+      }),
+    ).toThrow();
+  });
+
+  it('пропускает публичный роадмап без ссылок', () => {
+    const version = {
+      id: '22222222-2222-4222-8222-222222222222',
+      label: 'v1',
+      state: RoadmapVersionState.Planned,
+      plannedDate: null,
+      releasedDate: null,
+      position: 1,
+      progress: { done: 0, total: 1 },
+      checkpoints: [checkpoint],
+    };
+
+    expect(() =>
+      publicRoadmapSchema.parse({
+        projectName: 'Лавка',
+        stage: { current: 1, total: 1 },
+        versions: [version],
+      }),
+    ).not.toThrow();
   });
 });
