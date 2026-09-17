@@ -19,27 +19,24 @@ export const DOMAIN_WARN_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Собирает предупреждения из статусов (ТЗ 6): близкие сроки TLS
- * и регистрации, ошибки проверок, упавшие окружения.
+ * Собирает предупреждения из статусов адресов (ТЗ 6): мёртвые адреса,
+ * близкие сроки TLS и регистрации, ошибки проверок.
+ *
+ * Окружения в сигнатуру не входят: всё, о чём предупреждают, принадлежит
+ * адресу. «Стейдж не отвечает» не говорит, что чинить, — адрес говорит.
  */
-export function warningsOf(
-  environments: EnvironmentStatus[],
-  domains: DomainStatus[],
-  now: Date,
-): StatusWarning[] {
+export function warningsOf(domains: DomainStatus[], now: Date): StatusWarning[] {
   const warnings: StatusWarning[] = [];
 
-  for (const environment of environments) {
-    if (environment.health === HealthState.Down) {
+  for (const domain of domains) {
+    if (domain.health === HealthState.Down) {
       warnings.push({
         kind: StatusWarningKind.HealthDown,
-        subject: environment.name,
-        detail: environment.error ?? 'не отвечает',
+        subject: domain.name,
+        detail: domain.healthError ?? 'не отвечает',
       });
     }
-  }
 
-  for (const domain of domains) {
     if (domain.tlsError) {
       warnings.push({
         kind: StatusWarningKind.TlsError,
@@ -79,7 +76,6 @@ export function warningsOf(
  */
 export function indicatorOf(
   lifecycle: ProjectLifecycle,
-  environments: EnvironmentStatus[],
   domains: DomainStatus[],
   now: Date,
   extraWarnings: StatusWarning[] = [],
@@ -88,19 +84,17 @@ export function indicatorOf(
     return StatusIndicator.Paused;
   }
 
-  if (environments.some((environment) => environment.health === HealthState.Down)) {
+  if (domains.some((domain) => domain.health === HealthState.Down)) {
     return StatusIndicator.Down;
   }
 
-  if (warningsOf(environments, domains, now).length + extraWarnings.length > 0) {
+  if (warningsOf(domains, now).length + extraWarnings.length > 0) {
     return StatusIndicator.Warning;
   }
 
-  const hasAnyResult =
-    environments.some((environment) => environment.checkedAt !== null) ||
-    domains.some((domain) => domain.checkedAt !== null);
-
-  return hasAnyResult ? StatusIndicator.Ok : StatusIndicator.Unknown;
+  return domains.some((domain) => domain.checkedAt !== null)
+    ? StatusIndicator.Ok
+    : StatusIndicator.Unknown;
 }
 
 /** Истекает ли срок в ближайшие `days` дней (включая уже истёкший). */
