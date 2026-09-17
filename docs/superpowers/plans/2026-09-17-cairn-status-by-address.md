@@ -53,7 +53,7 @@ TDD: сначала падающий тест, затем реализация. 
 - Modify: `packages/shared/src/schemas/environment.ts`
 - Modify: `packages/shared/src/schemas/environment.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 describe('путь проверки', () => {
@@ -86,11 +86,11 @@ describe('путь проверки', () => {
 
 Существующие тесты с `healthCheckUrl` в этом файле переписать на `healthCheckPath`.
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
 Run: `pnpm --filter @cairn/shared test`
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `environmentUpdateSchema` вместо `healthCheckUrl`:
 
@@ -113,8 +113,8 @@ Run: `pnpm --filter @cairn/shared test`
 
 В `environmentDetailSchema` — `healthCheckPath: z.string().nullable()`.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add packages/shared/src/schemas/environment.ts packages/shared/src/schemas/environment.test.ts
@@ -127,7 +127,7 @@ git commit -m "Спрашивать путь проверки вместо вт�
 - Modify: `packages/shared/src/schemas/status.ts`
 - Modify: `packages/shared/src/schemas/status.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 it('статус адреса держит все три проверки', () => {
@@ -162,15 +162,15 @@ it('статус окружения — вывод, а не измерение',
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
-- [ ] **Step 3: Реализация**
+- [x] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 3: Реализация**
 
 `domainStatusSchema` получает `environmentId: z.string().uuid()`, `health: z.nativeEnum(HealthState).nullable()`, `latencyMs: z.number().int().nonnegative().nullable()`, `healthError: z.string().nullable()`.
 
 Из `environmentStatusSchema` уходят `latencyMs` и `error`.
 
-- [ ] **Step 4: Запустить** → PASS. `pnpm typecheck` покажет все места, где проекции разошлись, — это ожидаемо и чинится в Chunk 3 и 4.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS. `pnpm typecheck` покажет все места, где проекции разошлись, — это ожидаемо и чинится в Chunk 3 и 4.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add packages/shared/src/schemas/status.ts packages/shared/src/schemas/status.test.ts
@@ -183,7 +183,7 @@ git commit -m "Свести три проверки в статус одного
 - Modify: `apps/api/src/status/checkers/health.checker.ts`
 - Modify: `apps/api/src/status/checkers/health.checker.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 it('собирает адрес из имени и пути', async () => {
@@ -239,11 +239,11 @@ it('когда не отвечает ни то ни другое, причина
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
 Run: `pnpm --filter @cairn/api test -- --run src/status/checkers/health`
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 Сигнатура `checkHealth(address: string, path: string | null, fetchFn = fetch)`. Внутри:
 
@@ -254,8 +254,8 @@ Run: `pnpm --filter @cairn/api test -- --run src/status/checkers/health`
 
 Задержка меряется от начала первой попытки: человеку важно, сколько ждал он, а не сколько заняла удачная попытка.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status/checkers
@@ -273,7 +273,7 @@ git commit -m "Проверять адрес окружения, а не отд�
 - Modify: `apps/api/src/db/schema/status.ts`
 - Modify: `apps/api/src/db/schema/environments.test.ts`, `status.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 В `environments.test.ts` — колонка `health_check_path` вместо `health_check_url`. В `status.test.ts`:
 
@@ -295,8 +295,8 @@ it('отдельной таблицы статусов окружения бол
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
-- [ ] **Step 3: Реализация**
+- [x] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 3: Реализация**
 
 `environments.healthCheckUrl` → `healthCheckPath: text('health_check_path')`.
 
@@ -304,8 +304,8 @@ it('отдельной таблицы статусов окружения бол
 
 Таблицу `environmentStatuses` и тип `EnvironmentStatusRow` удалить вместе с экспортами из `schema/index.ts`.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/db/schema
@@ -318,7 +318,7 @@ git commit -m "Держать здоровье адреса рядом с его
 - Create: `apps/api/drizzle/0023_health_by_address.sql` (имя и запись в `meta/_journal.json` даёт `db:generate --custom`)
 - Create: `apps/api/test/health-address-migration.test.ts`
 
-- [ ] **Step 1: Падающий тест миграции**
+- [x] **Step 1: Падающий тест миграции**
 
 Образец — `apps/api/test/environment-host-migration.test.ts`: журнал применяется до границы, засеваются старые данные, затем применяется остаток.
 
@@ -361,11 +361,11 @@ it('корень без пути оставляет путь пустым', asyn
 
 Засев: `Прод` с `health_check_url = 'https://prod.example.com/api/health'` и без доменов; `Стейдж` с `https://stage.example.com` и уже заведённым доменом `stage.example.com`; `Стенд` с `http://10.0.0.5:3000/health`.
 
-- [ ] **Step 2: Запустить, убедиться что падает**
+- [x] **Step 2: Запустить, убедиться что падает**
 
 Run: `pnpm --filter @cairn/api test -- --run test/health-address-migration`
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 `pnpm --filter @cairn/api db:generate --custom --name=health_by_address`, затем написать SQL руками, по образцу `0021`:
 
@@ -379,8 +379,8 @@ Run: `pnpm --filter @cairn/api test -- --run test/health-address-migration`
 8. `ALTER TABLE environments DROP COLUMN health_check_url;`
 9. Права `cairn_app` на новые колонки — посмотреть, как это делает `0020_domain_privileges.sql`, и повторить, а не выдумывать.
 
-- [ ] **Step 4: Запустить** → PASS. Затем весь `pnpm --filter @cairn/api test -- --run test/` — миграции трогают все интеграционные тесты.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS. Затем весь `pnpm --filter @cairn/api test -- --run test/` — миграции трогают все интеграционные тесты.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/drizzle apps/api/test/health-address-migration.test.ts
@@ -396,7 +396,7 @@ git commit -m "Перенести адрес проверки в домены о
 **Files:**
 - Create: `apps/api/src/status/status.projection.ts`, `status.projection.test.ts`
 
-- [ ] **Step 1: Падающий тест** (чистый, без базы)
+- [x] **Step 1: Падающий тест** (чистый, без базы)
 
 ```ts
 describe('здоровье окружения по его адресам', () => {
@@ -433,13 +433,13 @@ describe('здоровье окружения по его адресам', () =>
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падает**
-- [ ] **Step 3: Реализация**
+- [x] **Step 2: Запустить, убедиться что падает**
+- [x] **Step 3: Реализация**
 
 `environmentStatusesOf(environments: { id: string; name: string }[], addresses: DomainStatus[]): EnvironmentStatus[]` — группировка по `environmentId`, правило «down, если хоть один down; up, если хоть один up; иначе null».
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status/status.projection.ts apps/api/src/status/status.projection.test.ts
@@ -451,7 +451,7 @@ git commit -m "Выводить здоровье окружения из его 
 **Files:**
 - Modify: `apps/api/src/status/indicator.ts`, `indicator.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 it('предупреждение о падении называет адрес, а не окружение', () => {
@@ -476,13 +476,13 @@ it('без единой проверки индикатор неизвестен
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
-- [ ] **Step 3: Реализация**
+- [x] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 3: Реализация**
 
 `warningsOf(domains: DomainStatus[], now)` — окружения уходят из сигнатуры: всё, о чём предупреждают, принадлежит адресу. `indicatorOf(lifecycle, domains, now, extraWarnings)` — тем же образом.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status/indicator.ts apps/api/src/status/indicator.test.ts
@@ -494,7 +494,7 @@ git commit -m "Называть в предупреждении адрес, ко
 **Files:**
 - Modify: `apps/api/src/status/status.repository.ts`, `status.repository.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 it('целями обхода служат адреса окружений', async () => {
@@ -531,15 +531,15 @@ it('окружение без адресов не проверяется', async
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
-- [ ] **Step 3: Реализация**
+- [x] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 3: Реализация**
 
 - `listTargets` возвращает `{ addresses: { id, name, healthCheckPath }[] }` — join `environment_domains` с `environments`;
 - `upsertEnvironmentStatus` удаляется, `upsertDomainStatus` переименовывается в `upsertAddressStatus` и принимает все три проверки;
 - `buildStatus` собирает адреса с `environmentId`, зовёт `environmentStatusesOf` и обновлённые `warningsOf`/`indicatorOf`.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status/status.repository.ts apps/api/src/status/status.repository.test.ts
@@ -552,7 +552,7 @@ git commit -m "Хранить результат проверок у адрес�
 - Modify: `apps/api/src/status/status-runner.service.ts`, `status-runner.service.test.ts`
 - Modify: `apps/api/test/status.e2e.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 it('по каждому адресу делает все три проверки', async () => {
@@ -566,13 +566,13 @@ it('по каждому адресу делает все три проверки
 it('падение одного адреса не прерывает обход', async () => { /* второй адрес проверен */ });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
-- [ ] **Step 3: Реализация**
+- [x] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 3: Реализация**
 
 Один цикл по `targets.addresses`: три проверки, одна запись `upsertAddressStatus`.
 
-- [ ] **Step 4: Запустить** → PASS. Затем `pnpm --filter @cairn/api test` целиком и `pnpm typecheck`.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS. Затем `pnpm --filter @cairn/api test` целиком и `pnpm typecheck`.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status apps/api/test/status.e2e.test.ts
@@ -591,7 +591,7 @@ git commit -m "Обходить проверками адреса окружен
 - Modify: `apps/web/src/app/(app)/projects/[id]/infrastructure/InfrastructureScreen.tsx`
 - Modify: `apps/web/src/api/errors.ts`, `errors.test.ts` (подпись поля в разборе отказа)
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```tsx
 it('спрашивает путь проверки, а не адрес', async () => {
@@ -614,13 +614,13 @@ it('объясняет, что адресом служат домены', () => 
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
-- [ ] **Step 3: Реализация**
+- [x] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 3: Реализация**
 
 Подпись `healthCheckPath: 'Путь проверки'`, подсказка под полем: «Ручка приложения, например `/api/health`. Адресами служат домены окружения». В карточке — то же поле вместо «Адрес проверки».
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/web/src
@@ -633,7 +633,7 @@ git commit -m "Спрашивать у окружения путь провер�
 - Create: `apps/web/src/components/StatusByEnvironment/{index.ts,StatusByEnvironment.tsx,AddressStatusLine.tsx,types.ts,StatusByEnvironment.test.tsx}`
 - Modify: `apps/web/src/app/(app)/projects/[id]/infrastructure/InfrastructureStatusPanel.tsx`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```tsx
 it('показывает адреса под их окружением', () => {
@@ -659,13 +659,13 @@ it('окружение без адресов говорит, что провер
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
-- [ ] **Step 3: Реализация**
+- [x] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 3: Реализация**
 
 `StatusByEnvironment` группирует адреса по `environmentId`; строка адреса — отдельный компонент `AddressStatusLine` (граница в 100 строк). Панель `InfrastructureStatusPanel` перестаёт рисовать два списка и отдаёт данные компоненту.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/web/src
@@ -676,8 +676,8 @@ git commit -m "Показать статус адресами под их окр
 
 ## Финальная проверка
 
-- [ ] `pnpm test` — зелено во всех рабочих пространствах
-- [ ] `pnpm typecheck` — чисто
-- [ ] `pnpm build` — собирается
-- [ ] `grep -rn "healthCheckUrl\|health_check_url\|environmentStatuses" apps packages --include=*.ts --include=*.tsx | grep -v dist | grep -v drizzle/0` — пусто
-- [ ] `CLAUDE.md`: адрес окружения — его домены, проверки идут по ним, путь ручки задаётся отдельно
+- [x] `pnpm test` — зелено во всех рабочих пространствах
+- [x] `pnpm typecheck` — чисто
+- [x] `pnpm build` — собирается
+- [x] `grep -rn "healthCheckUrl\|health_check_url\|environmentStatuses" apps packages --include=*.ts --include=*.tsx | grep -v dist | grep -v drizzle/0` — пусто
+- [x] `CLAUDE.md`: адрес окружения — его домены, проверки идут по ним, путь ручки задаётся отдельно
