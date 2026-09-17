@@ -1,4 +1,4 @@
-import { AccessLevel, EnvironmentKind, Section, SubjectKind } from '@cairn/shared';
+import { AccessLevel, EnvironmentKind, HealthState, Section, SubjectKind } from '@cairn/shared';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
 import { DATABASE } from '../src/db/db.module';
+import { STATUS_CHECKERS } from '../src/status/status-runner.service';
 import {
   domains,
   environmentDomains,
@@ -18,6 +19,19 @@ import {
   users,
 } from '../src/db/schema';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
+
+/**
+ * Проверщики-подделки: тест отвечает за путь запроса, а не за сеть.
+ *
+ * Настоящие ушли бы к RDAP-сервису зоны и к чужому серверу за
+ * сертификатом, и результат прогона зависел бы от связи, а не от кода.
+ * Сами проверщики проверены отдельно, каждый своим тестом.
+ */
+const DEAD_ADDRESS_CHECKERS = {
+  checkHealth: async () => ({ health: HealthState.Down, latencyMs: null, error: 'HTTP 502' }),
+  checkTls: async () => ({ validTo: null, error: null }),
+  checkDomainExpiry: async () => ({ expiresAt: null, error: null }),
+};
 
 describe('HTTP: статус', () => {
   let testDb: TestDatabase;
@@ -32,6 +46,8 @@ describe('HTTP: статус', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE)
       .useValue(testDb.db)
+      .overrideProvider(STATUS_CHECKERS)
+      .useValue(DEAD_ADDRESS_CHECKERS)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -84,13 +100,11 @@ describe('HTTP: статус', () => {
       .values({ projectId, name: 'Прод', kind: EnvironmentKind.Production })
       .returning();
 
-    // Адрес окружения — его домен, по нему и идёт проверка. Петля без
-    // слушателя закрыта и по 443, и по 80: реальная проверка быстро даст
-    // «down», не выходя в сеть.
-    const [root] = await testDb.db.insert(domains).values({ name: '127.0.0.1' }).returning();
+    // Адрес окружения — его домен, по нему и идёт проверка.
+    const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
     await testDb.db
       .insert(environmentDomains)
-      .values({ environmentId: environment!.id, domainId: root!.id, name: '127.0.0.1' });
+      .values({ environmentId: environment!.id, domainId: root!.id, name: 'prod.example.com' });
   });
 
   async function signIn(email: string) {
@@ -129,6 +143,12 @@ describe('HTTP: статус', () => {
 
     expect(status.body.indicator).toBe('down');
     expect(status.body.environments[0].health).toBe('down');
+    // Предупреждение называет адрес: оно отвечает на вопрос «что чинить».
+    expect(status.body.warnings[0]).toMatchObject({
+      kind: 'health_down',
+      subject: 'prod.example.com',
+      detail: 'HTTP 502',
+    });
     expect(status.body.warnings.some((warning: { kind: string }) => warning.kind === 'health_down')).toBe(
       true,
     );

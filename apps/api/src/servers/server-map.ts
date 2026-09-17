@@ -62,7 +62,7 @@ export function buildServerMap(input: ServerMapInput, now: Date): ServerMap {
       name: server.name,
       owner: server.owner,
       indicator: serverIndicatorOf(
-        environmentStatusesOf(byServer.get(server.id) ?? []),
+        serverEnvironmentsOf(byServer.get(server.id) ?? []),
         server.paidUntil,
         now,
       ),
@@ -96,7 +96,7 @@ export function buildServerMap(input: ServerMapInput, now: Date): ServerMap {
 }
 
 /** Приводит размещения к статусам окружений, понятным вычислению индикаторов. */
-function environmentStatusesOf(placements: ServerMapPlacement[]): EnvironmentStatus[] {
+function serverEnvironmentsOf(placements: ServerMapPlacement[]): EnvironmentStatus[] {
   return placements.map((placement) => ({
     environmentId: placement.environmentId,
     name: placement.environmentName,

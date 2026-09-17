@@ -210,9 +210,10 @@ async function runAdminScenario(admin) {
       ip: '203.0.113.10',
       provider: 'Hetzner',
       domains: ['example.com'],
-      // Изнутри compose соседний контейнер доступен по имени сервиса:
-      // живой адрес для настоящей health-проверки.
-      healthCheckUrl: 'http://web:3000/login',
+      // Адресом служит домен окружения, а здесь — только путь ручки.
+      // Настоящая проверка уйдёт наружу, к example.com, и её результат
+      // этот дым не проверяет: он о том, что окружение заводится.
+      healthCheckPath: '/login',
     },
   });
   check(

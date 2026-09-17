@@ -95,6 +95,19 @@ describe('перенос адреса проверки в домены окру�
     expect(rows.map((row) => row.name)).toEqual(['stage.example.com']);
   });
 
+  it('IP-адрес доменом не считает', async () => {
+    // Иначе корнем встала бы последняя пара чисел — запись, которую
+    // некому продлевать и нечем проверять.
+    const roots = await client`SELECT name FROM domains ORDER BY name`;
+    const [row] = await client`
+      SELECT notes, health_check_path FROM environments WHERE name = 'Числа'
+    `;
+
+    expect(roots.map((root) => root.name)).not.toContain('113.10');
+    expect(row?.notes).toContain('203.0.113.10');
+    expect(row?.health_check_path).toBe('/api/health');
+  });
+
   it('хост, доменом не являющийся, сохраняет в заметках', async () => {
     const [row] = await client`
       SELECT notes, health_check_path FROM environments WHERE name = 'Стенд'
@@ -187,5 +200,11 @@ async function seedLegacyHealthUrls(client: postgres.Sql): Promise<void> {
   await client`
     INSERT INTO environments (project_id, name, kind, health_check_url, notes)
     VALUES (${project!.id}, 'Стенд', 'other', 'http://10.0.0.5:3000/health', 'Временная машина')
+  `;
+
+  // Голый IP формой на домен похож, а доменом не является.
+  await client`
+    INSERT INTO environments (project_id, name, kind, health_check_url)
+    VALUES (${project!.id}, 'Числа', 'development', 'https://203.0.113.10/api/health')
   `;
 }

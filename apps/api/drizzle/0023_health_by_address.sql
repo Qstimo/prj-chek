@@ -35,11 +35,15 @@ CREATE VIEW "cairn_health_url" AS
 --> независимо от того, переезжает ли хост в домены.
 UPDATE "environments" SET "health_check_path" = u.path
 FROM "cairn_health_url" u WHERE u.environment_id = "environments"."id";--> statement-breakpoint
---> Отбор доменных хостов: форма имени та же, что в domainSchema контракта.
+--> Отбор доменных хостов: форма имени та же, что в domainSchema контракта,
+--> включая требование буквы в последней метке. Без него доменом прошёл бы
+--> голый IP, корнем ему встала бы последняя пара чисел («113.10»), и в
+--> реестре корней завелась бы запись, которую некому продлевать.
 CREATE VIEW "cairn_health_host_moving" AS
   SELECT environment_id, host AS name
   FROM "cairn_health_url"
   WHERE host ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+    AND host ~ '\.[a-z][a-z0-9-]*$'
     AND NOT EXISTS (
       SELECT 1 FROM "environment_domains" d
       WHERE d."environment_id" = "cairn_health_url".environment_id AND d."name" = "cairn_health_url".host
@@ -61,7 +65,10 @@ UPDATE "environments"
 SET "notes" = concat_ws(E'\n', "notes", 'Адрес проверки: ' || u.host)
 FROM "cairn_health_url" u
 WHERE u.environment_id = "environments"."id"
-  AND u.host !~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$';--> statement-breakpoint
+  AND (
+    u.host !~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+    OR u.host !~ '\.[a-z][a-z0-9-]*$'
+  );--> statement-breakpoint
 DROP VIEW "cairn_health_host_moving";--> statement-breakpoint
 DROP VIEW "cairn_health_url";--> statement-breakpoint
 DROP FUNCTION "cairn_root_domain"(text);--> statement-breakpoint
