@@ -2,14 +2,27 @@
 
 import type { DomainDetail } from '@cairn/shared';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
-import { useMutationUpdateDomain } from '@/api/hooks';
+import {
+  useMutationAddEnvironmentDomain,
+  useMutationUpdateDomain,
+  useQueryEnvironments,
+  useQueryProjects,
+} from '@/api/hooks';
+import { describeApiError } from '@/api';
+import { DomainAddressForm } from '@/components/DomainAddressForm';
 import { DomainForm } from '@/components/DomainForm';
 
 /** Правка корневого домена вместе со списком его поддоменов. */
 export function EditDomainScreen({ domain }: { domain: DomainDetail }) {
   const router = useRouter();
+  const [projectId, setProjectId] = useState('');
+
   const mutation = useMutationUpdateDomain();
+  const projects = useQueryProjects();
+  const environments = useQueryEnvironments(projectId, { enabled: projectId.length > 0 });
+  const addSubdomain = useMutationAddEnvironmentDomain();
 
   return (
     <div className="space-y-6">
@@ -38,6 +51,32 @@ export function EditDomainScreen({ domain }: { domain: DomainDetail }) {
           )
         }
       />
+
+      <section className="space-y-2">
+        <h2 className="text-lg font-medium">Добавить поддомен</h2>
+        {/* Та же форма адреса, но корень уже выбран самой карточкой:
+            вводится только левая часть имени. */}
+        <DomainAddressForm
+          knownRoots={[domain.name]}
+          rootSuffix={domain.name}
+          projects={projects.data ?? []}
+          environments={environments.data ?? []}
+          projectId={projectId}
+          onProjectChange={setProjectId}
+          isSubmitting={addSubdomain.isPending}
+          error={describeApiError(addSubdomain.error)}
+          onSubmitSubdomain={({ name, projectId: target, environmentId }) =>
+            addSubdomain.mutate(
+              { projectId: target, environmentId, name },
+              {
+                onSuccess: () => {
+                  router.refresh();
+                },
+              },
+            )
+          }
+        />
+      </section>
 
       <section className="space-y-2">
         <h2 className="text-lg font-medium">Поддомены</h2>
