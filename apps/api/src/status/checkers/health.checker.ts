@@ -16,35 +16,54 @@ export type HealthFetch = (
 /** Предел ожидания ответа. */
 const TIMEOUT_MS = 10_000;
 
+/** Собирает адрес проверки: пустой путь означает корень. */
+function urlOf(scheme: 'https' | 'http', address: string, path: string | null): string {
+  return `${scheme}://${address}${path ?? '/'}`;
+}
+
 /**
- * Проверяет доступность health-check адреса (ТЗ 6).
+ * Проверяет доступность адреса окружения (ТЗ 6).
+ *
+ * Адрес и путь принимаются порознь, а URL собирается здесь: иначе правило
+ * «https с откатом на http» разошлось бы по двум местам.
  *
  * Не бросает исключений: недоступность — данные проверки, а не авария.
  * Живым считается ответ до 400: редирект — признак работающего сервера.
  */
 export async function checkHealth(
-  url: string,
+  address: string,
+  path: string | null,
   fetchFn: HealthFetch = fetch,
 ): Promise<HealthResult> {
+  // Задержку меряем от первой попытки: человеку важно, сколько ждал он.
   const startedAt = Date.now();
 
-  try {
-    const response = await fetchFn(url, {
+  const request = async (scheme: 'https' | 'http') =>
+    fetchFn(urlOf(scheme, address, path), {
       redirect: 'manual',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    const latencyMs = Date.now() - startedAt;
 
-    if (response.status < 400) {
-      return { health: HealthState.Up, latencyMs, error: null };
-    }
+  const answered = (status: number): HealthResult => ({
+    health: status < 400 ? HealthState.Up : HealthState.Down,
+    latencyMs: Date.now() - startedAt,
+    error: status < 400 ? null : `HTTP ${status}`,
+  });
 
-    return { health: HealthState.Down, latencyMs, error: `HTTP ${response.status}` };
+  let secureFailure: string;
+
+  try {
+    // Ответ сервера — любой — и есть результат: перепроверять нечего.
+    return answered((await request('https')).status);
   } catch (cause) {
-    return {
-      health: HealthState.Down,
-      latencyMs: Date.now() - startedAt,
-      error: cause instanceof Error ? cause.message : 'неизвестная ошибка',
-    };
+    secureFailure = cause instanceof Error ? cause.message : 'неизвестная ошибка';
+  }
+
+  try {
+    // Стенд без сертификата отвечает по http — звать его мёртвым неверно.
+    return answered((await request('http')).status);
+  } catch {
+    // Спрашивали https — о нём и отвечаем: отказ http нового не добавляет.
+    return { health: HealthState.Down, latencyMs: Date.now() - startedAt, error: secureFailure };
   }
 }
