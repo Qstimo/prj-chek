@@ -72,7 +72,7 @@ export const environmentServerSchema = z.object({
 
 /** Окружение на уровне чтения: машина, проверка и заметки. */
 export const environmentDetailSchema = environmentMetadataSchema.extend({
-  healthCheckUrl: z.string().nullable(),
+  healthCheckPath: z.string().nullable(),
   notes: z.string().nullable(),
   server: environmentServerSchema.nullable(),
   createdAt: z.string(),
@@ -85,7 +85,20 @@ export const environmentUpdateSchema = z.object({
   kind: z.nativeEnum(EnvironmentKind).optional(),
   /** Привязку к серверу задаёт суперадмин: список машин межпроектен. */
   serverId: z.string().uuid().nullable().optional(),
-  healthCheckUrl: z.string().url().max(500).nullable().optional(),
+  /**
+   * Путь ручки проверки, а не адрес: адресами служат домены окружения.
+   *
+   * Форма проверяется намеренно строго. Стоит разрешить сюда полный
+   * адрес — и появится второе место, где он живёт, то самое, из-за
+   * которого здоровье расходилось с проверками сертификата.
+   */
+  healthCheckPath: z
+    .string()
+    .trim()
+    .max(200)
+    .regex(/^\/[^\s?#]*$/, 'Путь начинается со слеша, без адреса и строки запроса')
+    .nullable()
+    .optional(),
   notes: z.string().max(10_000).nullable().optional(),
   domains: z
     .array(domainSchema)

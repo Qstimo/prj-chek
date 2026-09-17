@@ -123,12 +123,31 @@ describe('адрес окружения', () => {
     expect(parsed.notes).toBeNull();
   });
 
-  it('требует адрес health-check в виде ссылки', () => {
-    expect(() => environmentUpdateSchema.parse({ healthCheckUrl: 'localhost' })).toThrow();
-    expect(
-      environmentUpdateSchema.parse({ healthCheckUrl: 'https://example.com/health' })
-        .healthCheckUrl,
-    ).toBe('https://example.com/health');
+  it('принимает путь ручки проверки', () => {
+    expect(environmentUpdateSchema.parse({ healthCheckPath: '/api/health' }).healthCheckPath).toBe(
+      '/api/health',
+    );
+  });
+
+  it('принимает отсутствие пути: проверяется корень', () => {
+    expect(environmentUpdateSchema.parse({ healthCheckPath: null }).healthCheckPath).toBeNull();
+  });
+
+  it('отвергает полный URL: адрес у окружения один — его домены', () => {
+    // Стоит разрешить сюда адрес — и появится второе место для него,
+    // то самое, из-за которого статус расходился с доменами.
+    expect(() =>
+      environmentUpdateSchema.parse({ healthCheckPath: 'https://example.com/health' }),
+    ).toThrow();
+  });
+
+  it('отвергает путь без ведущего слеша', () => {
+    expect(() => environmentUpdateSchema.parse({ healthCheckPath: 'api/health' })).toThrow();
+  });
+
+  it('отвергает строку запроса и якорь', () => {
+    expect(() => environmentUpdateSchema.parse({ healthCheckPath: '/health?deep=1' })).toThrow();
+    expect(() => environmentUpdateSchema.parse({ healthCheckPath: '/health#top' })).toThrow();
   });
 });
 
@@ -138,7 +157,7 @@ describe('схема деталей окружения', () => {
     name: 'Прод',
     kind: EnvironmentKind.Production,
     domains: ['example.com'],
-    healthCheckUrl: null,
+    healthCheckPath: null,
     notes: null,
     createdAt: '2026-09-10T10:00:00.000Z',
     updatedAt: '2026-09-10T10:00:00.000Z',
