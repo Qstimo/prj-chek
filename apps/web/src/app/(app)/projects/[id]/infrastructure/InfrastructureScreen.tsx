@@ -5,6 +5,7 @@ import {
   EnvironmentKind,
   Section,
   type EnvironmentCreate,
+  type DomainRow,
   type EnvironmentDetail,
   type EnvironmentMetadata,
 } from '@cairn/shared';
@@ -15,6 +16,7 @@ import {
   useMutationDeleteEnvironment,
   useMutationUpdateEnvironment,
   useQueryEnvironments,
+  useQueryDomains,
   useQuerySections,
   useQueryServers,
 } from '@/api/hooks';
@@ -39,6 +41,9 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
   // Реестр машин запрашивается только суперадмином: остальным API ответит
   // отказом, а список ему всё равно не показывается.
   const servers = useQueryServers({ enabled: isSuperadmin });
+  // Реестр адресов — тем же признаком и по той же причине: подрядчику он
+  // раскрыл бы чужие адреса, а через них — существование чужих проектов.
+  const domains = useQueryDomains({ enabled: isSuperadmin });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
@@ -84,6 +89,7 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
           initial={formValuesOf(editing)}
           servers={servers.data ?? []}
           canAssignServer={isSuperadmin}
+          knownDomains={isSuperadmin ? knownAddressesOf(domains.data ?? []) : undefined}
           isSubmitting={create.isPending || update.isPending}
           error={describeApiError(create.error ?? update.error)}
           onSubmit={submit}
@@ -118,4 +124,19 @@ function formValuesOf(
     notes: detail?.notes ?? null,
     domains: editing?.domains ?? [],
   };
+}
+
+/**
+ * Известные адреса для подсказки: корни реестра и растущие из них имена.
+ *
+ * Корни тоже годятся в адрес окружения — прод часто отвечает по самому
+ * `example.com`. Повторы отсекаются: тогда корень попал бы в список дважды.
+ */
+function knownAddressesOf(domains: DomainRow[]): string[] {
+  const names = domains.flatMap((domain) => [
+    domain.name,
+    ...domain.subdomains.map((subdomain) => subdomain.name),
+  ]);
+
+  return [...new Set(names)].sort();
 }

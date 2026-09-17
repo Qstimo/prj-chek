@@ -102,6 +102,7 @@ describe('схема строки реестра доменов', () => {
       warnings: [],
       subdomainCount: 3,
       projectCount: 2,
+      subdomains: [],
       createdAt: '2026-09-10T10:00:00.000Z',
       updatedAt: '2026-09-10T10:00:00.000Z',
     });

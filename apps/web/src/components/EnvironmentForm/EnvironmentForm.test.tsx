@@ -130,4 +130,30 @@ describe('EnvironmentForm', () => {
       expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ serverId: null }));
     });
   });
+
+  describe('известные адреса', () => {
+    it('передаёт список в поле доменов', async () => {
+      render(
+        <EnvironmentForm
+          initial={initial}
+          onSubmit={vi.fn()}
+          knownDomains={['api.example.com']}
+        />,
+      );
+
+      await userEvent.type(screen.getByLabelText('Домены'), 'api');
+
+      expect(screen.getByRole('option', { name: 'api.example.com' })).toBeInTheDocument();
+    });
+
+    it('без списка поле остаётся вводом текста', async () => {
+      // Список известных адресов раскрыл бы подрядчику чужие адреса,
+      // а через них — существование чужих проектов.
+      render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} />);
+
+      await userEvent.type(screen.getByLabelText('Домены'), 'api');
+
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    });
+  });
 });

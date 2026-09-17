@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseAddress, rootHintOf } from './utils';
+import { parseAddress, rootHintOf } from './parse-address';
 
 describe('разбор введённого адреса', () => {
   it('пустой адрес не разбирается', () => {
@@ -71,5 +71,9 @@ describe('подсказка о корне', () => {
     expect(rootHintOf(parseAddress('api.example.com', [])!)).toBe(
       'Корень: example.com — будет заведён',
     );
+  });
+
+  it('без видимого реестра судьбу корня не выдумывает', () => {
+    expect(rootHintOf(parseAddress('api.example.com', [])!, false)).toBe('Корень: example.com');
   });
 });

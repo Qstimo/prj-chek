@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 
+import { parseAddress, rootHintOf } from '@/utils';
+
 import { DomainForm } from '../DomainForm';
 import { SubdomainFields } from './SubdomainFields';
 import type { IProps } from './types';
-import { parseAddress, rootHintOf } from './utils';
 
 /**
  * Одно поле адреса вместо двух разных путей.

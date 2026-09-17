@@ -45,7 +45,18 @@ export function parseAddress(
  *
  * Правило корня до сих пор работало молча, и именно это делало его
  * невидимым: человек не понимал, почему `api.example.com` в реестр нельзя.
+ *
+ * Судьба корня договаривается только тому, кому виден реестр. Подрядчику
+ * он не показывается вовсе, и «будет заведён» было бы выдумкой: корень
+ * вполне может уже существовать в чужом проекте.
  */
-export function rootHintOf({ root, isKnownRoot }: IAddressParse): string {
+export function rootHintOf(
+  { root, isKnownRoot }: IAddressParse,
+  isRegistryVisible = true,
+): string {
+  if (!isRegistryVisible) {
+    return `Корень: ${root}`;
+  }
+
   return `Корень: ${root} — ${isKnownRoot ? 'уже в реестре' : 'будет заведён'}`;
 }
