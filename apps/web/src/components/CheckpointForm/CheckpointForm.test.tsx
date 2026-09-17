@@ -37,4 +37,30 @@ describe('CheckpointForm', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('заполните поле');
   });
+
+  it('даёт полю семь строк высоты', () => {
+    render(<CheckpointForm onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText('Формулировка')).toHaveAttribute('rows', '7');
+  });
+
+  it('отправляет по Ctrl+Enter', async () => {
+    const onSubmit = vi.fn();
+    render(<CheckpointForm onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Формулировка'), 'Перевести биллинг');
+    await userEvent.keyboard('{Control>}{Enter}{/Control}');
+
+    expect(onSubmit).toHaveBeenCalledWith({ title: 'Перевести биллинг' });
+  });
+
+  it('не отправляет пустую формулировку по Ctrl+Enter', async () => {
+    const onSubmit = vi.fn();
+    render(<CheckpointForm onSubmit={onSubmit} />);
+
+    await userEvent.click(screen.getByLabelText('Формулировка'));
+    await userEvent.keyboard('{Control>}{Enter}{/Control}');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });

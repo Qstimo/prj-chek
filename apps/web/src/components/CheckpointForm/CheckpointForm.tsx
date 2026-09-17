@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type KeyboardEvent } from 'react';
 
 import { FormError } from '../FormError';
 import type { IProps } from './types';
@@ -16,9 +16,7 @@ export function CheckpointForm({
 
   const canSubmit = title.trim().length > 0 && !isSubmitting;
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-
+  function submit(): void {
     if (!canSubmit) {
       return;
     }
@@ -27,30 +25,45 @@ export function CheckpointForm({
     setTitle('');
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    submit();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    // С многострочным полем Enter перестаёт отправлять форму, и без этого
+    // сочетания клавиатурного пути к кнопке не остаётся вовсе.
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      submit();
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
-      <div className="flex gap-2">
-      <div className="flex-1 space-y-1">
+      <div className="space-y-1">
         <label htmlFor="checkpoint-title" className="block text-sm font-medium">
           Формулировка
         </label>
-        <input
+        <textarea
           id="checkpoint-title"
+          rows={7}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
-          className="w-full rounded-md border border-border px-3 py-2"
+          onKeyDown={handleKeyDown}
+          className="w-full rounded-md border border-border bg-surface px-3 py-2"
         />
-      </div>
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="self-end rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
-      >
-        Добавить
-        </button>
       </div>
 
       <FormError message={error} />
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+      >
+        Добавить
+      </button>
     </form>
   );
 }
