@@ -67,6 +67,7 @@ export function VersionDrawer({ version, isCurrent, isOpen, onClose, actions }: 
         <CheckpointForm
           isSubmitting={actions.isSubmittingCheckpoint}
           onSubmit={actions.onAddCheckpoint}
+          onReadTitle={actions.onReadCheckpointTitle}
         />
       )}
 

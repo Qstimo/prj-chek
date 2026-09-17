@@ -116,4 +116,25 @@ describe('VersionDrawer', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Подтвердить удаление' }));
     expect(actions.onDeleteVersion).toHaveBeenCalled();
   });
+
+  it('отдаёт чтение заголовка форме чекпоинта', async () => {
+    const onReadCheckpointTitle = vi.fn(async () => 'Перевести биллинг');
+    render(
+      <VersionDrawer
+        version={detail}
+        isCurrent
+        isOpen
+        onClose={vi.fn()}
+        actions={makeActions({ onReadCheckpointTitle })}
+      />,
+    );
+
+    await userEvent.type(
+      screen.getByLabelText('Ссылка на задачу'),
+      'https://tracker.example.com/TASK-17',
+    );
+    await userEvent.tab();
+
+    expect(onReadCheckpointTitle).toHaveBeenCalledWith('https://tracker.example.com/TASK-17');
+  });
 });

@@ -9,6 +9,8 @@ import type {
 export interface IVersionActions {
   onToggleCheckpoint: (checkpointId: string, isDone: boolean) => void;
   onAddCheckpoint: (input: RoadmapCheckpointCreate) => void;
+  /** Чтение заголовка задачи по ссылке: подставляется в пустую формулировку. */
+  onReadCheckpointTitle?: (url: string) => Promise<string | null>;
   onDeleteCheckpoint: (checkpointId: string) => void;
   /** Сохранение полей версии; `onSuccess` возвращает панель в просмотр. */
   onSubmitVersion: (input: RoadmapVersionCreate, onSuccess: () => void) => void;
