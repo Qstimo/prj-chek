@@ -4,7 +4,7 @@ import { ProjectCard } from '../ProjectCard';
 import type { IProps } from './types';
 
 /** Сводка: все доступные субъекту проекты (спека 9.1). */
-export function ProjectList({ projects, canCreate = false }: IProps) {
+export function ProjectList({ projects, canCreate = false, indicators }: IProps) {
   if (projects.length === 0) {
     // Суперадмину пустая система — не отказ в доступе, а приглашение начать.
     return canCreate ? (
@@ -26,7 +26,7 @@ export function ProjectList({ projects, canCreate = false }: IProps) {
       <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {projects.map((project) => (
           <li key={project.id}>
-            <ProjectCard project={project} />
+            <ProjectCard project={project} indicator={indicators?.[project.id]} />
           </li>
         ))}
       </ul>

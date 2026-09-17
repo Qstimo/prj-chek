@@ -8,6 +8,9 @@ const dayDateSchema = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ожидается дата ГГГГ-ММ-ДД')
   .nullable();
 
+/** Адрес задачи во внешнем трекере. */
+const checkpointUrlSchema = z.string().trim().url().max(2000).nullable();
+
 /**
  * Чекпоинт: формулировка результата и признак «закрыт» — и ничего больше.
  *
@@ -20,6 +23,13 @@ export const roadmapCheckpointSchema = z.object({
   title: z.string(),
   isDone: z.boolean(),
   position: z.number().int().positive(),
+  /**
+   * Ссылка на задачу во внешнем трекере.
+   *
+   * Указатель наружу, а не задача внутри: исполнителей, оценок и дат
+   * у чекпоинта по-прежнему нет, и трекером продукт не становится (ТЗ 1.4).
+   */
+  url: checkpointUrlSchema,
 });
 
 /** Прогресс версии: вычисляется, не хранится (ТЗ 3.5). */
@@ -81,6 +91,7 @@ export const roadmapVersionUpdateSchema = z
 export const roadmapCheckpointCreateSchema = z
   .object({
     title: z.string().trim().min(1).max(300),
+    url: checkpointUrlSchema.optional(),
   })
   .strict();
 
@@ -88,10 +99,19 @@ export const roadmapCheckpointCreateSchema = z
 export const roadmapCheckpointUpdateSchema = z
   .object({
     title: z.string().trim().min(1).max(300).optional(),
+    url: checkpointUrlSchema.optional(),
     isDone: z.boolean().optional(),
     position: z.number().int().positive().optional(),
   })
   .strict();
+
+/** Запрос заголовка по ссылке на задачу. */
+export const linkTitleRequestSchema = z
+  .object({ url: z.string().trim().url().max(2000) })
+  .strict();
+
+/** Ответ: заголовок либо его отсутствие — неудача чтения не ошибка. */
+export const linkTitleResponseSchema = z.object({ title: z.string().nullable() });
 
 /** Публичная ссылка роадмапа. */
 export const publicLinkSchema = z.object({
@@ -99,11 +119,29 @@ export const publicLinkSchema = z.object({
   url: z.string(),
 });
 
-/** Публичный роадмап: то же, что видит уровень чтения внутри. */
+/**
+ * Чекпоинт в публичной выдаче: без ссылки на задачу.
+ *
+ * Публичная страница роадмапа открыта без авторизации, и ссылка раскрыла бы
+ * адрес внутреннего трекера вместе с номером задачи. Отдельная схема, а не
+ * проекция по уровню: публичная страница ходит именно под уровнем чтения,
+ * и различать пути по уровню значило бы менять его смысл.
+ *
+ * Схема строгая: лишнее поле — ошибка, а не молчаливое отбрасывание. Тихое
+ * отбрасывание скрыло бы ошибку проекции вместо того, чтобы её показать.
+ */
+export const publicCheckpointSchema = roadmapCheckpointSchema.omit({ url: true }).strict();
+
+/** Версия в публичной выдаче. */
+export const publicVersionSchema = roadmapVersionMetadataSchema.extend({
+  checkpoints: z.array(publicCheckpointSchema),
+});
+
+/** Публичный роадмап: то же, что видит уровень чтения внутри, без ссылок. */
 export const publicRoadmapSchema = z.object({
   projectName: z.string(),
   stage: roadmapStageSchema,
-  versions: z.array(roadmapVersionDetailSchema),
+  versions: z.array(publicVersionSchema),
 });
 
 /** Чекпоинт. */
@@ -136,8 +174,20 @@ export type RoadmapCheckpointCreate = z.infer<typeof roadmapCheckpointCreateSche
 /** Правка чекпоинта. */
 export type RoadmapCheckpointUpdate = z.infer<typeof roadmapCheckpointUpdateSchema>;
 
+/** Запрос заголовка по ссылке. */
+export type LinkTitleRequest = z.infer<typeof linkTitleRequestSchema>;
+
+/** Ответ с заголовком. */
+export type LinkTitleResponse = z.infer<typeof linkTitleResponseSchema>;
+
 /** Публичная ссылка. */
 export type PublicLink = z.infer<typeof publicLinkSchema>;
+
+/** Чекпоинт в публичной выдаче. */
+export type PublicCheckpoint = z.infer<typeof publicCheckpointSchema>;
+
+/** Версия в публичной выдаче. */
+export type PublicVersion = z.infer<typeof publicVersionSchema>;
 
 /** Публичный роадмап. */
 export type PublicRoadmap = z.infer<typeof publicRoadmapSchema>;

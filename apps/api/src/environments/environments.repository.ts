@@ -4,10 +4,17 @@ import {
   Section,
   type EnvironmentCreate,
   type EnvironmentDetail,
+  type EnvironmentDomainCreate,
   type EnvironmentMetadata,
   type EnvironmentUpdate,
 } from '@cairn/shared';
-import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import { SectionNotVisibleError } from '../access/access.errors';
@@ -237,6 +244,108 @@ export class EnvironmentsRepository {
     return environment;
   }
 
+  /**
+   * Заводит один адрес окружения, не трогая остальные.
+   *
+   * Отдельный метод, а не правка через `update` с полным набором: адрес
+   * добавляется из реестра доменов, где остальных адресов окружения перед
+   * глазами нет, и присылать их значило бы затирать чужую правку.
+   */
+  async addDomain(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    environmentId: string,
+    input: EnvironmentDomainCreate,
+  ): Promise<Environment> {
+    await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Infrastructure,
+      AccessLevel.Write,
+      tx,
+    );
+
+    await this.requireEnvironment(tx, projectId, environmentId);
+
+    const [existing] = await tx
+      .select({ id: environmentDomains.id })
+      .from(environmentDomains)
+      .where(
+        and(
+          eq(environmentDomains.environmentId, environmentId),
+          eq(environmentDomains.name, input.name),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      throw new ConflictException('Такой адрес у окружения уже есть.');
+    }
+
+    await this.insertDomains(tx, environmentId, [input.name]);
+
+    return this.touch(tx, environmentId);
+  }
+
+  /**
+   * Снимает один адрес окружения.
+   *
+   * Корень остаётся в реестре: срок продления и владелец принадлежат
+   * суперадмину и переживают стенд, которым корень был заведён.
+   */
+  async removeDomain(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    environmentId: string,
+    domainId: string,
+  ): Promise<Environment> {
+    await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Infrastructure,
+      AccessLevel.Write,
+      tx,
+    );
+
+    await this.requireEnvironment(tx, projectId, environmentId);
+
+    // Принадлежность окружению — часть условия выборки: адрес чужого
+    // окружения обязан выглядеть несуществующим.
+    const [domain] = await tx
+      .select({ id: environmentDomains.id })
+      .from(environmentDomains)
+      .where(
+        and(
+          eq(environmentDomains.id, domainId),
+          eq(environmentDomains.environmentId, environmentId),
+        ),
+      )
+      .limit(1);
+
+    if (!domain) {
+      throw new NotFoundException('Адрес не найден');
+    }
+
+    // Статусы проверок ссылаются на адрес с restrict (каскады запрещены).
+    await tx.delete(domainStatuses).where(eq(domainStatuses.domainId, domain.id));
+    await tx.delete(environmentDomains).where(eq(environmentDomains.id, domain.id));
+
+    return this.touch(tx, environmentId);
+  }
+
+  /** Отмечает окружение изменённым и возвращает его строку. */
+  private async touch(tx: Transaction, environmentId: string): Promise<Environment> {
+    const [updated] = await tx
+      .update(environments)
+      .set({ updatedAt: new Date() })
+      .where(eq(environments.id, environmentId))
+      .returning();
+
+    return updated!;
+  }
+
   /** Возвращает машины перечисленных окружений, сгруппированные по идентификатору. */
   private async serversOf(rows: { serverId: string | null }[]): Promise<Map<string, Server>> {
     const ids = [...new Set(rows.map((row) => row.serverId).filter(isPresent))];
@@ -295,7 +404,21 @@ export class EnvironmentsRepository {
 
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
 
-    if (domains.length === 0) {
+    await this.insertDomains(tx, environmentId, domains);
+  }
+
+  /**
+   * Вставляет адреса окружения, заведя их корни.
+   *
+   * Общая часть замены набора и заведения одного адреса: два места,
+   * заводящие корень по-разному, разошлись бы при первой же правке.
+   */
+  private async insertDomains(
+    tx: Transaction,
+    environmentId: string,
+    names: string[],
+  ): Promise<void> {
+    if (names.length === 0) {
       return;
     }
 
@@ -308,13 +431,13 @@ export class EnvironmentsRepository {
     // бы держать транзакцию окружения лишними запросами.
     const rootIds = new Map<string, string>();
 
-    for (const root of new Set(domains.map((name) => rootDomainOf(name)))) {
+    for (const root of new Set(names.map((name) => rootDomainOf(name)))) {
       const created = await this.domainsRepository.ensureRoot(tx, root);
       rootIds.set(root, created.id);
     }
 
     await tx.insert(environmentDomains).values(
-      domains.map((name) => ({
+      names.map((name) => ({
         environmentId,
         name,
         domainId: rootIds.get(rootDomainOf(name))!,

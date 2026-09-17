@@ -13,11 +13,18 @@ import type { RoadmapCheckpointRow, RoadmapVersionRow } from '../db/schema';
  * Метаданные — «версии и их прогресс»: паспорт версии и числа done/total.
  * Формулировки чекпоинтов открываются уровнем чтения.
  * Прогресс вычисляется здесь и нигде не хранится (ТЗ 3.5).
+ *
+ * Ссылки на задачи отключаются отдельным флагом, а не уровнем: публичная
+ * страница роадмапа ходит именно под уровнем чтения, и различать пути по
+ * уровню значило бы менять его смысл. Умолчание «со ссылками» выбрано
+ * осознанно: забыть флаг на внутреннем пути — потерять ссылку, забыть на
+ * публичном — раскрыть адрес внутреннего трекера. Публичный путь один.
  */
 export function versionProjection(
   version: RoadmapVersionRow,
   checkpoints: RoadmapCheckpointRow[],
   level: AccessLevel,
+  withLinks = true,
 ): RoadmapVersionMetadata | RoadmapVersionDetail {
   return projectByLevel(
     level,
@@ -39,6 +46,9 @@ export function versionProjection(
         title: checkpoint.title,
         isDone: checkpoint.isDone,
         position: checkpoint.position,
+        // Поле добавляется, а не обнуляется: публичная схема строгая,
+        // и `url: null` был бы для неё такой же ошибкой, как и адрес.
+        ...(withLinks ? { url: checkpoint.url } : {}),
       })),
     }),
   );

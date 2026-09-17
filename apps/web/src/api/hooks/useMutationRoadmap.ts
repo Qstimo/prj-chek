@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  LinkTitleResponse,
   RoadmapCheckpointCreate,
   RoadmapCheckpointUpdate,
   RoadmapVersionCreate,
@@ -103,5 +104,25 @@ export function useMutationDeleteCheckpoint(projectId: string) {
         { method: 'DELETE' },
       ),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Заголовок страницы по ссылке на задачу.
+ *
+ * Мутация, а не запрос: наружу ходит сервер по явной просьбе человека, и
+ * кэшировать этот поход незачем. Адрес начинается с проекта намеренно —
+ * право то же, что у самого чекпоинта, отдельного не заводится.
+ */
+export function useMutationReadLinkTitle(projectId: string) {
+  return useMutation({
+    mutationFn: async (url: string) => {
+      const { title } = await apiClient<LinkTitleResponse>(
+        `/projects/${projectId}/roadmap/link-title`,
+        { method: 'POST', body: { url } },
+      );
+
+      return title;
+    },
   });
 }

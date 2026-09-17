@@ -1,6 +1,10 @@
 'use client';
 
-import { useMutationDeleteDomain, useQueryDomains } from '@/api/hooks';
+import {
+  useMutationDeleteDomain,
+  useMutationRemoveEnvironmentDomain,
+  useQueryDomains,
+} from '@/api/hooks';
 import { DomainList } from '@/components/DomainList';
 import { describeApiError } from '@/api';
 
@@ -8,6 +12,7 @@ import { describeApiError } from '@/api';
 export function DomainsScreen() {
   const domains = useQueryDomains();
   const remove = useMutationDeleteDomain();
+  const removeSubdomain = useMutationRemoveEnvironmentDomain();
 
   if (domains.isPending) {
     return <p className="text-muted-foreground">Загрузка…</p>;
@@ -29,7 +34,23 @@ export function DomainsScreen() {
         </p>
       )}
 
-      <DomainList domains={domains.data} onDelete={(id) => remove.mutate(id)} />
+      {removeSubdomain.isError && (
+        <p role="alert" className="text-destructive">
+          {describeApiError(removeSubdomain.error)}
+        </p>
+      )}
+
+      <DomainList
+        domains={domains.data}
+        onDelete={(id) => remove.mutate(id)}
+        onDeleteSubdomain={(subdomain) =>
+          removeSubdomain.mutate({
+            projectId: subdomain.projectId,
+            environmentId: subdomain.environmentId,
+            domainId: subdomain.id,
+          })
+        }
+      />
     </div>
   );
 }

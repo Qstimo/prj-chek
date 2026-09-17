@@ -72,6 +72,15 @@ export const environmentUpdateSchema = z.object({
     .optional(),
 });
 
+/**
+ * Один адрес окружения: только имя, всё остальное выводится.
+ *
+ * Отдельная схема от `domains` в правке окружения: адрес заводится и
+ * снимается по одному, и присылать ради этого весь набор значило бы
+ * затирать чужую правку, сделанную между чтением и отправкой.
+ */
+export const environmentDomainCreateSchema = z.object({ name: domainSchema }).strict();
+
 /** Поля для создания окружения. Имя и вид обязательны, остальное дополняется позже. */
 export const environmentCreateSchema = environmentUpdateSchema.extend({
   name: z.string().trim().min(1).max(100),
@@ -92,3 +101,6 @@ export type EnvironmentUpdate = z.infer<typeof environmentUpdateSchema>;
 
 /** Данные для создания окружения. */
 export type EnvironmentCreate = z.infer<typeof environmentCreateSchema>;
+
+/** Данные для заведения одного адреса. */
+export type EnvironmentDomainCreate = z.infer<typeof environmentDomainCreateSchema>;

@@ -50,18 +50,7 @@ export class DomainsRepository {
     const root = await this.requireDomain(this.db, id);
     const subdomains = (await this.subdomainsOf([id])).get(id) ?? [];
 
-    return {
-      ...this.rowOf(root, subdomains, new Date()),
-      subdomains: subdomains.map((subdomain) => ({
-        id: subdomain.id,
-        name: subdomain.name,
-        environmentId: subdomain.environmentId,
-        environmentName: subdomain.environmentName,
-        environmentKind: subdomain.environmentKind,
-        projectId: subdomain.projectId,
-        projectName: subdomain.projectName,
-      })),
-    };
+    return this.rowOf(root, subdomains, new Date());
   }
 
   /** Данные карты доменов. */
@@ -169,6 +158,15 @@ export class DomainsRepository {
       warnings,
       subdomainCount: subdomains.length,
       projectCount: new Set(subdomains.map((subdomain) => subdomain.projectId)).size,
+      subdomains: subdomains.map((subdomain) => ({
+        id: subdomain.id,
+        name: subdomain.name,
+        environmentId: subdomain.environmentId,
+        environmentName: subdomain.environmentName,
+        environmentKind: subdomain.environmentKind,
+        projectId: subdomain.projectId,
+        projectName: subdomain.projectName,
+      })),
       createdAt: root.createdAt.toISOString(),
       updatedAt: root.updatedAt.toISOString(),
     };

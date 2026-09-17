@@ -1,6 +1,6 @@
 'use client';
 
-import type { ProjectStatus, StatusSummaryRow } from '@cairn/shared';
+import type { ProjectStatus } from '@cairn/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
@@ -9,7 +9,6 @@ import { ApiError } from '../errors';
 /** Ключи кэша статусов. */
 export const STATUS_KEYS = {
   forProject: (projectId: string) => ['status', projectId] as const,
-  summary: ['status-summary'] as const,
 };
 
 /**
@@ -34,14 +33,6 @@ export function useQueryProjectStatus(projectId: string) {
   });
 }
 
-/** Индикаторы и предупреждения по видимым проектам. */
-export function useQueryStatusSummary() {
-  return useQuery({
-    queryKey: STATUS_KEYS.summary,
-    queryFn: () => apiClient<StatusSummaryRow[]>('/status/summary'),
-  });
-}
-
 /** Ручной запуск всех проверок. Право суперадмина. */
 export function useMutationRunChecks() {
   const client = useQueryClient();
@@ -50,7 +41,6 @@ export function useMutationRunChecks() {
     mutationFn: () => apiClient('/status/run', { method: 'POST' }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['status'] });
-      await client.invalidateQueries({ queryKey: STATUS_KEYS.summary });
     },
   });
 }

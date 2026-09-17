@@ -1,10 +1,13 @@
 import {
   AccessLevel,
   Section,
+  linkTitleRequestSchema,
   roadmapCheckpointCreateSchema,
   roadmapCheckpointUpdateSchema,
   roadmapVersionCreateSchema,
   roadmapVersionUpdateSchema,
+  type LinkTitleRequest,
+  type LinkTitleResponse,
   type PublicLink,
   type PublicRoadmap,
   type RoadmapCheckpoint,
@@ -34,6 +37,7 @@ import { SuperadminGuard } from '../access/superadmin.guard';
 import { CurrentSubject } from '../auth/current-subject.decorator';
 import { SessionGuard } from '../auth/session.guard';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { LinkTitleService } from '../link-title';
 import { RoadmapService } from './roadmap.service';
 
 /** Секция «Роадмап» (спека 5). */
@@ -43,7 +47,24 @@ export class RoadmapController {
   constructor(
     private readonly roadmap: RoadmapService,
     private readonly access: AccessService,
+    private readonly linkTitle: LinkTitleService,
   ) {}
+
+  /**
+   * Заголовок страницы по ссылке на задачу — чтобы не перепечатывать его
+   * руками. Право то же, что у самого чекпоинта: адрес начинается с проекта
+   * именно ради этого, отдельной проверки прав здесь не заводится.
+   */
+  @Post('link-title')
+  async readLinkTitle(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body(new ZodValidationPipe(linkTitleRequestSchema)) body: LinkTitleRequest,
+  ): Promise<LinkTitleResponse> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write);
+
+    return { title: await this.linkTitle.read(body.url) };
+  }
 
   /** Роадмап проекта в проекции по уровню, со стадией. */
   @Get()
@@ -103,6 +124,7 @@ export class RoadmapController {
     return {
       id: created.id,
       title: created.title,
+      url: created.url,
       isDone: created.isDone,
       position: created.position,
     };
@@ -128,6 +150,7 @@ export class RoadmapController {
     return {
       id: updated.id,
       title: updated.title,
+      url: updated.url,
       isDone: updated.isDone,
       position: updated.position,
     };

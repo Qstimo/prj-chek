@@ -17,6 +17,7 @@ export function EnvironmentForm({
   onSubmit,
   servers = [],
   canAssignServer = false,
+  knownDomains,
   error,
   isSubmitting = false,
 }: IProps) {
@@ -84,7 +85,11 @@ export function EnvironmentForm({
       />
 
       <div className="space-y-1">
-        <DomainsField value={values.domains} onChange={(value) => change('domains', value)} />
+        <DomainsField
+          value={values.domains}
+          onChange={(value) => change('domains', value)}
+          knownDomains={knownDomains}
+        />
         <p className="text-xs text-muted-foreground">{DOMAINS_HINT}</p>
       </div>
 

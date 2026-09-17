@@ -1,4 +1,4 @@
-import { ProjectLifecycle } from '@cairn/shared';
+import { ProjectLifecycle, StatusIndicator } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
@@ -41,5 +41,17 @@ describe('ProjectCard', () => {
     render(<ProjectCard project={{ ...project, lifecycle: ProjectLifecycle.Archived }} />);
 
     expect(screen.getByText('Архив')).toBeInTheDocument();
+  });
+
+  it('показывает индикатор состояния рядом со стадией', () => {
+    render(<ProjectCard project={project} indicator={StatusIndicator.Down} />);
+
+    expect(screen.getByText('Авария')).toBeInTheDocument();
+  });
+
+  it('без индикатора показывает только стадию', () => {
+    render(<ProjectCard project={project} />);
+
+    expect(screen.queryByText('Авария')).not.toBeInTheDocument();
   });
 });

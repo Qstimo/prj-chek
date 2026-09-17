@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { Drawer } from './Drawer';
+import { DrawerWidth } from './types';
 
 describe('Drawer', () => {
   it('закрытая панель не рендерится', () => {
@@ -50,5 +51,25 @@ describe('Drawer', () => {
     await userEvent.keyboard('{Escape}');
 
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('открывается широкой, когда попрошена ширина панели роадмапа', () => {
+    render(
+      <Drawer isOpen onClose={vi.fn()} title="Панель" width={DrawerWidth.Wide}>
+        содержимое
+      </Drawer>,
+    );
+
+    expect(screen.getByRole('dialog')).toHaveClass('max-w-[640px]');
+  });
+
+  it('по умолчанию остаётся узкой', () => {
+    render(
+      <Drawer isOpen onClose={vi.fn()} title="Панель">
+        содержимое
+      </Drawer>,
+    );
+
+    expect(screen.getByRole('dialog')).toHaveClass('max-w-[480px]');
   });
 });

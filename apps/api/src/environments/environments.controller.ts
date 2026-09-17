@@ -1,8 +1,10 @@
 import {
   environmentCreateSchema,
+  environmentDomainCreateSchema,
   environmentUpdateSchema,
   type EnvironmentCreate,
   type EnvironmentDetail,
+  type EnvironmentDomainCreate,
   type EnvironmentMetadata,
   type EnvironmentUpdate,
 } from '@cairn/shared';
@@ -79,6 +81,37 @@ export class EnvironmentsController {
     @Body(new ZodValidationPipe(environmentUpdateSchema)) body: EnvironmentUpdate,
   ): Promise<EnvironmentMetadata | EnvironmentDetail> {
     await this.environments.update(subject, projectId, id, body);
+
+    return this.environments.findById(subject, projectId, id);
+  }
+
+  /**
+   * Заводит один адрес окружения.
+   *
+   * Отдельный адрес, а не весь набор: так адрес добавляется из реестра
+   * доменов, где остальных адресов окружения перед глазами нет.
+   */
+  @Post(':id/domains')
+  async addDomain(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(environmentDomainCreateSchema)) body: EnvironmentDomainCreate,
+  ): Promise<EnvironmentMetadata | EnvironmentDetail> {
+    await this.environments.addDomain(subject, projectId, id, body);
+
+    return this.environments.findById(subject, projectId, id);
+  }
+
+  /** Снимает один адрес окружения. Корень остаётся в реестре доменов. */
+  @Delete(':id/domains/:domainId')
+  async removeDomain(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('domainId', ParseUUIDPipe) domainId: string,
+  ): Promise<EnvironmentMetadata | EnvironmentDetail> {
+    await this.environments.removeDomain(subject, projectId, id, domainId);
 
     return this.environments.findById(subject, projectId, id);
   }

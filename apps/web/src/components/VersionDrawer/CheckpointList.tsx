@@ -2,6 +2,8 @@
 
 import type { RoadmapCheckpoint } from '@cairn/shared';
 
+import { CheckpointItem } from './CheckpointItem';
+
 /** Пропсы списка чекпоинтов. */
 interface IProps {
   checkpoints: RoadmapCheckpoint[];
@@ -23,32 +25,13 @@ export function CheckpointList({ checkpoints, canWrite, onToggle, onDelete }: IP
   return (
     <ul className="grid gap-1">
       {checkpoints.map((checkpoint) => (
-        <li key={checkpoint.id} className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id={`checkpoint-${checkpoint.id}`}
-            checked={checkpoint.isDone}
-            disabled={!canWrite}
-            onChange={(event) => onToggle(checkpoint.id, event.target.checked)}
-            aria-label={checkpoint.title}
-          />
-          <label
-            htmlFor={`checkpoint-${checkpoint.id}`}
-            className={checkpoint.isDone ? 'text-muted-foreground line-through' : ''}
-          >
-            {checkpoint.title}
-          </label>
-          {canWrite && (
-            <button
-              type="button"
-              aria-label={`Убрать ${checkpoint.title}`}
-              onClick={() => onDelete(checkpoint.id)}
-              className="text-sm text-muted-foreground"
-            >
-              ×
-            </button>
-          )}
-        </li>
+        <CheckpointItem
+          key={checkpoint.id}
+          checkpoint={checkpoint}
+          canWrite={canWrite}
+          onToggle={onToggle}
+          onDelete={onDelete}
+        />
       ))}
     </ul>
   );

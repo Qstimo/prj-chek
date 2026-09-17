@@ -133,6 +133,27 @@ describe('репозиторий доменов', () => {
       });
     });
 
+    it('отдаёт поддомены вместе со строкой реестра', async () => {
+      // Реестр рисуется деревом, а данные уже подняты ради счётчиков:
+      // платить вторым запросом на каждый корень незачем.
+      const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
+      await addSubdomain(root!.id, 'stage.example.com');
+
+      const [row] = await repository.list();
+
+      expect(row?.subdomains).toEqual([
+        expect.objectContaining({ name: 'stage.example.com', projectName: 'Витрина', projectId }),
+      ]);
+    });
+
+    it('корень без поддоменов отдаёт пустой список', async () => {
+      await testDb.db.insert(domains).values({ name: 'example.com' });
+
+      const [row] = await repository.list();
+
+      expect(row?.subdomains).toEqual([]);
+    });
+
     it('перечисляет корни по имени', async () => {
       await testDb.db.insert(domains).values([{ name: 'beta.com' }, { name: 'alpha.com' }]);
 

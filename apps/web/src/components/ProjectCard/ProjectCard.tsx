@@ -1,15 +1,17 @@
 import Link from 'next/link';
 
+import { StatusIndicator } from '../StatusIndicator';
 import { LIFECYCLE_LABELS, LIFECYCLE_STYLES } from './constants';
 import type { IProps } from './types';
 
 /**
  * Карточка проекта в сводке.
  *
- * Место под индикатор технического статуса появится на этапе 6; сейчас
- * показывается только состояние жизненного цикла, задаваемое вручную.
+ * Стадия жизненного цикла — намерение, задаваемое вручную; индикатор —
+ * вычисляемый факт. Соседство этих двух вещей и есть ответ на вопрос
+ * «что с проектом», ради которого сводка существует.
  */
-export function ProjectCard({ project }: IProps) {
+export function ProjectCard({ project, indicator }: IProps) {
   return (
     <Link
       href={`/projects/${project.id}`}
@@ -21,6 +23,12 @@ export function ProjectCard({ project }: IProps) {
           {LIFECYCLE_LABELS[project.lifecycle]}
         </span>
       </div>
+
+      {indicator && (
+        <div className="mt-2">
+          <StatusIndicator indicator={indicator} />
+        </div>
+      )}
     </Link>
   );
 }

@@ -6,6 +6,7 @@ import {
   useMutationCreateCheckpoint,
   useMutationDeleteCheckpoint,
   useMutationDeleteVersion,
+  useMutationReadLinkTitle,
   useMutationUpdateCheckpoint,
   useMutationUpdateVersion,
 } from '@/api/hooks';
@@ -27,6 +28,7 @@ export function RoadmapVersionPanel({ projectId, version, isCurrent, canWrite, o
   const createCheckpoint = useMutationCreateCheckpoint(projectId);
   const updateCheckpoint = useMutationUpdateCheckpoint(projectId);
   const deleteCheckpoint = useMutationDeleteCheckpoint(projectId);
+  const readLinkTitle = useMutationReadLinkTitle(projectId);
 
   return (
     <VersionDrawer
@@ -41,6 +43,7 @@ export function RoadmapVersionPanel({ projectId, version, isCurrent, canWrite, o
                 updateCheckpoint.mutate({ versionId: version.id, checkpointId, input: { isDone } }),
               onAddCheckpoint: (input) =>
                 createCheckpoint.mutate({ versionId: version.id, input }),
+              onReadCheckpointTitle: (url) => readLinkTitle.mutateAsync(url),
               onDeleteCheckpoint: (checkpointId) =>
                 deleteCheckpoint.mutate({ versionId: version.id, checkpointId }),
               onSubmitVersion: (input, onSuccess) =>

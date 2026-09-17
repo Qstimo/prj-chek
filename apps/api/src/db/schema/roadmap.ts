@@ -63,6 +63,8 @@ export const roadmapCheckpoints = pgTable(
       .notNull()
       .references(() => roadmapVersions.id, { onDelete: 'restrict' }),
     title: text('title').notNull(),
+    /** Ссылка на задачу во внешнем трекере; наружу не отдаётся. */
+    url: text('url'),
     isDone: boolean('is_done').notNull().default(false),
     position: integer('position').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

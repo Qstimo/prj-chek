@@ -50,4 +50,76 @@ describe('DomainsField', () => {
 
     expect(onChange).toHaveBeenCalledWith(['api.example.com']);
   });
+
+  it('предлагает известные адреса', async () => {
+    render(<DomainsField value={[]} onChange={vi.fn()} knownDomains={['api.example.com']} />);
+
+    await userEvent.type(screen.getByLabelText('Домены'), 'api');
+
+    expect(screen.getByRole('option', { name: 'api.example.com' })).toBeInTheDocument();
+  });
+
+  it('добавляет адрес выбором из списка', async () => {
+    const onChange = vi.fn();
+    render(<DomainsField value={[]} onChange={onChange} knownDomains={['api.example.com']} />);
+
+    await userEvent.type(screen.getByLabelText('Домены'), 'api');
+    await userEvent.click(screen.getByRole('option', { name: 'api.example.com' }));
+
+    expect(onChange).toHaveBeenCalledWith(['api.example.com']);
+  });
+
+  it('не предлагает уже добавленное', async () => {
+    render(
+      <DomainsField
+        value={['api.example.com']}
+        onChange={vi.fn()}
+        knownDomains={['api.example.com', 'stage.example.com']}
+      />,
+    );
+
+    await userEvent.type(screen.getByLabelText('Домены'), 'example');
+
+    expect(screen.queryByRole('option', { name: 'api.example.com' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'stage.example.com' })).toBeInTheDocument();
+  });
+
+  it('позволяет завести адрес, которого нет в списке', async () => {
+    const onChange = vi.fn();
+    render(<DomainsField value={[]} onChange={onChange} knownDomains={[]} />);
+
+    await userEvent.type(screen.getByLabelText('Домены'), 'new.example.com');
+    await userEvent.click(screen.getByRole('option', { name: /Создать/ }));
+
+    expect(onChange).toHaveBeenCalledWith(['new.example.com']);
+  });
+
+  it('без списка работает как обычное поле ввода', async () => {
+    // Правило спеки: подрядчику список не показывается вовсе — иначе он
+    // увидел бы чужие адреса, а через них существование чужих проектов.
+    render(<DomainsField value={[]} onChange={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText('Домены'), 'api');
+
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('называет корень набранного адреса', async () => {
+    // Разбор считается из набранного самим человеком и потому не
+    // раскрывает ничего чужого — его видят все. А вот судьбу корня без
+    // реестра знать неоткуда, и придумывать её нельзя.
+    render(<DomainsField value={[]} onChange={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText('Домены'), 'api.example.com');
+
+    expect(screen.getByText('Корень: example.com')).toBeInTheDocument();
+  });
+
+  it('знает, что корень уже в реестре', async () => {
+    render(<DomainsField value={[]} onChange={vi.fn()} knownDomains={['stage.example.com']} />);
+
+    await userEvent.type(screen.getByLabelText('Домены'), 'api.example.com');
+
+    expect(screen.getByText('Корень: example.com — уже в реестре')).toBeInTheDocument();
+  });
 });
