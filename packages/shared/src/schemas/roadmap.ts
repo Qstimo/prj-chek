@@ -105,6 +105,14 @@ export const roadmapCheckpointUpdateSchema = z
   })
   .strict();
 
+/** Запрос заголовка по ссылке на задачу. */
+export const linkTitleRequestSchema = z
+  .object({ url: z.string().trim().url().max(2000) })
+  .strict();
+
+/** Ответ: заголовок либо его отсутствие — неудача чтения не ошибка. */
+export const linkTitleResponseSchema = z.object({ title: z.string().nullable() });
+
 /** Публичная ссылка роадмапа. */
 export const publicLinkSchema = z.object({
   token: z.string(),
@@ -165,6 +173,12 @@ export type RoadmapCheckpointCreate = z.infer<typeof roadmapCheckpointCreateSche
 
 /** Правка чекпоинта. */
 export type RoadmapCheckpointUpdate = z.infer<typeof roadmapCheckpointUpdateSchema>;
+
+/** Запрос заголовка по ссылке. */
+export type LinkTitleRequest = z.infer<typeof linkTitleRequestSchema>;
+
+/** Ответ с заголовком. */
+export type LinkTitleResponse = z.infer<typeof linkTitleResponseSchema>;
 
 /** Публичная ссылка. */
 export type PublicLink = z.infer<typeof publicLinkSchema>;
