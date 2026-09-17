@@ -2,20 +2,34 @@ import { z } from 'zod';
 
 import { HealthState, StatusIndicator, StatusWarningKind } from '../enums';
 
-/** Статус окружения. Null-поля означают «ещё не проверялось». */
+/**
+ * Статус окружения: вывод из статусов его адресов, а не измерение.
+ *
+ * Задержка и причина отказа принадлежат адресу — у окружения их столько
+ * же, сколько адресов. Здесь остаётся ответ на один вопрос: жив ли стенд
+ * целиком. `null` означает, что не проверялся ни один его адрес.
+ */
 export const environmentStatusSchema = z.object({
   environmentId: z.string().uuid(),
   name: z.string(),
   health: z.nativeEnum(HealthState).nullable(),
-  latencyMs: z.number().int().nonnegative().nullable(),
-  error: z.string().nullable(),
   checkedAt: z.string().nullable(),
 });
 
-/** Статус домена: сроки TLS и регистрации либо ошибки их получения. */
+/**
+ * Статус адреса: все три проверки в одной строке.
+ *
+ * Пока здоровье лежало у окружения, а сроки — у адреса, они могли
+ * описывать разные хосты. Ключ теперь один, и расходиться нечему.
+ */
 export const domainStatusSchema = z.object({
   domainId: z.string().uuid(),
+  /** Окружение, которому адрес принадлежит: по нему статусы группируются. */
+  environmentId: z.string().uuid(),
   name: z.string(),
+  health: z.nativeEnum(HealthState).nullable(),
+  latencyMs: z.number().int().nonnegative().nullable(),
+  healthError: z.string().nullable(),
   tlsValidTo: z.string().nullable(),
   tlsError: z.string().nullable(),
   registryExpiresAt: z.string().nullable(),
@@ -50,7 +64,7 @@ export const statusSummaryRowSchema = z.object({
 /** Статус окружения. */
 export type EnvironmentStatus = z.infer<typeof environmentStatusSchema>;
 
-/** Статус домена. */
+/** Статус адреса. */
 export type DomainStatus = z.infer<typeof domainStatusSchema>;
 
 /** Предупреждение. */

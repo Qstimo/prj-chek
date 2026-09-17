@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { StatusIndicator } from '../enums';
-import { projectStatusSchema, statusSummaryRowSchema } from './status';
+import { HealthState, StatusIndicator } from '../enums';
+import {
+  domainStatusSchema,
+  environmentStatusSchema,
+  projectStatusSchema,
+  statusSummaryRowSchema,
+} from './status';
+
+const ENVIRONMENT_ID = '11111111-1111-1111-1111-111111111111';
+const DOMAIN_ID = '22222222-2222-2222-2222-222222222222';
 
 describe('схема статуса проекта', () => {
   it('принимает собранный агрегат', () => {
@@ -9,18 +17,20 @@ describe('схема статуса проекта', () => {
       indicator: StatusIndicator.Warning,
       environments: [
         {
-          environmentId: '11111111-1111-1111-1111-111111111111',
+          environmentId: ENVIRONMENT_ID,
           name: 'Прод',
           health: 'up',
-          latencyMs: 42,
-          error: null,
           checkedAt: '2026-08-28T10:00:00.000Z',
         },
       ],
       domains: [
         {
-          domainId: '22222222-2222-2222-2222-222222222222',
+          domainId: DOMAIN_ID,
+          environmentId: ENVIRONMENT_ID,
           name: 'example.com',
+          health: null,
+          latencyMs: null,
+          healthError: null,
           tlsValidTo: null,
           tlsError: 'нет соединения',
           registryExpiresAt: '2026-09-20T00:00:00.000Z',
@@ -39,11 +49,9 @@ describe('схема статуса проекта', () => {
       indicator: StatusIndicator.Unknown,
       environments: [
         {
-          environmentId: '11111111-1111-1111-1111-111111111111',
+          environmentId: ENVIRONMENT_ID,
           name: 'Прод',
           health: null,
-          latencyMs: null,
-          error: null,
           checkedAt: null,
         },
       ],
@@ -62,5 +70,60 @@ describe('схема статуса проекта', () => {
         warnings: [],
       }),
     ).toThrow();
+  });
+});
+
+describe('схема статуса адреса', () => {
+  const ADDRESS = {
+    domainId: DOMAIN_ID,
+    environmentId: ENVIRONMENT_ID,
+    name: 'stage.example.com',
+    health: HealthState.Down,
+    latencyMs: 120,
+    healthError: 'HTTP 502',
+    tlsValidTo: null,
+    tlsError: null,
+    registryExpiresAt: null,
+    registryError: null,
+    checkedAt: '2026-09-17T10:00:00.000Z',
+  };
+
+  it('держит все три проверки в одной строке', () => {
+    // Пока здоровье и сроки лежали порознь, они могли описывать разные
+    // хосты: ключ у строки один — адрес.
+    const parsed = domainStatusSchema.parse(ADDRESS);
+
+    expect(parsed).toMatchObject({ health: HealthState.Down, healthError: 'HTTP 502' });
+  });
+
+  it('знает, чьё это окружение', () => {
+    expect(domainStatusSchema.parse(ADDRESS).environmentId).toBe(ENVIRONMENT_ID);
+  });
+
+  it('непроверенный адрес выражается null-полями', () => {
+    const parsed = domainStatusSchema.parse({
+      ...ADDRESS,
+      health: null,
+      latencyMs: null,
+      healthError: null,
+      checkedAt: null,
+    });
+
+    expect(parsed.health).toBeNull();
+  });
+});
+
+describe('схема статуса окружения', () => {
+  it('держит вывод, а не измерение', () => {
+    // Задержка и причина принадлежат адресу: у окружения их несколько.
+    const parsed = environmentStatusSchema.parse({
+      environmentId: ENVIRONMENT_ID,
+      name: 'Прод',
+      health: HealthState.Up,
+      checkedAt: '2026-09-17T10:00:00.000Z',
+    });
+
+    expect(parsed.health).toBe(HealthState.Up);
+    expect('latencyMs' in parsed).toBe(false);
   });
 });
