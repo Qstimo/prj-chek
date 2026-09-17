@@ -21,6 +21,16 @@ describe('DomainsField', () => {
     expect(onChange).toHaveBeenCalledWith(['example.com']);
   });
 
+  it('принимает адрес, вставленный из адресной строки', async () => {
+    const onChange = vi.fn();
+    render(<DomainsField value={[]} onChange={onChange} />);
+
+    await userEvent.type(screen.getByLabelText('Домены'), 'https://stage.fc.critica.im/');
+    await userEvent.click(screen.getByRole('button', { name: 'Добавить домен' }));
+
+    expect(onChange).toHaveBeenCalledWith(['stage.fc.critica.im']);
+  });
+
   it('не добавляет пустую строку', async () => {
     const onChange = vi.fn();
     render(<DomainsField value={[]} onChange={onChange} />);

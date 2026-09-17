@@ -1,6 +1,6 @@
 'use client';
 
-import { rootDomainOf } from '@cairn/shared';
+import { hostnameOf, rootDomainOf } from '@cairn/shared';
 import { useState } from 'react';
 
 import { parseAddress, rootHintOf } from '@/utils';
@@ -27,11 +27,13 @@ export function DomainsField({ value, onChange, knownDomains }: IProps) {
   const isRegistryVisible = knownDomains !== undefined;
   const parsed = parseAddress(draft, (knownDomains ?? []).map(rootDomainOf));
   const matches = (knownDomains ?? []).filter(
-    (domain) => domain.includes(draft.trim().toLowerCase()) && !value.includes(domain),
+    (domain) => domain.includes(hostnameOf(draft)) && !value.includes(domain),
   );
 
   function add(candidate: string): void {
-    const domain = candidate.trim().toLowerCase();
+    // Нормализация та же, что на сервере: вставленный из браузера адрес
+    // сохранится именем хоста, и человек увидит это сразу.
+    const domain = hostnameOf(candidate);
 
     if (!domain) {
       return;

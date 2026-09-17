@@ -28,6 +28,16 @@ describe('разбор введённого адреса', () => {
     expect(parseAddress(' API.Example.COM ', [])).toMatchObject({ name: 'api.example.com' });
   });
 
+  it('понимает адрес, вставленный из адресной строки', () => {
+    // Разбор обязан показывать то же имя, которое сохранит сервер: там
+    // такая же нормализация, и расходиться им нельзя.
+    expect(parseAddress('https://stage.fc.critica.im/', [])).toMatchObject({
+      name: 'stage.fc.critica.im',
+      root: 'critica.im',
+      isRoot: false,
+    });
+  });
+
   it('помнит зоны третьего уровня', () => {
     expect(parseAddress('api.shop.co.uk', [])).toMatchObject({ root: 'shop.co.uk' });
   });

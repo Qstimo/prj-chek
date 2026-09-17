@@ -1,4 +1,4 @@
-import { rootDomainOf } from '@cairn/shared';
+import { hostnameOf, rootDomainOf } from '@cairn/shared';
 
 /** Разбор введённого адреса: что за имя и чем ему приходится корень. */
 export interface IAddressParse {
@@ -15,18 +15,17 @@ export interface IAddressParse {
 /**
  * Разбирает введённое пользователем в адрес и его корень.
  *
- * `rootDomainOf` берётся из общего пакета, а не переписывается: правило
- * корня одно на сервер и на интерфейс, и разойтись им нельзя.
- *
- * Приведение к нижнему регистру повторяет серверное: человек должен
- * видеть ровно то, что будет сохранено.
+ * `rootDomainOf` и `hostnameOf` берутся из общего пакета, а не
+ * переписываются: правило корня и нормализация адреса одни на сервер
+ * и на интерфейс, и разойтись им нельзя — иначе подсказка обещала бы
+ * одно имя, а сохранялось бы другое.
  */
 export function parseAddress(
   draft: string,
   knownRoots: string[],
   rootSuffix?: string,
 ): IAddressParse | null {
-  const entered = draft.trim().toLowerCase();
+  const entered = hostnameOf(draft);
 
   if (entered.length === 0) {
     return null;

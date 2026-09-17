@@ -5,6 +5,7 @@ import {
   environmentCreateSchema,
   environmentDetailSchema,
   environmentUpdateSchema,
+  hostnameOf,
 } from './environment';
 
 describe('схема создания окружения', () => {
@@ -46,6 +47,22 @@ describe('домены окружения', () => {
     // Иначе в реестр попадёт «мой сервер» вместо адреса, и проверки
     // сроков на этапе 6 будут падать на бессмысленных данных.
     expect(() => environmentUpdateSchema.parse({ domains: ['не домен'] })).toThrow();
+  });
+
+  it('принимает адрес, вставленный из адресной строки', () => {
+    // Скопировать адрес браузера — первое, что делает человек, и отвечать
+    // на это «Ожидается домен» значит требовать ручной правки очевидного.
+    const parsed = environmentUpdateSchema.parse({ domains: ['https://stage.fc.critica.im/'] });
+
+    expect(parsed.domains).toEqual(['stage.fc.critica.im']);
+  });
+
+  it('срезает путь, запрос и порт', () => {
+    const parsed = environmentUpdateSchema.parse({
+      domains: ['http://example.com:8443/admin?tab=1#top'],
+    });
+
+    expect(parsed.domains).toEqual(['example.com']);
   });
 
   it('отвергает повторяющиеся домены', () => {
@@ -149,5 +166,27 @@ describe('схема деталей окружения', () => {
 
     expect(parsed.server?.owner).toBe('ООО Ромашка');
     expect(parsed).not.toHaveProperty('ip');
+  });
+});
+
+describe('нормализация адреса', () => {
+  it.each([
+    ['https://stage.fc.critica.im/', 'stage.fc.critica.im'],
+    ['HTTP://Example.COM', 'example.com'],
+    ['example.com:8443', 'example.com'],
+    ['example.com/admin/users', 'example.com'],
+    ['example.com?tab=1', 'example.com'],
+    ['example.com#top', 'example.com'],
+    // Хвостовая точка — корень DNS: имя то же самое.
+    ['example.com.', 'example.com'],
+    // Учётные данные в адресе: в имени хоста им не место.
+    ['https://user:pass@example.com/', 'example.com'],
+    ['  Example.com  ', 'example.com'],
+  ])('%s → %s', (value, expected) => {
+    expect(hostnameOf(value)).toBe(expected);
+  });
+
+  it('оставляет непохожее на адрес как есть, чтобы отказ объяснила проверка', () => {
+    expect(hostnameOf('не домен')).toBe('не домен');
   });
 });
