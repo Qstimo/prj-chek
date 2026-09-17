@@ -11,7 +11,6 @@ import {
   domainStatuses,
   domains,
   environmentDomains,
-  environmentStatuses,
   environments,
   grants,
   projects,
@@ -468,13 +467,11 @@ describe('репозиторий окружений', () => {
         .from(environmentDomains)
         .where(eq(environmentDomains.environmentId, id));
       await testDb.db
-        .insert(environmentStatuses)
-        .values({ environmentId: id, health: HealthState.Up });
-      await testDb.db.insert(domainStatuses).values({ domainId: domain!.id });
+        .insert(domainStatuses)
+        .values({ domainId: domain!.id, health: HealthState.Up });
 
       await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id));
 
-      expect(await testDb.db.select().from(environmentStatuses)).toHaveLength(0);
       expect(await testDb.db.select().from(domainStatuses)).toHaveLength(0);
     });
 

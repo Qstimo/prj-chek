@@ -25,7 +25,6 @@ import type { Database, Executor, Transaction } from '../db/db.types';
 import {
   domainStatuses,
   environmentDomains,
-  environmentStatuses,
   environments,
   servers,
   variables,
@@ -235,9 +234,6 @@ export class EnvironmentsRepository {
       );
     }
 
-    await tx
-      .delete(environmentStatuses)
-      .where(eq(environmentStatuses.environmentId, environmentId));
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
     await tx.delete(environments).where(eq(environments.id, environmentId));
 

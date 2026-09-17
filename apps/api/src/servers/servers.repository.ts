@@ -1,4 +1,5 @@
 import {
+  HealthState,
   type ServerCreate,
   type ServerMap,
   type ServerDetail,
@@ -11,13 +12,15 @@ import { asc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { DATABASE } from '../db/db.module';
 import type { Database, Transaction } from '../db/db.types';
 import {
-  environmentStatuses,
+  domainStatuses,
+  environmentDomains,
   environments,
   projects,
   servers,
   type Server,
 } from '../db/schema';
 import { serverIndicatorOf, serverWarningsOf } from '../status/indicator';
+import { healthOfAddresses } from '../status/status.projection';
 import { buildServerMap } from './server-map';
 
 /** Строка размещения: окружение на сервере вместе с проектом и здоровьем. */
@@ -28,7 +31,7 @@ interface PlacementRow {
   environmentKind: (typeof environments.kind)['_']['data'];
   projectId: string;
   projectName: string;
-  health: (typeof environmentStatuses.health)['_']['data'] | null;
+  health: HealthState | null;
 }
 
 /**
@@ -88,18 +91,24 @@ export class ServersRepository {
         projectId: projects.id,
         projectName: projects.name,
         projectLifecycle: projects.lifecycle,
-        health: environmentStatuses.health,
       })
       .from(environments)
       .innerJoin(projects, eq(projects.id, environments.projectId))
-      .leftJoin(environmentStatuses, eq(environmentStatuses.environmentId, environments.id))
       .where(isNotNull(environments.serverId))
       .orderBy(asc(projects.name), asc(environments.name));
+
+    const health = await this.healthByEnvironment(
+      placements.map((placement) => placement.environmentId),
+    );
 
     return buildServerMap(
       {
         servers: machines,
-        placements: placements.map((placement) => ({ ...placement, serverId: placement.serverId! })),
+        placements: placements.map((placement) => ({
+          ...placement,
+          serverId: placement.serverId!,
+          health: health.get(placement.environmentId) ?? null,
+        })),
       },
       new Date(),
     );
@@ -153,14 +162,52 @@ export class ServersRepository {
     return server;
   }
 
+  /**
+   * Здоровье окружений по их адресам.
+   *
+   * Отдельным запросом, а не соединением: у окружения адресов несколько,
+   * и соединение размножило бы размещения. Правило свода — то же, что
+   * у статуса проекта: чужого второго экземпляра у него быть не должно.
+   */
+  private async healthByEnvironment(
+    environmentIds: string[],
+  ): Promise<Map<string, HealthState | null>> {
+    if (environmentIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      .select({
+        environmentId: environmentDomains.environmentId,
+        health: domainStatuses.health,
+      })
+      .from(environmentDomains)
+      .leftJoin(domainStatuses, eq(domainStatuses.domainId, environmentDomains.id))
+      .where(inArray(environmentDomains.environmentId, environmentIds));
+
+    const grouped = new Map<string, { health: HealthState | null }[]>();
+
+    for (const row of rows) {
+      grouped.set(row.environmentId, [
+        ...(grouped.get(row.environmentId) ?? []),
+        { health: row.health },
+      ]);
+    }
+
+    return new Map(
+      [...grouped].map(([environmentId, addresses]) => [
+        environmentId,
+        healthOfAddresses(addresses),
+      ]),
+    );
+  }
+
   /** Собирает строку реестра: статус считается из размещённых окружений. */
   private rowOf(server: Server, placements: PlacementRow[], now: Date): ServerRow {
     const environmentStatusesView = placements.map((placement) => ({
       environmentId: placement.environmentId,
       name: placement.environmentName,
       health: placement.health,
-      latencyMs: null,
-      error: null,
       checkedAt: null,
     }));
 
@@ -199,17 +246,23 @@ export class ServersRepository {
         environmentKind: environments.kind,
         projectId: projects.id,
         projectName: projects.name,
-        health: environmentStatuses.health,
       })
       .from(environments)
       .innerJoin(projects, eq(projects.id, environments.projectId))
-      .leftJoin(environmentStatuses, eq(environmentStatuses.environmentId, environments.id))
       .where(inArray(environments.serverId, serverIds))
       .orderBy(asc(projects.name), asc(environments.name));
 
+    const health = await this.healthByEnvironment(rows.map((row) => row.environmentId));
+
     for (const row of rows) {
       const key = row.serverId!;
-      grouped.set(key, [...(grouped.get(key) ?? []), { ...row, serverId: key }]);
+      const placement = {
+        ...row,
+        serverId: key,
+        health: health.get(row.environmentId) ?? null,
+      };
+
+      grouped.set(key, [...(grouped.get(key) ?? []), placement]);
     }
 
     return grouped;

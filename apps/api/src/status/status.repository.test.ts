@@ -14,9 +14,9 @@ import { AccessService } from '../access/access.service';
 import { SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import {
+  domainStatuses,
   domains,
   environmentDomains,
-  environmentStatuses,
   environments,
   grants,
   projects,
@@ -24,7 +24,7 @@ import {
   subjects,
   users,
 } from '../db/schema';
-import { StatusRepository } from './status.repository';
+import { StatusRepository, type AddressStatusInput } from './status.repository';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
 describe('репозиторий статусов', () => {
@@ -84,7 +84,7 @@ describe('репозиторий статусов', () => {
         projectId,
         name: 'Прод',
         kind: EnvironmentKind.Production,
-        healthCheckUrl: 'https://example.com/health',
+        healthCheckPath: '/api/health',
       })
       .returning();
     environmentId = environment!.id;
@@ -115,46 +115,100 @@ describe('репозиторий статусов', () => {
     });
   }
 
-  it('повторная запись статуса обновляет строку, а не плодит', async () => {
-    await repository.upsertEnvironmentStatus(environmentId, {
-      health: HealthState.Down,
-      latencyMs: null,
-      error: 'HTTP 500',
-    });
-    await repository.upsertEnvironmentStatus(environmentId, {
+  /** Результат всех трёх проверок адреса: в тестах меняется точечно. */
+  function checked(overrides: Partial<AddressStatusInput> = {}): AddressStatusInput {
+    return {
       health: HealthState.Up,
       latencyMs: 42,
-      error: null,
-    });
+      healthError: null,
+      tlsValidTo: null,
+      tlsError: null,
+      registryExpiresAt: null,
+      registryError: null,
+      ...overrides,
+    };
+  }
 
-    const rows = await testDb.db.select().from(environmentStatuses);
+  it('повторная запись статуса обновляет строку, а не плодит', async () => {
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ health: HealthState.Down, latencyMs: null, healthError: 'HTTP 500' }),
+    );
+    await repository.upsertAddressStatus(domainId, checked());
+
+    const rows = await testDb.db.select().from(domainStatuses);
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ health: HealthState.Up, latencyMs: 42 });
+    expect(rows[0]).toMatchObject({ health: HealthState.Up, latencyMs: 42, healthError: null });
   });
 
-  it('перечисляет цели проверок', async () => {
+  it('целями обхода служат адреса окружений', async () => {
+    // Отдельного адреса проверки больше нет: проверяется то же имя,
+    // о котором отчитываются сертификат и регистратор.
     const targets = await repository.listTargets();
 
-    expect(targets.environments).toEqual([
-      { id: environmentId, healthCheckUrl: 'https://example.com/health' },
+    expect(targets.addresses).toEqual([
+      { id: domainId, name: 'example.com', healthCheckPath: '/api/health' },
     ]);
-    expect(targets.domains).toEqual([{ id: domainId, name: 'example.com' }]);
   });
 
-  it('собирает статус проекта по уровню метаданных', async () => {
-    await repository.upsertEnvironmentStatus(environmentId, {
+  it('пишет три проверки одной строкой', async () => {
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ tlsValidTo: new Date('2027-01-01T00:00:00.000Z') }),
+    );
+    await grantInfra(AccessLevel.Metadata);
+
+    const status = await repository.statusForProject(member(), projectId);
+
+    expect(status.domains[0]).toMatchObject({
+      name: 'example.com',
+      environmentId,
       health: HealthState.Up,
       latencyMs: 42,
-      error: null,
+      tlsValidTo: '2027-01-01T00:00:00.000Z',
     });
+  });
+
+  it('окружение живо, когда живы его адреса', async () => {
+    await repository.upsertAddressStatus(domainId, checked());
     await grantInfra(AccessLevel.Metadata);
 
     const status = await repository.statusForProject(member(), projectId);
 
     expect(status.indicator).toBe(StatusIndicator.Ok);
     expect(status.environments[0]).toMatchObject({ name: 'Прод', health: HealthState.Up });
-    expect(status.domains[0]).toMatchObject({ name: 'example.com', tlsValidTo: null });
+  });
+
+  it('мёртвый адрес роняет окружение и называет себя', async () => {
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ health: HealthState.Down, latencyMs: null, healthError: 'HTTP 502' }),
+    );
+    await grantInfra(AccessLevel.Metadata);
+
+    const status = await repository.statusForProject(member(), projectId);
+
+    expect(status.indicator).toBe(StatusIndicator.Down);
+    expect(status.environments[0]?.health).toBe(HealthState.Down);
+    expect(status.warnings).toContainEqual(
+      expect.objectContaining({
+        kind: StatusWarningKind.HealthDown,
+        subject: 'example.com',
+        detail: 'HTTP 502',
+      }),
+    );
+  });
+
+  it('окружение без адресов не проверяется', async () => {
+    // Проверять нечем — значит, нечего и утверждать.
+    await testDb.db.delete(environmentDomains).where(eq(environmentDomains.id, domainId));
+    await grantInfra(AccessLevel.Metadata);
+
+    const status = await repository.statusForProject(member(), projectId);
+
+    expect(status.environments[0]?.health).toBeNull();
+    expect(status.indicator).toBe(StatusIndicator.Unknown);
   });
 
   it('без выдачи на инфраструктуру статус недоступен', async () => {

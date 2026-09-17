@@ -11,7 +11,6 @@ import {
   domainStatuses,
   domains,
   environmentDomains,
-  environmentStatuses,
   environments,
   projects,
   subjects,
@@ -74,19 +73,19 @@ describe('runner статусов', () => {
         projectId,
         name: 'Прод',
         kind: EnvironmentKind.Production,
-        healthCheckUrl: 'https://example.com/health',
+        healthCheckPath: '/api/health',
       })
       .returning();
     const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
-    await testDb.db
-      .insert(environmentDomains)
-      .values({ environmentId: environment!.id, domainId: root!.id, name: 'example.com' });
+    await testDb.db.insert(environmentDomains).values([
+      { environmentId: environment!.id, domainId: root!.id, name: 'example.com' },
+      { environmentId: environment!.id, domainId: root!.id, name: 'stage.example.com' },
+    ]);
   }
 
-  it('прогон пишет статусы окружений и доменов', async () => {
-    await seedTargets();
-
-    const runner = new StatusRunnerService(repository, {
+  /** Проверщики, отвечающие без отказов. */
+  function healthyCheckers() {
+    return {
       checkHealth: vi
         .fn()
         .mockResolvedValue({ health: HealthState.Up, latencyMs: 42, error: null }),
@@ -96,33 +95,63 @@ describe('runner статусов', () => {
       checkDomainExpiry: vi
         .fn()
         .mockResolvedValue({ expiresAt: new Date('2027-06-01T00:00:00Z'), error: null }),
-    });
+    };
+  }
 
-    await runner.runAll();
-
-    const [environmentStatus] = await testDb.db.select().from(environmentStatuses);
-    const [domainStatus] = await testDb.db.select().from(domainStatuses);
-
-    expect(environmentStatus).toMatchObject({ health: HealthState.Up, latencyMs: 42 });
-    expect(domainStatus?.tlsValidTo?.toISOString()).toBe('2027-01-01T00:00:00.000Z');
-    expect(domainStatus?.registryExpiresAt?.toISOString()).toBe('2027-06-01T00:00:00.000Z');
-  });
-
-  it('падение одной цели не прерывает обход', async () => {
+  it('по каждому адресу делает все три проверки', async () => {
     await seedTargets();
 
-    const runner = new StatusRunnerService(repository, {
-      // Проверщики не бросают по контракту, но runner обязан пережить
-      // даже нарушение этого контракта.
-      checkHealth: vi.fn().mockRejectedValue(new Error('взорвалось')),
-      checkTls: vi.fn().mockResolvedValue({ validTo: null, error: 'нет соединения' }),
-      checkDomainExpiry: vi.fn().mockResolvedValue({ expiresAt: null, error: 'нет RDAP' }),
-    });
+    const checkers = healthyCheckers();
+    const runner = new StatusRunnerService(repository, checkers);
 
     await runner.runAll();
 
-    const [domainStatus] = await testDb.db.select().from(domainStatuses);
-    expect(domainStatus).toMatchObject({ tlsError: 'нет соединения', registryError: 'нет RDAP' });
+    expect(checkers.checkHealth).toHaveBeenCalledWith('stage.example.com', '/api/health');
+    expect(checkers.checkTls).toHaveBeenCalledWith('stage.example.com');
+    expect(checkers.checkDomainExpiry).toHaveBeenCalledWith('stage.example.com');
+  });
+
+  it('прогон пишет три проверки одной строкой на адрес', async () => {
+    await seedTargets();
+
+    const runner = new StatusRunnerService(repository, healthyCheckers());
+
+    await runner.runAll();
+
+    const rows = await testDb.db.select().from(domainStatuses);
+    const [status] = rows;
+
+    expect(rows).toHaveLength(2);
+    expect(status).toMatchObject({ health: HealthState.Up, latencyMs: 42 });
+    expect(status?.tlsValidTo?.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+    expect(status?.registryExpiresAt?.toISOString()).toBe('2027-06-01T00:00:00.000Z');
+  });
+
+  it('окружение без пути проверяется по корню', async () => {
+    await seedTargets();
+    await testDb.db.update(environments).set({ healthCheckPath: null });
+
+    const checkers = healthyCheckers();
+
+    await new StatusRunnerService(repository, checkers).runAll();
+
+    expect(checkers.checkHealth).toHaveBeenCalledWith('example.com', null);
+  });
+
+  it('падение одного адреса не прерывает обход', async () => {
+    await seedTargets();
+
+    const checkers = healthyCheckers();
+    // Проверщики не бросают по контракту, но runner обязан пережить
+    // даже нарушение этого контракта.
+    checkers.checkHealth.mockRejectedValueOnce(new Error('взорвалось'));
+
+    await new StatusRunnerService(repository, checkers).runAll();
+
+    const rows = await testDb.db.select().from(domainStatuses);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ health: HealthState.Up });
   });
 
   it('ручной запуск пишет в журнал, фоновый — нет', async () => {

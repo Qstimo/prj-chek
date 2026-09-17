@@ -1,5 +1,7 @@
 import {
+  type DomainStatus,
   type EnvironmentKind,
+  type EnvironmentStatus,
   type HealthState,
   type ProjectLifecycle,
   type ServerMap,
@@ -60,7 +62,7 @@ export function buildServerMap(input: ServerMapInput, now: Date): ServerMap {
       name: server.name,
       owner: server.owner,
       indicator: serverIndicatorOf(
-        statusesOf(byServer.get(server.id) ?? []),
+        environmentStatusesOf(byServer.get(server.id) ?? []),
         server.paidUntil,
         now,
       ),
@@ -74,7 +76,7 @@ export function buildServerMap(input: ServerMapInput, now: Date): ServerMap {
         id: first.projectId,
         name: first.projectName,
         lifecycle: first.projectLifecycle,
-        indicator: indicatorOf(first.projectLifecycle, statusesOf(placements), [], now),
+        indicator: indicatorOf(first.projectLifecycle, addressStatusesOf(placements), now),
       };
     }),
     edges: [...byEdge.values()].map((placements) => {
@@ -94,13 +96,34 @@ export function buildServerMap(input: ServerMapInput, now: Date): ServerMap {
 }
 
 /** Приводит размещения к статусам окружений, понятным вычислению индикаторов. */
-function statusesOf(placements: ServerMapPlacement[]) {
+function environmentStatusesOf(placements: ServerMapPlacement[]): EnvironmentStatus[] {
   return placements.map((placement) => ({
     environmentId: placement.environmentId,
     name: placement.environmentName,
     health: placement.health,
+    checkedAt: placement.health ? CHECKED_AT : null,
+  }));
+}
+
+/**
+ * Те же размещения глазами индикатора проекта.
+ *
+ * Индикатор считается по адресам, а карта знает здоровье окружения целиком —
+ * поэтому каждое окружение представляется здесь одним адресом. Считать
+ * индикатор своим правилом значило бы завести ему второй экземпляр.
+ */
+function addressStatusesOf(placements: ServerMapPlacement[]): DomainStatus[] {
+  return placements.map((placement) => ({
+    domainId: placement.environmentId,
+    environmentId: placement.environmentId,
+    name: placement.environmentName,
+    health: placement.health,
     latencyMs: null,
-    error: null,
+    healthError: null,
+    tlsValidTo: null,
+    tlsError: null,
+    registryExpiresAt: null,
+    registryError: null,
     checkedAt: placement.health ? CHECKED_AT : null,
   }));
 }

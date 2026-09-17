@@ -24,14 +24,19 @@ export function environmentStatusesOf(
     return {
       environmentId: environment.id,
       name: environment.name,
-      health: healthOf(own),
+      health: healthOfAddresses(own),
       checkedAt: lastCheckedAtOf(own),
     };
   });
 }
 
-/** Сводит здоровье адресов в одно: молчание непроверенных не считается. */
-function healthOf(addresses: DomainStatus[]): HealthState | null {
+/**
+ * Сводит здоровье адресов в одно: молчание непроверенных не считается.
+ *
+ * Вынесено из `environmentStatusesOf` не ради краткости: то же правило нужно
+ * карте размещения, а второе его написание неизбежно разошлось бы с первым.
+ */
+export function healthOfAddresses(addresses: { health: HealthState | null }[]): HealthState | null {
   if (addresses.some((address) => address.health === HealthState.Down)) {
     return HealthState.Down;
   }

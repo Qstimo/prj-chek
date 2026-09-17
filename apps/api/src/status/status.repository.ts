@@ -9,7 +9,7 @@ import {
   type StatusWarning,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { asc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
@@ -18,27 +18,35 @@ import type { Database } from '../db/db.types';
 import {
   domainStatuses,
   environmentDomains,
-  environmentStatuses,
   domains,
   environments,
   projects,
   servers,
 } from '../db/schema';
 import { domainRenewalWarningsOf, indicatorOf, serverWarningsOf, warningsOf } from './indicator';
+import { environmentStatusesOf } from './status.projection';
 
-/** Результат health-проверки для записи. */
-export interface EnvironmentStatusInput {
+/**
+ * Результат всех проверок адреса для записи.
+ *
+ * Три проверки приходят вместе намеренно: пока здоровье писалось отдельно
+ * от сроков, записи могли описывать разные хосты.
+ */
+export interface AddressStatusInput {
   health: HealthState;
   latencyMs: number | null;
-  error: string | null;
-}
-
-/** Результат проверок домена для записи. */
-export interface DomainStatusInput {
+  healthError: string | null;
   tlsValidTo: Date | null;
   tlsError: string | null;
   registryExpiresAt: Date | null;
   registryError: string | null;
+}
+
+/** Адрес окружения как цель обхода: имя и путь ручки приложения. */
+export interface AddressTarget {
+  id: string;
+  name: string;
+  healthCheckPath: string | null;
 }
 
 /**
@@ -55,22 +63,8 @@ export class StatusRepository {
     private readonly access: AccessService,
   ) {}
 
-  /** Пишет результат health-проверки: одна строка на окружение. */
-  async upsertEnvironmentStatus(
-    environmentId: string,
-    input: EnvironmentStatusInput,
-  ): Promise<void> {
-    await this.db
-      .insert(environmentStatuses)
-      .values({ environmentId, ...input, checkedAt: new Date() })
-      .onConflictDoUpdate({
-        target: environmentStatuses.environmentId,
-        set: { ...input, checkedAt: new Date() },
-      });
-  }
-
-  /** Пишет результат проверок домена: одна строка на домен. */
-  async upsertDomainStatus(domainId: string, input: DomainStatusInput): Promise<void> {
+  /** Пишет результат проверок адреса: одна строка на адрес. */
+  async upsertAddressStatus(domainId: string, input: AddressStatusInput): Promise<void> {
     await this.db
       .insert(domainStatuses)
       .values({ domainId, ...input, checkedAt: new Date() })
@@ -80,27 +74,24 @@ export class StatusRepository {
       });
   }
 
-  /** Цели проверок: окружения с адресом health-check и все домены. */
-  async listTargets(): Promise<{
-    environments: { id: string; healthCheckUrl: string }[];
-    domains: { id: string; name: string }[];
-  }> {
-    const environmentRows = await this.db
-      .select({ id: environments.id, healthCheckUrl: environments.healthCheckUrl })
-      .from(environments)
-      .where(isNotNull(environments.healthCheckUrl));
+  /**
+   * Цели проверок — адреса окружений.
+   *
+   * Одна цель вместо двух списков: у окружения нет адреса помимо доменов,
+   * и путь проверки идёт вместе с именем, по которому её делать.
+   */
+  async listTargets(): Promise<{ addresses: AddressTarget[] }> {
+    const addresses = await this.db
+      .select({
+        id: environmentDomains.id,
+        name: environmentDomains.name,
+        healthCheckPath: environments.healthCheckPath,
+      })
+      .from(environmentDomains)
+      .innerJoin(environments, eq(environments.id, environmentDomains.environmentId))
+      .orderBy(asc(environmentDomains.name));
 
-    const domainRows = await this.db
-      .select({ id: environmentDomains.id, name: environmentDomains.name })
-      .from(environmentDomains);
-
-    return {
-      environments: environmentRows.map((row) => ({
-        id: row.id,
-        healthCheckUrl: row.healthCheckUrl!,
-      })),
-      domains: domainRows,
-    };
+    return { addresses };
   }
 
   /** Агрегированный статус проекта. Право — метаданные инфраструктуры. */
@@ -216,9 +207,8 @@ export class StatusRepository {
       .limit(1);
 
     const environmentRows = await this.db
-      .select({ environment: environments, status: environmentStatuses })
+      .select({ environment: environments })
       .from(environments)
-      .leftJoin(environmentStatuses, eq(environmentStatuses.environmentId, environments.id))
       .where(eq(environments.projectId, projectId))
       .orderBy(asc(environments.kind), asc(environments.name));
 
@@ -232,18 +222,13 @@ export class StatusRepository {
           .orderBy(asc(environmentDomains.name))
       : [];
 
-    const environmentStatusesView: EnvironmentStatus[] = environmentRows.map((row) => ({
-      environmentId: row.environment.id,
-      name: row.environment.name,
-      health: row.status?.health ?? null,
-      latencyMs: row.status?.latencyMs ?? null,
-      error: row.status?.error ?? null,
-      checkedAt: row.status?.checkedAt.toISOString() ?? null,
-    }));
-
     const domainStatusesView: DomainStatus[] = domainRows.map((row) => ({
       domainId: row.domain.id,
+      environmentId: row.domain.environmentId,
       name: row.domain.name,
+      health: row.status?.health ?? null,
+      latencyMs: row.status?.latencyMs ?? null,
+      healthError: row.status?.healthError ?? null,
       tlsValidTo: row.status?.tlsValidTo?.toISOString() ?? null,
       tlsError: row.status?.tlsError ?? null,
       registryExpiresAt: row.status?.registryExpiresAt?.toISOString() ?? null,
@@ -251,25 +236,23 @@ export class StatusRepository {
       checkedAt: row.status?.checkedAt.toISOString() ?? null,
     }));
 
+    // Здоровье окружения выводится из его адресов, а не хранится: правило
+    // того же рода, что прогресс версии в роадмапе.
+    const environmentStatusesView: EnvironmentStatus[] = environmentStatusesOf(
+      environmentRows.map((row) => ({ id: row.environment.id, name: row.environment.name })),
+      domainStatusesView,
+    );
+
     const now = new Date();
     const serverWarnings = await this.serverWarningsFor(environmentRows, now);
     const domainWarnings = await this.domainWarningsFor(environmentIds, now);
     const registryWarnings = [...serverWarnings, ...domainWarnings];
 
     return {
-      indicator: indicatorOf(
-        project!.lifecycle,
-        environmentStatusesView,
-        domainStatusesView,
-        now,
-        registryWarnings,
-      ),
+      indicator: indicatorOf(project!.lifecycle, domainStatusesView, now, registryWarnings),
       environments: environmentStatusesView,
       domains: domainStatusesView,
-      warnings: [
-        ...warningsOf(environmentStatusesView, domainStatusesView, now),
-        ...registryWarnings,
-      ],
+      warnings: [...warningsOf(domainStatusesView, now), ...registryWarnings],
     };
   }
 }

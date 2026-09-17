@@ -33,7 +33,7 @@ export function environmentProjection(
       domains,
     },
     () => ({
-      healthCheckUrl: environment.healthCheckUrl,
+      healthCheckPath: environment.healthCheckPath,
       notes: environment.notes,
       server: server
         ? {

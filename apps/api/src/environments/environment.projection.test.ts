@@ -10,7 +10,7 @@ const row: Environment = {
   name: 'Прод',
   kind: EnvironmentKind.Production,
   serverId: '33333333-3333-3333-3333-333333333333',
-  healthCheckUrl: 'https://example.com/health',
+  healthCheckPath: '/api/health',
   notes: 'Заметка',
   createdAt: new Date('2026-08-27T10:00:00Z'),
   updatedAt: new Date('2026-08-27T10:00:00Z'),

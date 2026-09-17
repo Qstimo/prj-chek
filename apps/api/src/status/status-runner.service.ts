@@ -64,36 +64,35 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Обходит все цели и пишет результаты.
+   * Обходит адреса окружений и пишет результаты.
+   *
+   * Цель одна — адрес: все три проверки идут по одному и тому же имени,
+   * и результат ложится одной строкой. Пока проверки шли порознь, они
+   * могли описывать разные хосты, попадая в один индикатор.
    *
    * Последовательно: масштаб системы — десятки проектов, и простота
-   * важнее скорости (ТЗ 9). Падение одной цели не прерывает обход.
+   * важнее скорости (ТЗ 9). Падение одного адреса не прерывает обход.
    */
   async runAll(): Promise<void> {
     const targets = await this.repository.listTargets();
 
-    for (const environment of targets.environments) {
+    for (const address of targets.addresses) {
       try {
-        const result = await this.checkers.checkHealth(environment.healthCheckUrl);
-        await this.repository.upsertEnvironmentStatus(environment.id, result);
-      } catch (cause) {
-        this.logger.warn(`Проверка окружения ${environment.id} упала: ${cause}`);
-      }
-    }
+        const health = await this.checkers.checkHealth(address.name, address.healthCheckPath);
+        const tls = await this.checkers.checkTls(address.name);
+        const registry = await this.checkers.checkDomainExpiry(address.name);
 
-    for (const domain of targets.domains) {
-      try {
-        const tls = await this.checkers.checkTls(domain.name);
-        const registry = await this.checkers.checkDomainExpiry(domain.name);
-
-        await this.repository.upsertDomainStatus(domain.id, {
+        await this.repository.upsertAddressStatus(address.id, {
+          health: health.health,
+          latencyMs: health.latencyMs,
+          healthError: health.error,
           tlsValidTo: tls.validTo,
           tlsError: tls.error,
           registryExpiresAt: registry.expiresAt,
           registryError: registry.error,
         });
       } catch (cause) {
-        this.logger.warn(`Проверка домена ${domain.name} упала: ${cause}`);
+        this.logger.warn(`Проверка адреса ${address.name} упала: ${cause}`);
       }
     }
   }

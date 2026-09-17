@@ -2,7 +2,14 @@ import { EnvironmentKind, HealthState, StatusIndicator, StatusWarningKind } from
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { environmentStatuses, environments, projects, servers } from '../db/schema';
+import {
+  domainStatuses,
+  domains,
+  environmentDomains,
+  environments,
+  projects,
+  servers,
+} from '../db/schema';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 import { ServersRepository } from './servers.repository';
 
@@ -37,7 +44,12 @@ describe('репозиторий серверов', () => {
     projectId = project!.id;
   });
 
-  /** Заводит окружение проекта на сервере и, если задан, его health-результат. */
+  /**
+   * Заводит окружение проекта на сервере и, если задан, результат проверки.
+   *
+   * Здоровье живёт у адреса: чтобы окружение было чем проверять, ему
+   * заводится домен, и результат пишется по нему.
+   */
   async function addEnvironment(
     serverId: string | null,
     name: string,
@@ -49,9 +61,22 @@ describe('репозиторий серверов', () => {
       .returning();
 
     if (health) {
-      await testDb.db
-        .insert(environmentStatuses)
-        .values({ environmentId: environment!.id, health });
+      const [root] = await testDb.db
+        .insert(domains)
+        .values({ name: 'example.com' })
+        .onConflictDoNothing()
+        .returning();
+      const [existing] = await testDb.db.select().from(domains);
+      const [address] = await testDb.db
+        .insert(environmentDomains)
+        .values({
+          environmentId: environment!.id,
+          domainId: (root ?? existing)!.id,
+          name: `${name.toLowerCase()}.example.com`,
+        })
+        .returning();
+
+      await testDb.db.insert(domainStatuses).values({ domainId: address!.id, health });
     }
 
     return environment!.id;

@@ -8,7 +8,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
 import { DATABASE } from '../src/db/db.module';
-import { environments, grants, projects, subjects, users } from '../src/db/schema';
+import {
+  domains,
+  environmentDomains,
+  environments,
+  grants,
+  projects,
+  subjects,
+  users,
+} from '../src/db/schema';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
 
 describe('HTTP: статус', () => {
@@ -71,13 +79,18 @@ describe('HTTP: статус', () => {
       .returning();
     projectId = project!.id;
 
-    await testDb.db.insert(environments).values({
-      projectId,
-      name: 'Прод',
-      kind: EnvironmentKind.Production,
-      // Порт 1 закрыт всегда: реальная проверка быстро даст «down».
-      healthCheckUrl: 'http://127.0.0.1:1/health',
-    });
+    const [environment] = await testDb.db
+      .insert(environments)
+      .values({ projectId, name: 'Прод', kind: EnvironmentKind.Production })
+      .returning();
+
+    // Адрес окружения — его домен, по нему и идёт проверка. Петля без
+    // слушателя закрыта и по 443, и по 80: реальная проверка быстро даст
+    // «down», не выходя в сеть.
+    const [root] = await testDb.db.insert(domains).values({ name: '127.0.0.1' }).returning();
+    await testDb.db
+      .insert(environmentDomains)
+      .values({ environmentId: environment!.id, domainId: root!.id, name: '127.0.0.1' });
   });
 
   async function signIn(email: string) {
