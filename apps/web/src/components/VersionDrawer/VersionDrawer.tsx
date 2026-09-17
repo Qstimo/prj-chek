@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 import { CheckpointForm } from '../CheckpointForm';
-import { Drawer } from '../Drawer';
+import { Drawer, DrawerWidth } from '../Drawer';
 import { VersionForm } from '../VersionForm';
 import { CheckpointList } from './CheckpointList';
 import { DeleteVersionButton } from './DeleteVersionButton';
@@ -27,7 +27,7 @@ export function VersionDrawer({ version, isCurrent, isOpen, onClose, actions }: 
   }
 
   return (
-    <Drawer isOpen={isOpen} onClose={handleClose} title={version.label}>
+    <Drawer isOpen={isOpen} onClose={handleClose} title={version.label} width={DrawerWidth.Wide}>
       {isEditing && actions ? (
         <VersionForm
           initial={{
