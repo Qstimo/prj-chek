@@ -7,7 +7,7 @@ import { DomainsRepository } from '../domains/domains.repository';
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
-import { auditLog, projects, subjects, users } from '../db/schema';
+import { auditLog, environmentDomains, projects, subjects, users } from '../db/schema';
 import { EnvironmentsRepository } from './environments.repository';
 import { EnvironmentsService } from './environments.service';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
@@ -115,5 +115,39 @@ describe('сервис окружений', () => {
     ).rejects.toThrow();
 
     expect(await entriesOf(AuditAction.EnvironmentDeleted)).toHaveLength(0);
+  });
+
+  it('пишет заведение адреса как правку доменов', async () => {
+    // Снаружи это правка доменов окружения: заводить ради неё отдельное
+    // действие журнала незачем.
+    const created = await service.create(admin(), projectId, {
+      name: 'Прод',
+      kind: EnvironmentKind.Production,
+    });
+
+    await service.addDomain(admin(), projectId, created.id, { name: 'api.example.com' });
+
+    const [entry] = await entriesOf(AuditAction.EnvironmentUpdated);
+
+    expect(entry?.entityId).toBe(created.id);
+    expect(entry?.metadata).toMatchObject({ name: 'Прод', fields: ['domains'] });
+  });
+
+  it('пишет снятие адреса тем же действием', async () => {
+    const created = await service.create(admin(), projectId, {
+      name: 'Прод',
+      kind: EnvironmentKind.Production,
+      domains: ['api.example.com'],
+    });
+    const [domain] = await testDb.db
+      .select()
+      .from(environmentDomains)
+      .where(eq(environmentDomains.environmentId, created.id));
+
+    await service.removeDomain(admin(), projectId, created.id, domain!.id);
+
+    const [entry] = await entriesOf(AuditAction.EnvironmentUpdated);
+
+    expect(entry?.metadata).toMatchObject({ name: 'Прод', fields: ['domains'] });
   });
 });

@@ -2,6 +2,7 @@ import {
   AuditSubjectKind,
   type EnvironmentCreate,
   type EnvironmentDetail,
+  type EnvironmentDomainCreate,
   type EnvironmentMetadata,
   type EnvironmentUpdate,
 } from '@cairn/shared';
@@ -83,6 +84,62 @@ export class EnvironmentsService {
         entityId: environmentId,
         projectId,
         metadata: { name: updated.name, fields: Object.keys(input) },
+      });
+
+      return updated;
+    });
+  }
+
+  /**
+   * Заводит один адрес окружения.
+   *
+   * В журнал идёт та же правка доменов, что и при замене набора: снаружи
+   * это по-прежнему правка окружения, и заводить ради одного адреса новое
+   * действие журнала незачем.
+   */
+  async addDomain(
+    subject: RequestSubject,
+    projectId: string,
+    environmentId: string,
+    input: EnvironmentDomainCreate,
+  ): Promise<Environment> {
+    return this.db.transaction(async (tx) => {
+      const updated = await this.repository.addDomain(subject, tx, projectId, environmentId, input);
+
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.EnvironmentUpdated,
+        entityType: 'environment',
+        entityId: environmentId,
+        projectId,
+        metadata: { name: updated.name, fields: ['domains'] },
+      });
+
+      return updated;
+    });
+  }
+
+  /** Снимает один адрес окружения. Корень остаётся в реестре. */
+  async removeDomain(
+    subject: RequestSubject,
+    projectId: string,
+    environmentId: string,
+    domainId: string,
+  ): Promise<Environment> {
+    return this.db.transaction(async (tx) => {
+      const updated = await this.repository.removeDomain(
+        subject,
+        tx,
+        projectId,
+        environmentId,
+        domainId,
+      );
+
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.EnvironmentUpdated,
+        entityType: 'environment',
+        entityId: environmentId,
+        projectId,
+        metadata: { name: updated.name, fields: ['domains'] },
       });
 
       return updated;

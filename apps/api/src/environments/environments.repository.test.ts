@@ -1,6 +1,6 @@
 import { AccessLevel, EnvironmentKind, HealthState, Section, SubjectKind } from '@cairn/shared';
-import { ConflictException, ForbiddenException } from '@nestjs/common';
-import { asc, eq } from 'drizzle-orm';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { and, asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccessService } from '../access/access.service';
@@ -113,6 +113,18 @@ describe('репозиторий окружений', () => {
         name: 'Прод',
         kind: EnvironmentKind.Production,
         domains: ['example.com'],
+      }),
+    );
+
+    return created.id;
+  }
+
+  async function createStage(): Promise<string> {
+    const created = await testDb.db.transaction((tx) =>
+      repository.create(admin(), tx, projectId, {
+        name: 'Стейдж',
+        kind: EnvironmentKind.Staging,
+        domains: ['stage.example.com'],
       }),
     );
 
@@ -579,6 +591,147 @@ describe('репозиторий окружений', () => {
       const [root] = await testDb.db.select().from(domains);
 
       expect(root?.owner).toBe('ООО Ромашка');
+    });
+  });
+
+  describe('адрес по одному', () => {
+    /** Адрес окружения вместе с его строкой в таблице доменов. */
+    async function domainRowOf(environmentId: string, name: string) {
+      const [row] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(
+          and(
+            eq(environmentDomains.environmentId, environmentId),
+            eq(environmentDomains.name, name),
+          ),
+        );
+
+      return row!;
+    }
+
+    it('добавляет один адрес, не трогая остальные', async () => {
+      const id = await createStage();
+
+      await testDb.db.transaction((tx) =>
+        repository.addDomain(admin(), tx, projectId, id, { name: 'api.example.com' }),
+      );
+
+      const environment = await repository.findById(admin(), projectId, id);
+
+      expect(environment.domains).toEqual(['api.example.com', 'stage.example.com']);
+    });
+
+    it('заводит корень нового адреса', async () => {
+      const id = await createStage();
+
+      await testDb.db.transaction((tx) =>
+        repository.addDomain(admin(), tx, projectId, id, { name: 'api.shop.co.uk' }),
+      );
+
+      const roots = await testDb.db.select().from(domains).orderBy(asc(domains.name));
+
+      expect(roots.map((root) => root.name)).toEqual(['example.com', 'shop.co.uk']);
+    });
+
+    it('не сбрасывает свойства уже заведённого корня', async () => {
+      const id = await createStage();
+      await testDb.db.update(domains).set({ owner: 'ООО Ромашка' });
+
+      await testDb.db.transaction((tx) =>
+        repository.addDomain(admin(), tx, projectId, id, { name: 'api.example.com' }),
+      );
+
+      const [root] = await testDb.db.select().from(domains);
+
+      expect(root?.owner).toBe('ООО Ромашка');
+    });
+
+    it('отказывает уровню чтения', async () => {
+      const id = await createStage();
+      await grant(AccessLevel.Read);
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.addDomain(member(), tx, projectId, id, { name: 'api.example.com' }),
+        ),
+      ).rejects.toBeInstanceOf(InsufficientLevelError);
+    });
+
+    it('прячет окружение чужого проекта за 404', async () => {
+      const id = await createStage();
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.addDomain(admin(), tx, otherProjectId, id, { name: 'api.example.com' }),
+        ),
+      ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    });
+
+    it('не даёт завести тот же адрес дважды', async () => {
+      const id = await createStage();
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.addDomain(admin(), tx, projectId, id, { name: 'stage.example.com' }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('убирает адрес вместе с его статусами проверок', async () => {
+      // Статус ссылается на адрес с restrict: без явной очистки снятие
+      // падало бы по внешнему ключу (как в remove).
+      const id = await createStage();
+      const domain = await domainRowOf(id, 'stage.example.com');
+      await testDb.db
+        .insert(domainStatuses)
+        .values({ domainId: domain.id, tlsError: 'getaddrinfo ENOTFOUND stage.example.com' });
+
+      await testDb.db.transaction((tx) =>
+        repository.removeDomain(admin(), tx, projectId, id, domain.id),
+      );
+
+      const environment = await repository.findById(admin(), projectId, id);
+
+      expect(environment.domains).toEqual([]);
+      expect(await testDb.db.select().from(domainStatuses)).toHaveLength(0);
+    });
+
+    it('оставляет корень в реестре после снятия адреса', async () => {
+      // Корень заводит адрес, но не уносит с собой: срок продления и
+      // владелец принадлежат суперадмину и переживают стенд.
+      const id = await createStage();
+      const domain = await domainRowOf(id, 'stage.example.com');
+
+      await testDb.db.transaction((tx) =>
+        repository.removeDomain(admin(), tx, projectId, id, domain.id),
+      );
+
+      expect(await testDb.db.select().from(domains)).toHaveLength(1);
+    });
+
+    it('отказывает уровню чтения и на снятии', async () => {
+      const id = await createStage();
+      const domain = await domainRowOf(id, 'stage.example.com');
+      await grant(AccessLevel.Read);
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.removeDomain(member(), tx, projectId, id, domain.id),
+        ),
+      ).rejects.toBeInstanceOf(InsufficientLevelError);
+    });
+
+    it('прячет адрес чужого окружения за 404', async () => {
+      const id = await createStage();
+      const other = await createProd();
+      const domain = await domainRowOf(other, 'example.com');
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.removeDomain(admin(), tx, projectId, id, domain.id),
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });
