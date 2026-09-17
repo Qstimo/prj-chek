@@ -1,33 +1,22 @@
 import { HealthState } from '@cairn/shared';
 import { integer, pgEnum, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
-import { environmentDomains, environments } from './environments';
+import { environmentDomains } from './environments';
 
 /** Результат health-проверки. Значения совпадают с контрактом. */
 export const healthStateEnum = pgEnum('health_state', [HealthState.Up, HealthState.Down]);
 
 /**
- * Последний результат проверки окружения (ТЗ 6).
+ * Последний результат проверок адреса окружения (ТЗ 6): жив ли он, срок
+ * сертификата и срок регистрации.
  *
- * Хранится только последний: статус — состояние, а не история.
+ * Все три проверки лежат в одной строке намеренно. Пока здоровье жило в
+ * отдельной таблице со своим ключом, оно могло описывать не тот хост, о
+ * котором отчитывались TLS и регистратор; с одним `domain_id` — не может.
+ *
+ * Хранится только последний результат: статус — состояние, а не история.
  * Отсутствие строки означает «ещё не проверялось».
  */
-export const environmentStatuses = pgTable(
-  'environment_statuses',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    environmentId: uuid('environment_id')
-      .notNull()
-      .references(() => environments.id, { onDelete: 'restrict' }),
-    health: healthStateEnum('health').notNull(),
-    latencyMs: integer('latency_ms'),
-    error: text('error'),
-    checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [unique('environment_statuses_environment').on(table.environmentId)],
-);
-
-/** Последний результат проверок домена: срок TLS и срок регистрации. */
 export const domainStatuses = pgTable(
   'domain_statuses',
   {
@@ -35,6 +24,10 @@ export const domainStatuses = pgTable(
     domainId: uuid('domain_id')
       .notNull()
       .references(() => environmentDomains.id, { onDelete: 'restrict' }),
+    /** Обнуляемый: адрес мог ещё ни разу не проверяться. */
+    health: healthStateEnum('health'),
+    latencyMs: integer('latency_ms'),
+    healthError: text('health_error'),
     tlsValidTo: timestamp('tls_valid_to', { withTimezone: true }),
     tlsError: text('tls_error'),
     registryExpiresAt: timestamp('registry_expires_at', { withTimezone: true }),
@@ -44,8 +37,5 @@ export const domainStatuses = pgTable(
   (table) => [unique('domain_statuses_domain').on(table.domainId)],
 );
 
-/** Строка статуса окружения. */
-export type EnvironmentStatusRow = typeof environmentStatuses.$inferSelect;
-
-/** Строка статуса домена. */
+/** Строка статуса адреса. */
 export type DomainStatusRow = typeof domainStatuses.$inferSelect;

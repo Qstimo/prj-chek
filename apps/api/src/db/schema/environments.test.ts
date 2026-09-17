@@ -25,7 +25,14 @@ describe('окружения', () => {
 
   it('допускает окружение без проверки', () => {
     // Реестр заполняется постепенно, пустое поле честнее выдуманного.
-    expect(environments.healthCheckUrl.notNull).toBe(false);
+    expect(environments.healthCheckPath.notNull).toBe(false);
+  });
+
+  it('хранит путь проверки, а не адрес', () => {
+    // Полный URL был вторым местом для адреса — тем самым, из-за которого
+    // статус расходился с доменами окружения.
+    expect(environments.healthCheckPath.name).toBe('health_check_path');
+    expect(environments).not.toHaveProperty('healthCheckUrl');
   });
 
   it('не хранит отдельного адреса: адрес окружения — его домены', () => {

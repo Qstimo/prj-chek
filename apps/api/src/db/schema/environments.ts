@@ -39,7 +39,11 @@ export const environments = pgTable(
      * переносом окружений, а не тихим обрывом связи.
      */
     serverId: uuid('server_id').references(() => servers.id, { onDelete: 'restrict' }),
-    healthCheckUrl: text('health_check_url'),
+    /**
+     * Путь ручки проверки, а не адрес: адресами служат домены окружения.
+     * Пустое значение означает корень.
+     */
+    healthCheckPath: text('health_check_path'),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
