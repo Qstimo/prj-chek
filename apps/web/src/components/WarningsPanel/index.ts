@@ -1,2 +1,3 @@
 export { WarningsPanel } from './WarningsPanel';
-export type { IProps } from './types';
+export { WarningTone } from './types';
+export type { IProps, PanelWarning } from './types';
