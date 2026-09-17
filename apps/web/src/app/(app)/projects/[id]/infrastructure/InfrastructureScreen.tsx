@@ -120,7 +120,7 @@ function formValuesOf(
     kind: editing?.kind ?? EnvironmentKind.Production,
     serverId: detail?.server?.id ?? null,
     serverName: detail?.server?.name ?? null,
-    healthCheckUrl: detail?.healthCheckUrl ?? null,
+    healthCheckPath: detail?.healthCheckPath ?? null,
     notes: detail?.notes ?? null,
     domains: editing?.domains ?? [],
   };

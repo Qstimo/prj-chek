@@ -37,7 +37,7 @@ export function EnvironmentCard({ environment, canWrite = false, onEdit, onDelet
           <Field label={FIELD_LABELS.ip} value={detail.server?.ip ?? null} />
           <Field label={FIELD_LABELS.provider} value={detail.server?.provider ?? null} />
           <Field label={FIELD_LABELS.specs} value={detail.server?.specs ?? null} />
-          <Field label={FIELD_LABELS.healthCheckUrl} value={detail.healthCheckUrl} />
+          <Field label={FIELD_LABELS.healthCheckPath} value={detail.healthCheckPath} />
           <Field label={FIELD_LABELS.notes} value={detail.notes} />
         </dl>
       )}

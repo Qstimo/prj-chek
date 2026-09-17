@@ -18,7 +18,8 @@ export interface EnvironmentFormValues {
    * подрядчику не отдаётся вовсе, и искать в нём было бы нечего.
    */
   serverName: string | null;
-  healthCheckUrl: string | null;
+  /** Путь ручки проверки. Адресами служат домены: их поле ниже. */
+  healthCheckPath: string | null;
   notes: string | null;
   /** Домены окружения. Они же его адрес: отдельного поля адреса нет. */
   domains: string[];

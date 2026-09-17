@@ -102,7 +102,7 @@ const FIELD_LABELS: Record<string, string> = {
   notes: 'Заметки',
   kind: 'Вид',
   domains: 'Домены',
-  healthCheckUrl: 'Адрес проверки',
+  healthCheckPath: 'Путь проверки',
   serverId: 'Сервер',
   host: 'Адрес машины',
   ip: 'IP-адрес',

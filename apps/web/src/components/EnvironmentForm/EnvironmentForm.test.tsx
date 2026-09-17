@@ -10,7 +10,7 @@ const initial = {
   kind: EnvironmentKind.Production,
   serverId: null,
   serverName: null,
-  healthCheckUrl: null,
+  healthCheckPath: null,
   notes: null,
   domains: [],
 };
@@ -45,6 +45,28 @@ describe('EnvironmentForm', () => {
       expect.objectContaining({ name: 'Прод', domains: ['prod.example.com'] }),
     );
     expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty('host');
+  });
+
+  it('спрашивает путь проверки, а не адрес', async () => {
+    // Полный URL был вторым местом для адреса — тем самым, из-за которого
+    // статус расходился с доменами окружения.
+    const onSubmit = vi.fn();
+    render(<EnvironmentForm initial={initial} onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText('Название'), 'Прод');
+    await userEvent.type(screen.getByLabelText('Путь проверки'), '/api/health');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ healthCheckPath: '/api/health' }),
+    );
+    expect(screen.queryByLabelText('Адрес проверки')).not.toBeInTheDocument();
+  });
+
+  it('объясняет, что адресом служат домены', () => {
+    render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} />);
+
+    expect(screen.getByText(/адресами служат домены/i)).toBeInTheDocument();
   });
 
   it('превращает пустые поля в отсутствие значения', async () => {

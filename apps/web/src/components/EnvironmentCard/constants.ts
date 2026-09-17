@@ -16,6 +16,6 @@ export const FIELD_LABELS = {
   ip: 'IP-адрес',
   provider: 'Провайдер',
   specs: 'Характеристики',
-  healthCheckUrl: 'Адрес проверки',
+  healthCheckPath: 'Путь проверки',
   notes: 'Заметки',
 } as const;

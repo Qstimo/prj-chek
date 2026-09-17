@@ -24,7 +24,7 @@ const server = {
 
 const detail = {
   ...metadata,
-  healthCheckUrl: 'https://example.com/health',
+  healthCheckPath: '/api/health',
   notes: 'Заметка',
   server,
   createdAt: '2026-08-27T10:00:00.000Z',
@@ -46,6 +46,14 @@ describe('EnvironmentCard', () => {
     render(<EnvironmentCard environment={metadata} />);
 
     expect(screen.queryByText(/203\.0\.113\.10/)).not.toBeInTheDocument();
+  });
+
+  it('показывает путь проверки, а не отдельный адрес', () => {
+    render(<EnvironmentCard environment={detail} />);
+
+    expect(screen.getByText('Путь проверки')).toBeInTheDocument();
+    expect(screen.getByText('/api/health')).toBeInTheDocument();
+    expect(screen.queryByText('Адрес проверки')).not.toBeInTheDocument();
   });
 
   it('на уровне чтения показывает машину, её владельца и параметры', () => {

@@ -5,7 +5,7 @@ import { useState, type FormEvent } from 'react';
 
 import { DomainsField } from '../DomainsField';
 import { TextField } from '../TextField';
-import { DOMAINS_HINT, FIELD_LABELS } from './constants';
+import { DOMAINS_HINT, FIELD_LABELS, HEALTH_CHECK_PATH_HINT } from './constants';
 import { KindField } from './KindField';
 import { ServerField } from './ServerField';
 import type { EnvironmentFormValues, IProps } from './types';
@@ -42,7 +42,7 @@ export function EnvironmentForm({
     onSubmit({
       name: values.name.trim(),
       kind: values.kind,
-      healthCheckUrl: emptyToNull(values.healthCheckUrl),
+      healthCheckPath: emptyToNull(values.healthCheckPath),
       notes: emptyToNull(values.notes),
       domains: values.domains,
       // Привязку принимает только суперадмин: у остальных API ответит 403,
@@ -70,12 +70,15 @@ export function EnvironmentForm({
         onChange={(value) => change('serverId', value)}
       />
 
-      <TextField
-        id="healthCheckUrl"
-        label={FIELD_LABELS.healthCheckUrl}
-        value={values.healthCheckUrl ?? ''}
-        onChange={(value) => change('healthCheckUrl', value)}
-      />
+      <div className="space-y-1">
+        <TextField
+          id="healthCheckPath"
+          label={FIELD_LABELS.healthCheckPath}
+          value={values.healthCheckPath ?? ''}
+          onChange={(value) => change('healthCheckPath', value)}
+        />
+        <p className="text-xs text-muted-foreground">{HEALTH_CHECK_PATH_HINT}</p>
+      </div>
       <TextField
         id="notes"
         label={FIELD_LABELS.notes}

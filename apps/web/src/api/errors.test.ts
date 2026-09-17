@@ -37,14 +37,14 @@ describe('describeApiError', () => {
     // пользователь видит «проверьте поля» и гадает, какие именно.
     const error = new ApiError(400, 'Неверные данные запроса', {
       issues: [
-        { path: 'healthCheckUrl', code: 'invalid_string', message: 'Invalid url' },
+        { path: 'healthCheckPath', code: 'invalid_string', message: 'Invalid path' },
         { path: 'domains.0', code: 'custom', message: 'Ожидается домен' },
       ],
     });
 
     const text = describeApiError(error);
 
-    expect(text).toContain('Адрес проверки');
+    expect(text).toContain('Путь проверки');
     expect(text).toContain('ссылк');
     expect(text).toContain('Домены');
     expect(text).toContain('Ожидается домен');
