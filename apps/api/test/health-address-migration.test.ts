@@ -149,6 +149,22 @@ describe('перенос адреса проверки в домены окру�
     expect(rows.map((row) => row.column_name)).toEqual(['health', 'health_error', 'latency_ms']);
   });
 
+  it('заводит место под результат разрешения и поиск по адресу', async () => {
+    // Миграция 0024 ничего не переносит, и отдельного набора не заслуживает:
+    // этот и так прогоняет весь журнал на живой базе.
+    const columns = await client`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'domain_statuses' AND column_name IN ('resolved_ip', 'resolve_error')
+      ORDER BY column_name
+    `;
+    const indexes = await client`
+      SELECT indexname FROM pg_indexes WHERE tablename = 'servers' AND indexname = 'servers_ip_idx'
+    `;
+
+    expect(columns.map((column) => column.column_name)).toEqual(['resolve_error', 'resolved_ip']);
+    expect(indexes).toHaveLength(1);
+  });
+
   it('оставляет приложению право писать здоровье адреса', async () => {
     const rows = await client`
       SELECT column_name FROM information_schema.column_privileges
