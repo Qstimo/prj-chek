@@ -30,6 +30,15 @@ export const domainStatusSchema = z.object({
   health: z.nativeEnum(HealthState).nullable(),
   latencyMs: z.number().int().nonnegative().nullable(),
   healthError: z.string().nullable(),
+  /**
+   * Адрес, в который разрешилось имя. По нему находится машина.
+   *
+   * Только адрес, без имени машины: статус открыт уровню «метаданные»,
+   * а имя сервера принадлежит уровню «чтение» и живёт в карточке
+   * окружения.
+   */
+  resolvedIp: z.string().nullable(),
+  resolveError: z.string().nullable(),
   tlsValidTo: z.string().nullable(),
   tlsError: z.string().nullable(),
   registryExpiresAt: z.string().nullable(),

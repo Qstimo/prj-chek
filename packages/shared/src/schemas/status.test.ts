@@ -31,6 +31,8 @@ describe('схема статуса проекта', () => {
           health: null,
           latencyMs: null,
           healthError: null,
+          resolvedIp: null,
+          resolveError: null,
           tlsValidTo: null,
           tlsError: 'нет соединения',
           registryExpiresAt: '2026-09-20T00:00:00.000Z',
@@ -81,6 +83,8 @@ describe('схема статуса адреса', () => {
     health: HealthState.Down,
     latencyMs: 120,
     healthError: 'HTTP 502',
+    resolvedIp: null,
+    resolveError: null,
     tlsValidTo: null,
     tlsError: null,
     registryExpiresAt: null,
@@ -98,6 +102,25 @@ describe('схема статуса адреса', () => {
 
   it('знает, чьё это окружение', () => {
     expect(domainStatusSchema.parse(ADDRESS).environmentId).toBe(ENVIRONMENT_ID);
+  });
+
+  it('помнит, во что имя разрешилось', () => {
+    // Разрешение — такая же наблюдаемая правда об имени, как срок
+    // сертификата: место ей в той же строке.
+    const parsed = domainStatusSchema.parse({ ...ADDRESS, resolvedIp: '203.0.113.10' });
+
+    expect(parsed.resolvedIp).toBe('203.0.113.10');
+    expect(parsed.resolveError).toBeNull();
+  });
+
+  it('неразрешённое имя держит причину', () => {
+    const parsed = domainStatusSchema.parse({
+      ...ADDRESS,
+      resolveError: 'queryA ENOTFOUND',
+    });
+
+    expect(parsed.resolvedIp).toBeNull();
+    expect(parsed.resolveError).toBe('queryA ENOTFOUND');
   });
 
   it('непроверенный адрес выражается null-полями', () => {
