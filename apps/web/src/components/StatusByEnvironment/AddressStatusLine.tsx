@@ -18,8 +18,29 @@ export function AddressStatusLine({ address }: IAddressProps) {
       <span>{tlsTextOf(address)}</span>
       {'; '}
       <span>{registryTextOf(address)}</span>
+
+      {placementTextOf(address) && (
+        <p className="text-xs text-muted-foreground">{placementTextOf(address)}</p>
+      )}
     </>
   );
+}
+
+/**
+ * Где живёт имя: адрес, в который оно разрешилось.
+ *
+ * Только адрес: имя машины принадлежит уровню «чтение» и показывается
+ * в карточке окружения, а панель статуса открыта уровню «метаданные».
+ */
+function placementTextOf({
+  resolvedIp,
+  resolveError,
+}: IAddressProps['address']): string | null {
+  if (resolvedIp) {
+    return `смотрит на ${resolvedIp}`;
+  }
+
+  return resolveError ? `имя не разрешается: ${resolveError}` : null;
 }
 
 /** Жив ли адрес: причина отказа важнее самого отказа. */

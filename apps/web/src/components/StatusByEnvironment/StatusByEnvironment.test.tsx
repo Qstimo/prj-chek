@@ -21,6 +21,8 @@ function address(overrides: Partial<DomainStatus> = {}): DomainStatus {
     health: HealthState.Up,
     latencyMs: 42,
     healthError: null,
+    resolvedIp: '203.0.113.10',
+    resolveError: null,
     tlsValidTo: '2027-01-01T00:00:00.000Z',
     tlsError: null,
     registryExpiresAt: '2027-06-01T00:00:00.000Z',
@@ -78,6 +80,26 @@ describe('StatusByEnvironment', () => {
     render(<StatusByEnvironment environments={[prod]} addresses={[broken]} />);
 
     expect(screen.getByText(/TLS: нет соединения/)).toBeInTheDocument();
+  });
+
+  it('показывает, на какой адрес смотрит имя', () => {
+    render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
+
+    expect(screen.getByText('смотрит на 203.0.113.10')).toBeInTheDocument();
+  });
+
+  it('неразрешённое имя объясняет причину', () => {
+    const broken = address({ resolvedIp: null, resolveError: 'queryA ENOTFOUND' });
+
+    render(<StatusByEnvironment environments={[prod]} addresses={[broken]} />);
+
+    expect(screen.getByText(/не разрешается: queryA ENOTFOUND/)).toBeInTheDocument();
+  });
+
+  it('не называет машину: её имя принадлежит уровню чтения', () => {
+    render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
+
+    expect(screen.queryByText(/hetzner/i)).not.toBeInTheDocument();
   });
 
   it('окружение без адресов говорит, что проверять нечего', () => {
