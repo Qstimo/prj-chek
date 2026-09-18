@@ -1,6 +1,6 @@
 'use client';
 
-import { FIELD_LABELS } from './constants';
+import { FIELD_LABELS, SERVER_HINT } from './constants';
 import type { ServerOption } from './types';
 
 /** Пропсы поля привязки к серверу. */
@@ -48,6 +48,7 @@ export function ServerField({ value, valueName, servers, canAssign, onChange }: 
           </option>
         ))}
       </select>
+      <p className="text-xs text-muted-foreground">{SERVER_HINT}</p>
     </div>
   );
 }

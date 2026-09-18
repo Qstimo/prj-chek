@@ -63,6 +63,22 @@ describe('EnvironmentForm', () => {
     expect(screen.queryByLabelText('Адрес проверки')).not.toBeInTheDocument();
   });
 
+  it('объясняет, что машина определится по адресу', () => {
+    render(
+      <EnvironmentForm initial={initial} onSubmit={vi.fn()} canAssignServer servers={SERVERS} />,
+    );
+
+    expect(screen.getByText(/машина определится по адресу/i)).toBeInTheDocument();
+    expect(screen.getByText(/за CDN определится край сети/i)).toBeInTheDocument();
+  });
+
+  it('подрядчику подсказку о машине не показывает', () => {
+    // Реестра машин у него нет, и объяснять ему нечего.
+    render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} />);
+
+    expect(screen.queryByText(/машина определится по адресу/i)).not.toBeInTheDocument();
+  });
+
   it('объясняет, что адресом служат домены', () => {
     render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} />);
 
