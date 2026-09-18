@@ -23,6 +23,7 @@ import {
   projects,
   servers,
 } from '../db/schema';
+import { machineWarningsOf } from '../servers/server-discovery';
 import { domainRenewalWarningsOf, indicatorOf, serverWarningsOf, warningsOf } from './indicator';
 import { environmentStatusesOf } from './status.projection';
 
@@ -245,6 +246,57 @@ export class StatusRepository {
     return roots.flatMap((root) => domainRenewalWarningsOf(root.name, root.paidUntil, now));
   }
 
+  /**
+   * Предупреждения о машине: адрес смотрит не туда, адреса разошлись.
+   *
+   * Правило то же, что у прогона, и живёт в одном с ним месте: второй
+   * его экземпляр разошёлся бы с первым. Из машины берётся один только
+   * адрес — имя сервера принадлежит уровню «чтение» и в статус не идёт.
+   */
+  private async machineWarningsFor(
+    environmentRows: { environment: { id: string; name: string; serverId: string | null } }[],
+    addresses: DomainStatus[],
+  ): Promise<StatusWarning[]> {
+    const boundIps = await this.boundIpsOf(environmentRows.map((row) => row.environment));
+
+    return environmentRows.flatMap((row) =>
+      machineWarningsOf({
+        environmentName: row.environment.name,
+        isBound: row.environment.serverId !== null,
+        boundIp: row.environment.serverId
+          ? (boundIps.get(row.environment.serverId) ?? null)
+          : null,
+        addresses: addresses
+          .filter((address) => address.environmentId === row.environment.id)
+          .map((address) => ({ name: address.name, resolvedIp: address.resolvedIp })),
+      }),
+    );
+  }
+
+  /** Адреса привязанных машин по их идентификаторам. */
+  private async boundIpsOf(
+    environmentRows: { serverId: string | null }[],
+  ): Promise<Map<string, string | null>> {
+    const serverIds = [
+      ...new Set(
+        environmentRows
+          .map((row) => row.serverId)
+          .filter((serverId): serverId is string => serverId !== null),
+      ),
+    ];
+
+    if (serverIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      .select({ id: servers.id, ip: servers.ip })
+      .from(servers)
+      .where(inArray(servers.id, serverIds));
+
+    return new Map(rows.map((row) => [row.id, row.ip]));
+  }
+
   /** Собирает агрегат проекта из таблиц статусов. */
   private async buildStatus(projectId: string): Promise<ProjectStatus> {
     const [project] = await this.db
@@ -295,7 +347,8 @@ export class StatusRepository {
     const now = new Date();
     const serverWarnings = await this.serverWarningsFor(environmentRows, now);
     const domainWarnings = await this.domainWarningsFor(environmentIds, now);
-    const registryWarnings = [...serverWarnings, ...domainWarnings];
+    const machineWarnings = await this.machineWarningsFor(environmentRows, domainStatusesView);
+    const registryWarnings = [...serverWarnings, ...domainWarnings, ...machineWarnings];
 
     return {
       indicator: indicatorOf(project!.lifecycle, domainStatusesView, now, registryWarnings),

@@ -273,6 +273,58 @@ describe('репозиторий статусов', () => {
     expect(summary[0]).toMatchObject({ projectId, projectName: 'Проект' });
   });
 
+  describe('машина, на которую смотрит адрес', () => {
+    /** Ставит окружение на машину с известным адресом. */
+    async function placeOn(ip: string): Promise<void> {
+      const [server] = await testDb.db
+        .insert(servers)
+        .values({ name: 'hetzner-fsn-1', ip })
+        .returning();
+
+      await testDb.db
+        .update(environments)
+        .set({ serverId: server!.id })
+        .where(eq(environments.id, environmentId));
+    }
+
+    it('адрес, смотрящий не на ту машину, даёт предупреждение', async () => {
+      await placeOn('198.51.100.7');
+      await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(status.warnings).toContainEqual({
+        kind: StatusWarningKind.ServerMismatch,
+        subject: 'example.com',
+        detail: 'смотрит на 203.0.113.10, а окружение привязано к другой машине',
+      });
+    });
+
+    it('предупреждение не называет машину', async () => {
+      // Имя сервера принадлежит уровню «чтение»: статус его не раскрывает.
+      await placeOn('198.51.100.7');
+      await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(JSON.stringify(status)).not.toContain('hetzner-fsn-1');
+    });
+
+    it('совпавший адрес молчит', async () => {
+      await placeOn('203.0.113.10');
+      await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
+      await grantInfra(AccessLevel.Metadata);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(
+        status.warnings.some((warning) => warning.kind === StatusWarningKind.ServerMismatch),
+      ).toBe(false);
+    });
+  });
+
   describe('срок оплаты сервера в статусе проекта', () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
 
