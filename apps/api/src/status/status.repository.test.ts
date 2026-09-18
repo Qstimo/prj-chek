@@ -121,6 +121,8 @@ describe('репозиторий статусов', () => {
       health: HealthState.Up,
       latencyMs: 42,
       healthError: null,
+      resolvedIp: null,
+      resolveError: null,
       tlsValidTo: null,
       tlsError: null,
       registryExpiresAt: null,
@@ -198,6 +200,32 @@ describe('репозиторий статусов', () => {
         detail: 'HTTP 502',
       }),
     );
+  });
+
+  it('пишет и отдаёт результат разрешения', async () => {
+    await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
+    await grantInfra(AccessLevel.Metadata);
+
+    const status = await repository.statusForProject(member(), projectId);
+
+    expect(status.domains[0]).toMatchObject({ resolvedIp: '203.0.113.10', resolveError: null });
+  });
+
+  it('перечисляет окружения с их адресами для второго прохода', async () => {
+    // Решение о машине принимается по окружению целиком: привязка у него
+    // одна, а адресов несколько.
+    await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
+
+    const targets = await repository.listDiscoveryTargets();
+
+    expect(targets).toEqual([
+      {
+        environmentId,
+        environmentName: 'Прод',
+        serverId: null,
+        addresses: [{ name: 'example.com', resolvedIp: '203.0.113.10' }],
+      },
+    ]);
   });
 
   it('окружение без адресов не проверяется', async () => {

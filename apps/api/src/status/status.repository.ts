@@ -36,6 +36,8 @@ export interface AddressStatusInput {
   health: HealthState;
   latencyMs: number | null;
   healthError: string | null;
+  resolvedIp: string | null;
+  resolveError: string | null;
   tlsValidTo: Date | null;
   tlsError: string | null;
   registryExpiresAt: Date | null;
@@ -47,6 +49,14 @@ export interface AddressTarget {
   id: string;
   name: string;
   healthCheckPath: string | null;
+}
+
+/** Окружение со своими адресами: цель второго прохода прогона. */
+export interface DiscoveryTarget {
+  environmentId: string;
+  environmentName: string;
+  serverId: string | null;
+  addresses: { name: string; resolvedIp: string | null }[];
 }
 
 /**
@@ -92,6 +102,43 @@ export class StatusRepository {
       .orderBy(asc(environmentDomains.name));
 
     return { addresses };
+  }
+
+  /**
+   * Окружения с их адресами и результатом разрешения.
+   *
+   * Второй проход прогона: решение о машине принимается по окружению
+   * целиком, а не по отдельному адресу — привязка у него одна.
+   */
+  async listDiscoveryTargets(): Promise<DiscoveryTarget[]> {
+    const rows = await this.db
+      .select({
+        environmentId: environments.id,
+        environmentName: environments.name,
+        serverId: environments.serverId,
+        name: environmentDomains.name,
+        resolvedIp: domainStatuses.resolvedIp,
+      })
+      .from(environmentDomains)
+      .innerJoin(environments, eq(environments.id, environmentDomains.environmentId))
+      .leftJoin(domainStatuses, eq(domainStatuses.domainId, environmentDomains.id))
+      .orderBy(asc(environments.name), asc(environmentDomains.name));
+
+    const grouped = new Map<string, DiscoveryTarget>();
+
+    for (const row of rows) {
+      const target = grouped.get(row.environmentId) ?? {
+        environmentId: row.environmentId,
+        environmentName: row.environmentName,
+        serverId: row.serverId,
+        addresses: [],
+      };
+
+      target.addresses.push({ name: row.name, resolvedIp: row.resolvedIp });
+      grouped.set(row.environmentId, target);
+    }
+
+    return [...grouped.values()];
   }
 
   /** Агрегированный статус проекта. Право — метаданные инфраструктуры. */
@@ -229,6 +276,8 @@ export class StatusRepository {
       health: row.status?.health ?? null,
       latencyMs: row.status?.latencyMs ?? null,
       healthError: row.status?.healthError ?? null,
+      resolvedIp: row.status?.resolvedIp ?? null,
+      resolveError: row.status?.resolveError ?? null,
       tlsValidTo: row.status?.tlsValidTo?.toISOString() ?? null,
       tlsError: row.status?.tlsError ?? null,
       registryExpiresAt: row.status?.registryExpiresAt?.toISOString() ?? null,
