@@ -57,7 +57,7 @@ TDD: сначала падающий тест, затем реализация. 
 - Modify: `packages/shared/src/schemas/status.test.ts`
 - Modify: `packages/shared/src/enums.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 В `status.test.ts`, внутрь набора про статус адреса:
 
@@ -88,12 +88,12 @@ it('статус адреса помнит, во что имя разрешил�
 
 Существующие вызовы `domainStatusSchema.parse` в этом файле дополнить обоими полями со значением `null`.
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd packages/shared && npx vitest run src/schemas/status.test.ts`
 Expected: FAIL — `resolvedIp` в разобранном объекте отсутствует.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `domainStatusSchema`, сразу после `healthError`:
 
@@ -128,12 +128,12 @@ Expected: FAIL — `resolvedIp` в разобранном объекте отс�
   AddressesDisagree = 'addresses_disagree',
 ```
 
-- [ ] **Step 4: Запустить**
+- [x] **Step 4: Запустить**
 
 Run: `cd packages/shared && npx vitest run`
 Expected: PASS. `pnpm typecheck` покажет места, где проекции API ещё не знают о новых полях, — это ожидаемо и чинится в Chunk 3.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add packages/shared/src
@@ -146,7 +146,7 @@ git commit -m "Помнить в статусе адреса, во что имя
 - Create: `apps/api/src/status/checkers/address.checker.ts`
 - Create: `apps/api/src/status/checkers/address.checker.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 import { describe, expect, it, vi } from 'vitest';
@@ -195,12 +195,12 @@ describe('resolveAddress', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/api && npx vitest run src/status/checkers/address.checker.test.ts`
 Expected: FAIL — модуль не найден.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 ```ts
 import { Resolver } from 'node:dns/promises';
@@ -261,12 +261,12 @@ async function resolvePublicRecord(name: string): Promise<string[]> {
 }
 ```
 
-- [ ] **Step 4: Запустить**
+- [x] **Step 4: Запустить**
 
 Run: `cd apps/api && npx vitest run src/status/checkers/address.checker.test.ts`
 Expected: PASS, 4 теста.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status/checkers/address.checker.ts apps/api/src/status/checkers/address.checker.test.ts
@@ -279,7 +279,7 @@ git commit -m "Разрешать адрес окружения в IP"
 - Create: `apps/api/src/servers/server-discovery.ts`
 - Create: `apps/api/src/servers/server-discovery.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 import { StatusWarningKind } from '@cairn/shared';
@@ -451,12 +451,12 @@ describe('предупреждения о машине', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/api && npx vitest run src/servers/server-discovery.test.ts`
 Expected: FAIL — модуль не найден.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 ```ts
 import { StatusWarningKind, type StatusWarning } from '@cairn/shared';
@@ -574,12 +574,12 @@ function agreedIpOf(addresses: DiscoveryAddress[]): string | null {
 }
 ```
 
-- [ ] **Step 4: Запустить**
+- [x] **Step 4: Запустить**
 
 Run: `cd apps/api && npx vitest run src/servers/server-discovery.test.ts`
 Expected: PASS, 10 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/servers/server-discovery.ts apps/api/src/servers/server-discovery.test.ts
@@ -598,7 +598,7 @@ git commit -m "Решать о машине по адресам окружени
 - Modify: `apps/api/src/db/schema/servers.ts`
 - Modify: `apps/api/src/db/schema/servers.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 В `status.test.ts`, в набор про статусы доменов:
 
@@ -625,12 +625,12 @@ it('машина ищется по адресу, но уникальности �
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/api && npx vitest run src/db/schema`
 Expected: FAIL на обоих новых тестах.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `status.ts`, в `domainStatuses`, после `healthError`:
 
@@ -650,12 +650,12 @@ Expected: FAIL на обоих новых тестах.
   ],
 ```
 
-- [ ] **Step 4: Запустить**
+- [x] **Step 4: Запустить**
 
 Run: `cd apps/api && npx vitest run src/db/schema`
 Expected: PASS.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/db/schema
@@ -668,7 +668,7 @@ git commit -m "Держать результат разрешения у адр�
 - Create: `apps/api/drizzle/0024_server_by_address.sql` (имя и запись в `meta/_journal.json` даёт `drizzle-kit generate --custom`)
 - Modify: `apps/api/test/health-address-migration.test.ts`
 
-- [ ] **Step 1: Падающий тест**
+- [x] **Step 1: Падающий тест**
 
 Миграция ничего не переносит, поэтому отдельного набора она не заслуживает: проверка дописывается в существующий, который и так прогоняет весь журнал на живой базе.
 
@@ -688,12 +688,12 @@ it('заводит место под результат разрешения и 
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падает**
+- [x] **Step 2: Запустить, убедиться что падает**
 
 Run: `cd apps/api && npx vitest run test/health-address-migration.test.ts`
 Expected: FAIL — колонок и индекса нет.
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 ```bash
 cd apps/api && npx drizzle-kit generate --custom --name=server_by_address
@@ -714,12 +714,12 @@ CREATE INDEX "servers_ip_idx" ON "servers" ("ip");
 
 Прав дописывать не нужно: `0011_status_privileges.sql` и `0018_server_privileges.sql` выдали права на таблицы целиком, и новые колонки покрыты ими.
 
-- [ ] **Step 4: Запустить**
+- [x] **Step 4: Запустить**
 
 Run: `cd apps/api && npx vitest run test/health-address-migration.test.ts`
 Expected: PASS, 12 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/drizzle apps/api/test/health-address-migration.test.ts
@@ -736,7 +736,7 @@ git commit -m "Завести место под результат разреш�
 - Modify: `apps/api/src/status/status.repository.ts`
 - Modify: `apps/api/src/status/status.repository.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 it('пишет и отдаёт результат разрешения', async () => {
@@ -768,11 +768,11 @@ it('перечисляет окружения с их адресами для в
 
 Проверено пробой: `new Resolver({ timeout, tries })` из `node:dns/promises` существует и отдаёт `resolve4`.
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/api && npx vitest run src/status/status.repository.test.ts`
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `AddressStatusInput` добавить `resolvedIp: string | null` и `resolveError: string | null`.
 
@@ -836,8 +836,8 @@ export interface DiscoveryTarget {
 }
 ```
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status/status.repository.ts apps/api/src/status/status.repository.test.ts
@@ -850,7 +850,7 @@ git commit -m "Возить результат разрешения в стат�
 - Modify: `apps/api/src/status/status.repository.ts`
 - Modify: `apps/api/src/status/status.repository.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 it('адрес, смотрящий не на ту машину, даёт предупреждение', async () => {
@@ -893,9 +893,9 @@ it('предупреждение не называет машину', async () =
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `buildStatus`, после сбора `domainStatusesView` и до сборки ответа:
 
@@ -950,8 +950,8 @@ it('предупреждение не называет машину', async () =
   }
 ```
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status/status.repository.ts apps/api/src/status/status.repository.test.ts
@@ -964,7 +964,7 @@ git commit -m "Предупреждать, когда адрес смотрит 
 - Modify: `apps/api/src/servers/servers.repository.ts`
 - Modify: `apps/api/src/servers/servers.repository.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 describe('заведение машины проверкой', () => {
@@ -1018,9 +1018,9 @@ describe('заведение машины проверкой', () => {
 
 Окружение `environmentId` в этом наборе заводится существующим помощником `addEnvironment(null, 'Прод')`.
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 ```ts
   /**
@@ -1072,8 +1072,8 @@ describe('заведение машины проверкой', () => {
 
 Дописать импорты: `and`, `isNull`, `isNotNull` из `drizzle-orm`, `environments` из `../db/schema`.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/servers/servers.repository.ts apps/api/src/servers/servers.repository.test.ts
@@ -1087,7 +1087,7 @@ git commit -m "Заводить машину по адресу и привязы
 - Modify: `apps/api/src/status/status-runner.service.test.ts`
 - Modify: `apps/api/src/status/status.module.ts` (внедрение `ServersRepository`)
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```ts
 it('разрешает адрес наравне с остальными проверками', async () => {
@@ -1138,9 +1138,9 @@ it('повторный прогон не плодит вторую машину'
 
 `seedTargets` завести так, чтобы у окружения был ровно один адрес и переменная `addressId` с его идентификатором: разногласие адресов проверяется правилом, а здесь нужен простой путь.
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `Checkers` добавить `resolveAddress: typeof resolveAddress`, в `REAL_CHECKERS` — саму функцию. Конструктор принимает `ServersRepository` вторым параметром.
 
@@ -1222,12 +1222,12 @@ it('повторный прогон не плодит вторую машину'
 
 Обратной зависимости не возникает: `ServersModule` тянет только `DbModule`, `AuthModule` и `AuditModule`.
 
-- [ ] **Step 4: Запустить**
+- [x] **Step 4: Запустить**
 
 Run: `cd apps/api && npx vitest run src/status` затем `cd apps/api && npx vitest run`
 Expected: PASS. Проверить, что `status.e2e.test.ts` по-прежнему зелёный: его подделки проверщиков надо дополнить `resolveAddress`.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/api/src/status apps/api/test
@@ -1245,7 +1245,7 @@ git commit -m "Определять машину окружения на про�
 - Modify: `apps/web/src/components/StatusByEnvironment/StatusByEnvironment.tsx`
 - Modify: `apps/web/src/components/StatusByEnvironment/StatusByEnvironment.test.tsx`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 ```tsx
 it('показывает, на какой адрес смотрит имя', () => {
@@ -1271,11 +1271,11 @@ it('не называет машину: её имя принадлежит ур�
 
 Фабрику `address` дополнить полями `resolvedIp: '203.0.113.10'` и `resolveError: null`.
 
-- [ ] **Step 2: Запустить, убедиться что падают**
+- [x] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/web && npx vitest run src/components/StatusByEnvironment`
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `AddressStatusLine.tsx` — отдельная приглушённая строка под проверками:
 
@@ -1303,8 +1303,8 @@ function placementTextOf({ resolvedIp, resolveError }: IAddressProps['address'])
 
 Компонент `AddressStatusLine` возвращает фрагмент, и добавление абзаца внутрь строки списка допустимо: `<li>` содержит текст проверок и абзац под ним. Если строка вырастет за сто строк — вынести `placementTextOf` в `utils.ts` рядом с компонентом.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/web/src/components/StatusByEnvironment
@@ -1318,7 +1318,7 @@ git commit -m "Показать, на какой адрес смотрит им�
 - Modify: `apps/web/src/components/EnvironmentForm/ServerField.tsx`
 - Modify: `apps/web/src/components/EnvironmentForm/EnvironmentForm.test.tsx`
 
-- [ ] **Step 1: Падающий тест**
+- [x] **Step 1: Падающий тест**
 
 ```tsx
 it('объясняет, что машина определится по адресу', () => {
@@ -1329,9 +1329,9 @@ it('объясняет, что машина определится по адре
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падает**
+- [x] **Step 2: Запустить, убедиться что падает**
 
-- [ ] **Step 3: Реализация**
+- [x] **Step 3: Реализация**
 
 В `constants.ts`:
 
@@ -1348,8 +1348,8 @@ export const SERVER_HINT =
 
 В `ServerField.tsx` — абзац с подсказкой под списком, показывается только когда `canAssign`.
 
-- [ ] **Step 4: Запустить** → PASS.
-- [ ] **Step 5: Коммит**
+- [x] **Step 4: Запустить** → PASS.
+- [x] **Step 5: Коммит**
 
 ```bash
 git add apps/web/src/components/EnvironmentForm
@@ -1360,8 +1360,8 @@ git commit -m "Объяснить, откуда берётся машина ок
 
 ## Финальная проверка
 
-- [ ] `pnpm test` — зелено во всех рабочих пространствах
-- [ ] `pnpm typecheck` — чисто
-- [ ] `pnpm build` — собирается
-- [ ] `scripts/e2e.mjs` — окружение заводится; после прогона проверок в реестре появляется машина
-- [ ] `CLAUDE.md`: машина окружения определяется по адресу, заводится сама, привязка ставится только в пустое место
+- [x] `pnpm test` — зелено во всех рабочих пространствах
+- [x] `pnpm typecheck` — чисто
+- [x] `pnpm build` — собирается
+- [ ] `scripts/e2e.mjs` — окружение заводится; после прогона проверок в реестре появляется машина (требует поднятого стека, не прогонялся)
+- [x] `CLAUDE.md`: машина окружения определяется по адресу, заводится сама, привязка ставится только в пустое место
