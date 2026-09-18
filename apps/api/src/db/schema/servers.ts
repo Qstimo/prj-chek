@@ -1,4 +1,4 @@
-import { date, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { date, index, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * Серверы реестра (ТЗ 3.2).
@@ -30,7 +30,13 @@ export const servers = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique('servers_name').on(table.name)],
+  (table) => [
+    unique('servers_name').on(table.name),
+    // Поиск машины по разрешённому адресу идёт на каждом прогоне проверок.
+    // Индекс, а не уникальность: NAT, переезды и две записи об одной
+    // машине — обычная жизнь реестра.
+    index('servers_ip_idx').on(table.ip),
+  ],
 );
 
 /** Строка таблицы серверов. */

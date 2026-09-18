@@ -27,6 +27,12 @@ describe('статусы доменов', () => {
     );
   });
 
+  it('статус адреса хранит результат разрешения', () => {
+    const columns = getTableConfig(domainStatuses).columns.map((column) => column.name);
+
+    expect(columns).toEqual(expect.arrayContaining(['resolved_ip', 'resolve_error']));
+  });
+
   it('здоровье адреса может быть ещё не измерено', () => {
     // Адрес мог появиться минуту назад: молчание честнее выдуманного «жив».
     expect(domainStatuses.health.notNull).toBe(false);

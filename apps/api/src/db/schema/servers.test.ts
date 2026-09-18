@@ -17,6 +17,15 @@ describe('серверы', () => {
     expect(unique?.columns.map((column) => column.name)).toEqual(['name']);
   });
 
+  it('машина ищется по адресу, но уникальности адреса не требует', () => {
+    // «IP определяет машину» выглядит инвариантом, но им не является:
+    // NAT, переезды и две записи об одной машине — обычная жизнь реестра.
+    const config = getTableConfig(servers);
+
+    expect(config.indexes.map((index) => index.config.name)).toContain('servers_ip_idx');
+    expect(config.uniqueConstraints.map((unique) => unique.name)).not.toContain('servers_ip');
+  });
+
   it('допускает сервер без параметров, кроме имени', () => {
     expect(servers.owner.notNull).toBe(false);
     expect(servers.host.notNull).toBe(false);

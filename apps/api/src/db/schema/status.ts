@@ -28,6 +28,9 @@ export const domainStatuses = pgTable(
     health: healthStateEnum('health'),
     latencyMs: integer('latency_ms'),
     healthError: text('health_error'),
+    /** Во что разрешилось имя: по этому адресу находится машина. */
+    resolvedIp: text('resolved_ip'),
+    resolveError: text('resolve_error'),
     tlsValidTo: timestamp('tls_valid_to', { withTimezone: true }),
     tlsError: text('tls_error'),
     registryExpiresAt: timestamp('registry_expires_at', { withTimezone: true }),
