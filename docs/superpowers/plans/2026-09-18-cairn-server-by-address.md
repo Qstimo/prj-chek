@@ -620,6 +620,8 @@ it('машина ищется по адресу, но уникальности �
 
   expect(config.indexes.map((index) => index.config.name)).toContain('servers_ip_idx');
   expect(config.uniqueConstraints.map((unique) => unique.name)).not.toContain('servers_ip');
+  // Форма проверена пробой: у индекса drizzle единственное поле `config`,
+  // и имя лежит в `config.name`.
 });
 ```
 
@@ -763,6 +765,8 @@ it('перечисляет окружения с их адресами для в
 ```
 
 Фабрику `checked` дополнить полями `resolvedIp: null` и `resolveError: null`.
+
+Проверено пробой: `new Resolver({ timeout, tries })` из `node:dns/promises` существует и отдаёт `resolve4`.
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
@@ -1125,7 +1129,14 @@ it('повторный прогон не плодит вторую машину'
 });
 ```
 
-`healthyCheckers` дополнить полем `resolveAddress: vi.fn().mockResolvedValue({ ip: '203.0.113.10', error: null })`. Таблицу `servers` импортировать под именем `servers_`, чтобы не столкнуться с переменной репозитория.
+`healthyCheckers` дополнить полем `resolveAddress: vi.fn().mockResolvedValue({ ip: '203.0.113.10', error: null })`.
+
+Две мелочи, о которые легко споткнуться в этом файле:
+
+- репозиторий серверов создаётся рядом с репозиторием статусов: `const servers = new ServersRepository(testDb.db);` — субъекта он не принимает, так решено этапом 9;
+- таблица `servers` из схемы импортируется под другим именем (`servers as serversTable`), иначе столкнётся с этой переменной.
+
+`seedTargets` завести так, чтобы у окружения был ровно один адрес и переменная `addressId` с его идентификатором: разногласие адресов проверяется правилом, а здесь нужен простой путь.
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
@@ -1204,7 +1215,12 @@ it('повторный прогон не плодит вторую машину'
         }
 ```
 
-В `status.module.ts` добавить `ServersRepository` в провайдеры (или импортировать `ServersModule`, если он есть, — посмотреть, как модуль устроен, и повторить, а не выдумывать).
+Проводка модулей — двумя строками, без нового провайдера:
+
+- в `apps/api/src/servers/servers.module.ts` дописать `ServersRepository` в `exports` (сейчас там только `ServersService`);
+- в `apps/api/src/status/status.module.ts` добавить `ServersModule` в `imports`.
+
+Обратной зависимости не возникает: `ServersModule` тянет только `DbModule`, `AuthModule` и `AuditModule`.
 
 - [ ] **Step 4: Запустить**
 
