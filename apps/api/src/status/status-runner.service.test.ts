@@ -13,9 +13,11 @@ import {
   environmentDomains,
   environments,
   projects,
+  servers as serversTable,
   subjects,
   users,
 } from '../db/schema';
+import { ServersRepository } from '../servers/servers.repository';
 import { StatusRepository } from './status.repository';
 import { StatusRunnerService } from './status-runner.service';
 import { StatusService } from './status.service';
@@ -24,12 +26,15 @@ import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 describe('runner статусов', () => {
   let testDb: TestDatabase;
   let repository: StatusRepository;
+  let servers: ServersRepository;
   let projectId: string;
   let subjectId: string;
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
     repository = new StatusRepository(testDb.db, new AccessService(testDb.db));
+    // Субъекта реестр серверов не принимает — так решено этапом 9.
+    servers = new ServersRepository(testDb.db);
   });
 
   afterAll(async () => {
@@ -95,6 +100,7 @@ describe('runner статусов', () => {
       checkDomainExpiry: vi
         .fn()
         .mockResolvedValue({ expiresAt: new Date('2027-06-01T00:00:00Z'), error: null }),
+      resolveAddress: vi.fn().mockResolvedValue({ ip: '203.0.113.10', error: null }),
     };
   }
 
@@ -102,7 +108,7 @@ describe('runner статусов', () => {
     await seedTargets();
 
     const checkers = healthyCheckers();
-    const runner = new StatusRunnerService(repository, checkers);
+    const runner = new StatusRunnerService(repository, servers, checkers);
 
     await runner.runAll();
 
@@ -114,7 +120,7 @@ describe('runner статусов', () => {
   it('прогон пишет три проверки одной строкой на адрес', async () => {
     await seedTargets();
 
-    const runner = new StatusRunnerService(repository, healthyCheckers());
+    const runner = new StatusRunnerService(repository, servers, healthyCheckers());
 
     await runner.runAll();
 
@@ -133,9 +139,48 @@ describe('runner статусов', () => {
 
     const checkers = healthyCheckers();
 
-    await new StatusRunnerService(repository, checkers).runAll();
+    await new StatusRunnerService(repository, servers, checkers).runAll();
 
     expect(checkers.checkHealth).toHaveBeenCalledWith('example.com', null);
+  });
+
+  it('разрешает адрес наравне с остальными проверками', async () => {
+    await seedTargets();
+
+    const checkers = healthyCheckers();
+
+    await new StatusRunnerService(repository, servers, checkers).runAll();
+
+    expect(checkers.resolveAddress).toHaveBeenCalledWith('stage.example.com');
+
+    const [status] = await testDb.db
+      .select()
+      .from(domainStatuses)
+      .orderBy(domainStatuses.resolvedIp);
+
+    expect(status?.resolvedIp).toBe('203.0.113.10');
+  });
+
+  it('заводит машину и привязывает окружение', async () => {
+    // Человек вписал адрес — большего от него не требуется.
+    await seedTargets();
+
+    await new StatusRunnerService(repository, servers, healthyCheckers()).runAll();
+
+    const [machine] = await testDb.db.select().from(serversTable);
+    const [environment] = await testDb.db.select().from(environments);
+
+    expect(machine).toMatchObject({ name: '203.0.113.10', ip: '203.0.113.10' });
+    expect(environment?.serverId).toBe(machine?.id);
+  });
+
+  it('повторный прогон не плодит вторую машину', async () => {
+    await seedTargets();
+
+    await new StatusRunnerService(repository, servers, healthyCheckers()).runAll();
+    await new StatusRunnerService(repository, servers, healthyCheckers()).runAll();
+
+    expect(await testDb.db.select().from(serversTable)).toHaveLength(1);
   });
 
   it('падение одного адреса не прерывает обход', async () => {
@@ -146,7 +191,7 @@ describe('runner статусов', () => {
     // даже нарушение этого контракта.
     checkers.checkHealth.mockRejectedValueOnce(new Error('взорвалось'));
 
-    await new StatusRunnerService(repository, checkers).runAll();
+    await new StatusRunnerService(repository, servers, checkers).runAll();
 
     const rows = await testDb.db.select().from(domainStatuses);
 
@@ -155,10 +200,11 @@ describe('runner статусов', () => {
   });
 
   it('ручной запуск пишет в журнал, фоновый — нет', async () => {
-    const runner = new StatusRunnerService(repository, {
+    const runner = new StatusRunnerService(repository, servers, {
       checkHealth: vi.fn(),
       checkTls: vi.fn(),
       checkDomainExpiry: vi.fn(),
+      resolveAddress: vi.fn(),
     });
     const service = new StatusService(testDb.db, repository, runner, new AuditService());
 

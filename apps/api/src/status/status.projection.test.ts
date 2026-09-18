@@ -87,6 +87,8 @@ function address(health: HealthState | null, checkedAt: string | null = null): D
     health,
     latencyMs: null,
     healthError: null,
+    resolvedIp: null,
+    resolveError: null,
     tlsValidTo: null,
     tlsError: null,
     registryExpiresAt: null,

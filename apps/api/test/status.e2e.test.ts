@@ -31,6 +31,7 @@ const DEAD_ADDRESS_CHECKERS = {
   checkHealth: async () => ({ health: HealthState.Down, latencyMs: null, error: 'HTTP 502' }),
   checkTls: async () => ({ validTo: null, error: null }),
   checkDomainExpiry: async () => ({ expiresAt: null, error: null }),
+  resolveAddress: async () => ({ ip: null, error: null }),
 };
 
 describe('HTTP: статус', () => {

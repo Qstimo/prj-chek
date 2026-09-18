@@ -36,6 +36,8 @@ function domain(overrides: Partial<DomainStatus> = {}): DomainStatus {
     health: HealthState.Up,
     latencyMs: 40,
     healthError: null,
+    resolvedIp: null,
+    resolveError: null,
     tlsValidTo: '2027-01-01T00:00:00.000Z',
     tlsError: null,
     registryExpiresAt: '2027-06-01T00:00:00.000Z',

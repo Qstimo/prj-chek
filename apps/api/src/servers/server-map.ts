@@ -120,6 +120,8 @@ function addressStatusesOf(placements: ServerMapPlacement[]): DomainStatus[] {
     health: placement.health,
     latencyMs: null,
     healthError: null,
+    resolvedIp: null,
+    resolveError: null,
     tlsValidTo: null,
     tlsError: null,
     registryExpiresAt: null,
