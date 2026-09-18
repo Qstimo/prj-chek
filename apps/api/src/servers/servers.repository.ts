@@ -7,7 +7,7 @@ import {
   type ServerUpdate,
 } from '@cairn/shared';
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { asc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 
 import { DATABASE } from '../db/db.module';
 import type { Database, Transaction } from '../db/db.types';
@@ -112,6 +112,54 @@ export class ServersRepository {
       },
       new Date(),
     );
+  }
+
+  /**
+   * Реестр, разложенный по адресу машины.
+   *
+   * Списком, а не одной машиной на адрес: уникальности адреса в реестре
+   * нет, и дубль — повод промолчать, а не гадать.
+   */
+  async machinesByIp(): Promise<Map<string, { id: string }[]>> {
+    const rows = await this.db
+      .select({ id: servers.id, ip: servers.ip })
+      .from(servers)
+      .where(isNotNull(servers.ip));
+
+    const byIp = new Map<string, { id: string }[]>();
+
+    for (const row of rows) {
+      const ip = row.ip!;
+
+      byIp.set(ip, [...(byIp.get(ip) ?? []), { id: row.id }]);
+    }
+
+    return byIp;
+  }
+
+  /**
+   * Заводит машину, найденную проверкой (спека 3.2).
+   *
+   * Имя равно адресу: это всё, что система о ней знает. Человеческое имя,
+   * владельца, провайдера и срок оплаты дописывает суперадмин.
+   */
+  async createDiscovered(ip: string): Promise<Server> {
+    const [created] = await this.db.insert(servers).values({ name: ip, ip }).returning();
+
+    return created!;
+  }
+
+  /**
+   * Ставит привязку окружению, у которого её нет (спека 3.3).
+   *
+   * Условие в запросе, а не только в правиле: привязка, поставленная
+   * человеком, не должна переехать ни при каком порядке вызовов.
+   */
+  async bindEnvironment(environmentId: string, serverId: string): Promise<void> {
+    await this.db
+      .update(environments)
+      .set({ serverId, updatedAt: new Date() })
+      .where(and(eq(environments.id, environmentId), isNull(environments.serverId)));
   }
 
   /** Заводит сервер. */

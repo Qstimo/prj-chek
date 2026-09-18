@@ -1,5 +1,6 @@
 import { EnvironmentKind, HealthState, StatusIndicator, StatusWarningKind } from '@cairn/shared';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -201,6 +202,62 @@ describe('репозиторий серверов', () => {
       await expect(
         testDb.db.transaction((tx) => repository.remove(tx, server!.id)),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('заведение машины проверкой', () => {
+    it('отдаёт реестр, разложенный по адресу', async () => {
+      await testDb.db.insert(servers).values({ name: 'hetzner-fsn-1', ip: '203.0.113.10' });
+
+      const byIp = await repository.machinesByIp();
+
+      expect(byIp.get('203.0.113.10')).toHaveLength(1);
+    });
+
+    it('машины без адреса в разбор не попадают', async () => {
+      await testDb.db.insert(servers).values({ name: 'старая-запись' });
+
+      expect(await repository.machinesByIp()).toEqual(new Map());
+    });
+
+    it('заводит машину под именем её адреса', async () => {
+      // Больше система о ней не знает: имя, владельца и срок оплаты
+      // допишет человек.
+      const created = await repository.createDiscovered('203.0.113.10');
+
+      expect(created).toMatchObject({ name: '203.0.113.10', ip: '203.0.113.10', owner: null });
+    });
+
+    it('ставит привязку окружению', async () => {
+      const environmentId = await addEnvironment(null, 'Прод');
+      const created = await repository.createDiscovered('203.0.113.10');
+
+      await repository.bindEnvironment(environmentId, created.id);
+
+      const [environment] = await testDb.db
+        .select()
+        .from(environments)
+        .where(eq(environments.id, environmentId));
+
+      expect(environment?.serverId).toBe(created.id);
+    });
+
+    it('привязку, поставленную человеком, не перетирает', async () => {
+      // Защита на уровне запроса, а не только правила: второй вызов
+      // не должен переехать окружение молча.
+      const environmentId = await addEnvironment(null, 'Прод');
+      const first = await repository.createDiscovered('203.0.113.10');
+      const second = await repository.createDiscovered('198.51.100.7');
+      await repository.bindEnvironment(environmentId, first.id);
+
+      await repository.bindEnvironment(environmentId, second.id);
+
+      const [environment] = await testDb.db
+        .select()
+        .from(environments)
+        .where(eq(environments.id, environmentId));
+
+      expect(environment?.serverId).toBe(first.id);
     });
   });
 });
