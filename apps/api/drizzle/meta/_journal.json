@@ -176,6 +176,13 @@
       "when": 1789728376744,
       "tag": "0024_server_by_address",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791400538358,
+      "tag": "0025_snapshot_realign",
+      "breakpoints": true
     }
   ]
 }
