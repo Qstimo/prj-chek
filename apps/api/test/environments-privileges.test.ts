@@ -78,6 +78,23 @@ describe('права роли приложения на окружения', () 
     ).resolves.toBeDefined();
   });
 
+  it('роль приложения читает и пишет платформы, связи и выпуски', async () => {
+    // Единственная автоматическая проверка миграции прав: забытый GRANT
+    // иначе всплывёт только в бою.
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM project_platforms`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM environment_platforms`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM version_platform_releases`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM checkpoint_platforms`),
+    ).resolves.toBeDefined();
+  });
+
   it('роль приложения не меняет схему', async () => {
     await expect(
       testDb.appDb.execute(sql`ALTER TABLE environments ADD COLUMN sneaky text`),
