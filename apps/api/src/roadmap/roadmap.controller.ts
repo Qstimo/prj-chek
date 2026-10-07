@@ -127,6 +127,7 @@ export class RoadmapController {
       url: created.url,
       isDone: created.isDone,
       position: created.position,
+      platformIds: created.platformIds,
     };
   }
 
@@ -153,6 +154,7 @@ export class RoadmapController {
       url: updated.url,
       isDone: updated.isDone,
       position: updated.position,
+      platformIds: updated.platformIds,
     };
   }
 

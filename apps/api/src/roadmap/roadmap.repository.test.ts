@@ -797,4 +797,49 @@ describe('репозиторий роадмапа', () => {
       expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
     });
   });
+
+  describe('ответы чекпоинта', () => {
+    it('возвращает теги вместе с созданным и правленым чекпоинтом', async () => {
+      // Ответы ручек собираются литералом, и без тегов в строке
+      // контроллеру было бы нечего в них положить.
+      const versionId = await createVersion('v1.0');
+      const iosId = await createPlatform('App Store', PlatformKind.Store);
+
+      const created = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Вход по телефону',
+          platformIds: [iosId],
+        }),
+      );
+
+      expect(created.platformIds).toEqual([iosId]);
+
+      const updated = await testDb.db.transaction((tx) =>
+        repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
+          platformIds: [],
+        }),
+      );
+
+      expect(updated.platformIds).toEqual([]);
+    });
+
+    it('в ответе правки без тегов отдаёт текущий набор, а не присланный', async () => {
+      const versionId = await createVersion('v1.0');
+      const iosId = await createPlatform('App Store', PlatformKind.Store);
+      const created = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Оплата',
+          platformIds: [iosId],
+        }),
+      );
+
+      const updated = await testDb.db.transaction((tx) =>
+        repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
+          isDone: true,
+        }),
+      );
+
+      expect(updated.platformIds).toEqual([iosId]);
+    });
+  });
 });

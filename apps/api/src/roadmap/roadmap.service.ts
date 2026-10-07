@@ -15,7 +15,7 @@ import { AuditAction, type AuditActor } from '../audit/audit.types';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import type { RoadmapCheckpointRow, RoadmapVersionRow } from '../db/schema';
-import { RoadmapRepository } from './roadmap.repository';
+import { RoadmapRepository, type TaggedCheckpointRow } from './roadmap.repository';
 
 /**
  * Роадмап: изменения вместе с журналированием.
@@ -115,7 +115,7 @@ export class RoadmapService {
     projectId: string,
     versionId: string,
     input: RoadmapCheckpointCreate,
-  ): Promise<RoadmapCheckpointRow> {
+  ): Promise<TaggedCheckpointRow> {
     return this.db.transaction(async (tx) => {
       const created = await this.repository.createCheckpoint(
         subject,
@@ -144,7 +144,7 @@ export class RoadmapService {
     versionId: string,
     checkpointId: string,
     input: RoadmapCheckpointUpdate,
-  ): Promise<RoadmapCheckpointRow> {
+  ): Promise<TaggedCheckpointRow> {
     return this.db.transaction(async (tx) => {
       const updated = await this.repository.updateCheckpoint(
         subject,

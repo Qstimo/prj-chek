@@ -192,7 +192,7 @@ export class RoadmapRepository {
     projectId: string,
     versionId: string,
     input: RoadmapCheckpointCreate,
-  ): Promise<RoadmapCheckpointRow> {
+  ): Promise<TaggedCheckpointRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
     await this.requireVersion(tx, projectId, versionId);
 
@@ -217,7 +217,7 @@ export class RoadmapRepository {
       await this.replaceCheckpointPlatforms(tx, projectId, created!.id, input.platformIds);
     }
 
-    return created!;
+    return { ...created!, platformIds: await this.tagsOf(tx, created!.id) };
   }
 
   /** Правит чекпоинт: формулировку, признак, позицию. */
@@ -228,7 +228,7 @@ export class RoadmapRepository {
     versionId: string,
     checkpointId: string,
     input: RoadmapCheckpointUpdate,
-  ): Promise<RoadmapCheckpointRow> {
+  ): Promise<TaggedCheckpointRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
     await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
 
@@ -248,7 +248,9 @@ export class RoadmapRepository {
       await this.replaceCheckpointPlatforms(tx, projectId, checkpointId, platformIds);
     }
 
-    return updated!;
+    // Набор читается из базы, а не берётся из тела: ответ описывает
+    // состояние после операции, а правка могла тегов и не присылать.
+    return { ...updated!, platformIds: await this.tagsOf(tx, checkpointId) };
   }
 
   /** Удаляет чекпоинт. */
@@ -352,6 +354,18 @@ export class RoadmapRepository {
       );
 
     return { platformName: platform.name, versionLabel: version.label };
+  }
+
+  /** Теги одного чекпоинта по порядку платформ. */
+  private async tagsOf(executor: Executor, checkpointId: string): Promise<string[]> {
+    const rows = await executor
+      .select({ platformId: checkpointPlatforms.platformId })
+      .from(checkpointPlatforms)
+      .innerJoin(projectPlatforms, eq(projectPlatforms.id, checkpointPlatforms.platformId))
+      .where(eq(checkpointPlatforms.checkpointId, checkpointId))
+      .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt));
+
+    return rows.map((row) => row.platformId);
   }
 
   /**
@@ -669,3 +683,11 @@ function stageOf(versions: RoadmapVersionRow[]): RoadmapStage {
 
   return { current: current + 1, total: versions.length };
 }
+
+/**
+ * Строка чекпоинта вместе с его тегами.
+ *
+ * Теги живут отдельной таблицей, а ответы ручек собираются литералом:
+ * без них контроллеру нечего положить в обязательное поле контракта.
+ */
+export type TaggedCheckpointRow = RoadmapCheckpointRow & { platformIds: string[] };
