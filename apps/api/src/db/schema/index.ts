@@ -6,6 +6,7 @@ export * from './domains';
 export * from './environments';
 export * from './grants';
 export * from './invitations';
+export * from './platforms';
 export * from './projects';
 export * from './roadmap';
 export * from './servers';

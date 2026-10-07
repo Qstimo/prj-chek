@@ -9,6 +9,12 @@ import { domains } from './domains';
 import { environmentDomains, environments } from './environments';
 import { grants } from './grants';
 import { invitations } from './invitations';
+import {
+  checkpointPlatforms,
+  environmentPlatforms,
+  projectPlatforms,
+  versionPlatformReleases,
+} from './platforms';
 import { projects } from './projects';
 import { roadmapCheckpoints, roadmapPublicLinks, roadmapVersions } from './roadmap';
 import { servers } from './servers';
@@ -31,6 +37,10 @@ const ALL_TABLES = [
   { name: 'environments', table: environments },
   { name: 'domains', table: domains },
   { name: 'environment_domains', table: environmentDomains },
+  { name: 'project_platforms', table: projectPlatforms },
+  { name: 'environment_platforms', table: environmentPlatforms },
+  { name: 'version_platform_releases', table: versionPlatformReleases },
+  { name: 'checkpoint_platforms', table: checkpointPlatforms },
   { name: 'chronicle_entries', table: chronicleEntries },
   { name: 'doc_pages', table: docPages },
   { name: 'agent_tokens', table: agentTokens },
