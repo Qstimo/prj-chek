@@ -16,6 +16,7 @@ import { AuditAction, type AuditActor } from '../audit/audit.types';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import type { Project } from '../db/schema';
+import { PlatformsRepository } from '../platforms/platforms.repository';
 import { ProjectsRepository } from './projects.repository';
 
 /**
@@ -31,6 +32,7 @@ export class ProjectsService {
     private readonly repository: ProjectsRepository,
     private readonly audit: AuditService,
     private readonly access: AccessService,
+    private readonly platforms: PlatformsRepository,
   ) {}
 
   /**
@@ -62,7 +64,13 @@ export class ProjectsService {
     return this.repository.findById(subject, projectId);
   }
 
-  /** Создаёт проект. Право проверяет репозиторий. */
+  /**
+   * Создаёт проект вместе с его платформами. Право проверяет репозиторий.
+   *
+   * Платформы заводятся репозиторием платформ, а не их службой: вложенная
+   * транзакция здесь не нужна и при единственном подключении в пуле
+   * заблокировалась бы навсегда.
+   */
   async create(subject: RequestSubject, input: ProjectCreate): Promise<Project> {
     return this.db.transaction(async (tx) => {
       const created = await this.repository.create(subject, tx, input);
@@ -74,6 +82,27 @@ export class ProjectsService {
         projectId: created.id,
         metadata: { name: created.name },
       });
+
+      // Охрана по двум причинам: поле необязательно в схеме, а
+      // `insert().values([])` в Drizzle бросает.
+      if (input.platforms?.length) {
+        const platforms = await this.platforms.createMany(
+          subject,
+          tx,
+          created.id,
+          input.platforms,
+        );
+
+        for (const platform of platforms) {
+          await this.audit.record(tx, actorOf(subject), {
+            action: AuditAction.PlatformCreated,
+            entityType: 'platform',
+            entityId: platform.id,
+            projectId: created.id,
+            metadata: { name: platform.name, kind: platform.kind },
+          });
+        }
+      }
 
       return created;
     });

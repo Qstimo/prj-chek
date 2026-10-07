@@ -1,4 +1,4 @@
-import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { AccessLevel, PlatformKind, Section, SubjectKind } from '@cairn/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -7,9 +7,10 @@ import { InsufficientLevelError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
+import { PlatformsRepository } from '../platforms/platforms.repository';
 import { ProjectsRepository } from './projects.repository';
 import { ProjectsService } from './projects.service';
-import { auditLog, grants, projects, subjects, users } from '../db/schema';
+import { auditLog, grants, projectPlatforms, projects, subjects, users } from '../db/schema';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
 describe('ProjectsService', () => {
@@ -28,6 +29,7 @@ describe('ProjectsService', () => {
       new ProjectsRepository(testDb.db, access),
       new AuditService(),
       access,
+      new PlatformsRepository(testDb.db, access),
     );
   });
 
@@ -160,5 +162,39 @@ describe('ProjectsService', () => {
 
       expect(await testDb.db.select().from(auditLog)).toHaveLength(0);
     });
+  });
+
+  it('создаёт проект вместе с платформами и пишет каждую в журнал', async () => {
+    const created = await service.create(admin(), {
+      name: 'Касса',
+      platforms: [
+        { kind: PlatformKind.Server, name: 'API' },
+        { kind: PlatformKind.Store, name: 'App Store' },
+      ],
+    });
+
+    const platforms = await testDb.rowsOf(projectPlatforms);
+
+    // Сортировка по позиции обязательна: `rowsOf` — это `select` без
+    // `ORDER BY`, и порядок строк в куче ничем не закреплён.
+    expect(
+      [...platforms]
+        .sort((first, second) => first.position - second.position)
+        .map((row) => row.name),
+    ).toEqual(['API', 'App Store']);
+    expect(platforms.every((platform) => platform.projectId === created.id)).toBe(true);
+
+    const entries = await testDb.db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, AuditAction.PlatformCreated));
+
+    expect(entries).toHaveLength(2);
+  });
+
+  it('создаёт проект без платформ, когда их не прислали', async () => {
+    await service.create(admin(), { name: 'Касса' });
+
+    expect(await testDb.rowsOf(projectPlatforms)).toHaveLength(0);
   });
 });

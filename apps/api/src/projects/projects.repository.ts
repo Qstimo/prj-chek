@@ -90,11 +90,14 @@ export class ProjectsRepository {
       throw new InsufficientLevelError();
     }
 
-    const slug = await this.findFreeSlug(tx, generateSlug(input.name));
+    // Платформы — не колонка таблицы: Drizzle молча пропустил бы лишнее
+    // поле, и проект создался бы без них незаметно. Их заводит служба.
+    const { platforms: _platforms, ...fields } = input;
+    const slug = await this.findFreeSlug(tx, generateSlug(fields.name));
 
     const [created] = await tx
       .insert(projects)
-      .values({ ...input, slug })
+      .values({ ...fields, slug })
       .returning();
 
     return created!;
