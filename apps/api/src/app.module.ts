@@ -13,6 +13,7 @@ import { GrantsModule } from './grants/grants.module';
 import { HealthModule } from './health/health.module';
 import { IntakeModule } from './intake/intake.module';
 import { InvitationsModule } from './invitations/invitations.module';
+import { PlatformsModule } from './platforms/platforms.module';
 import { ProjectsModule } from './projects/projects.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
 import { StatusModule } from './status/status.module';
@@ -31,6 +32,7 @@ import { VariablesModule } from './variables/variables.module';
     AccessModule,
     AuthModule,
     ProjectsModule,
+    PlatformsModule,
     EnvironmentsModule,
     ChronicleModule,
     VariablesModule,
