@@ -170,6 +170,7 @@ describe('схема деталей окружения', () => {
     domains: ['example.com'],
     healthCheckPath: null,
     notes: null,
+    platforms: [],
     createdAt: '2026-09-10T10:00:00.000Z',
     updatedAt: '2026-09-10T10:00:00.000Z',
   };
@@ -218,5 +219,19 @@ describe('нормализация адреса', () => {
 
   it('оставляет непохожее на адрес как есть, чтобы отказ объяснила проверка', () => {
     expect(hostnameOf('не домен')).toBe('не домен');
+  });
+});
+
+describe('платформы окружения', () => {
+  it('окружение принимает платформы, которые в нём живут', () => {
+    const platformId = '55555555-5555-4555-8555-555555555555';
+
+    expect(environmentUpdateSchema.parse({ platformIds: [platformId] }).platformIds).toEqual([
+      platformId,
+    ]);
+
+    expect(() =>
+      environmentUpdateSchema.parse({ platformIds: [platformId, platformId] }),
+    ).toThrow();
   });
 });

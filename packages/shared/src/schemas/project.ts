@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { ProjectLifecycle } from '../enums';
+import { platformCreateSchema } from './platform';
 
 /**
  * Проект на уровне метаданных: видно, что он есть, и его состояние (ТЗ 4.3).
@@ -28,20 +29,40 @@ export const projectDetailSchema = projectMetadataSchema.extend({
   updatedAt: z.string(),
 });
 
-/** Поля, доступные для правки при уровне записи. */
-export const projectUpdateSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
-  purpose: z.string().max(2000).nullable().optional(),
-  stack: z.string().max(500).nullable().optional(),
-  repoUrl: z.string().url().max(500).nullable().optional(),
-  ownerUserId: z.string().uuid().nullable().optional(),
-  lifecycle: z.nativeEnum(ProjectLifecycle).optional(),
-  notes: z.string().max(10_000).nullable().optional(),
-});
+/**
+ * Поля, доступные для правки при уровне записи.
+ *
+ * Строгая намеренно: платформы здесь не принимаются, и без `.strict()`
+ * присланное поле молча отбросилось бы вместо отказа.
+ */
+export const projectUpdateSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    purpose: z.string().max(2000).nullable().optional(),
+    stack: z.string().max(500).nullable().optional(),
+    repoUrl: z.string().url().max(500).nullable().optional(),
+    ownerUserId: z.string().uuid().nullable().optional(),
+    lifecycle: z.nativeEnum(ProjectLifecycle).optional(),
+    notes: z.string().max(10_000).nullable().optional(),
+  })
+  .strict();
 
-/** Поля для создания проекта. Слаг генерируется сервером и здесь не принимается. */
+/**
+ * Поля для создания проекта. Слаг генерируется сервером и здесь не принимается.
+ *
+ * Платформы принимаются здесь, но не в правке: при создании затирать
+ * нечего, а требовать сначала создать проект и лишь потом вернуться
+ * за платформами — лишний шаг. В правке каждая платформа действует своей
+ * мутацией и чужого не трогает.
+ *
+ * Строгость наследуется от правки: `.extend()` в zod сохраняет
+ * `unknownKeys`, поэтому создание тоже отвергает лишние поля. Так и
+ * нужно — переписывать схему отдельным нестрогим `z.object` нельзя,
+ * требование выше потеряется.
+ */
 export const projectCreateSchema = projectUpdateSchema.extend({
   name: z.string().min(1).max(200),
+  platforms: z.array(platformCreateSchema).max(20).optional(),
 });
 
 /** Проект на уровне метаданных. */

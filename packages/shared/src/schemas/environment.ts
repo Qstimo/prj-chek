@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { EnvironmentKind } from '../enums';
+import { platformIdsSchema, platformRefSchema } from './platform';
 
 /**
  * Имя хоста из того, что вписал человек.
@@ -76,11 +77,19 @@ export const environmentServerSchema = z.object({
   specs: z.string().nullable(),
 });
 
-/** Окружение на уровне чтения: машина, проверка и заметки. */
+/** Окружение на уровне чтения: машина, проверка, заметки и платформы. */
 export const environmentDetailSchema = environmentMetadataSchema.extend({
   healthCheckPath: z.string().nullable(),
   notes: z.string().nullable(),
   server: environmentServerSchema.nullable(),
+  /**
+   * Платформы, развёрнутые в этом окружении.
+   *
+   * Имя платформы принадлежит паспорту проекта, но раскрывается в той
+   * секции, где упомянуто, — тот же приём, что у имени окружения
+   * в переменных.
+   */
+  platforms: z.array(platformRefSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -111,6 +120,15 @@ export const environmentUpdateSchema = z.object({
     .max(20)
     .refine((domains) => new Set(domains).size === domains.length, 'Домены повторяются')
     .optional(),
+  /**
+   * Платформы, развёрнутые в этом окружении.
+   *
+   * Присылается целиком, как и `domains` рядом, и по той же причине:
+   * набор правится целиком в одной форме. Платформа вида «магазин»
+   * в окружение не ставится — отказ приходит от сервера, который один
+   * знает вид платформы.
+   */
+  platformIds: platformIdsSchema.optional(),
 });
 
 /**
