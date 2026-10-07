@@ -676,4 +676,125 @@ describe('репозиторий роадмапа', () => {
       expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
     });
   });
+
+  describe('теги платформ у чекпоинтов', () => {
+    it('ставит теги при создании и заменяет при правке', async () => {
+      await grant(AccessLevel.Read);
+      const versionId = await createVersion('v1.0');
+      const iosId = await createPlatform('App Store', PlatformKind.Store, 1);
+      const androidId = await createPlatform('Google Play', PlatformKind.Store, 2);
+
+      const created = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Вход по телефону',
+          platformIds: [iosId, androidId],
+        }),
+      );
+
+      await testDb.db.transaction((tx) =>
+        repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
+          platformIds: [iosId],
+        }),
+      );
+
+      const roadmap = await repository.findForProject(member(), projectId);
+      const detail = roadmap.versions[0] as RoadmapVersionDetail;
+
+      expect(detail.checkpoints[0]?.platformIds).toEqual([iosId]);
+    });
+
+    it('пустой набор тегов снимает все', async () => {
+      const versionId = await createVersion('v1.0');
+      const iosId = await createPlatform('App Store', PlatformKind.Store);
+      const created = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Оплата',
+          platformIds: [iosId],
+        }),
+      );
+
+      await testDb.db.transaction((tx) =>
+        repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
+          platformIds: [],
+        }),
+      );
+
+      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+    });
+
+    it('правка без тегов их не трогает', async () => {
+      // Ровно так переключается галочка «закрыт»: буквальная замена
+      // набора снесла бы теги при каждом щелчке.
+      const versionId = await createVersion('v1.0');
+      const iosId = await createPlatform('App Store', PlatformKind.Store);
+      const created = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Оплата',
+          platformIds: [iosId],
+        }),
+      );
+
+      await testDb.db.transaction((tx) =>
+        repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
+          isDone: true,
+        }),
+      );
+
+      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(1);
+    });
+
+    it('не ставит тег платформы чужого проекта', async () => {
+      const versionId = await createVersion('v1.0');
+      const foreign = await createPlatform('API', PlatformKind.Server, 1, otherProjectId);
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.createCheckpoint(admin(), tx, projectId, versionId, {
+            title: 'Оплата',
+            platformIds: [foreign],
+          }),
+        ),
+      ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    });
+
+    it('удаление версии уносит выпуски и теги её чекпоинтов', async () => {
+      const versionId = await createVersion('v1.0');
+      const apiId = await createPlatform('API');
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Оплата',
+          platformIds: [apiId],
+        }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+          state: PlatformReleaseState.OnTest,
+        }),
+      );
+
+      await testDb.db.transaction((tx) =>
+        repository.removeVersion(admin(), tx, projectId, versionId),
+      );
+
+      expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
+      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+    });
+
+    it('удаление чекпоинта уносит его теги', async () => {
+      const versionId = await createVersion('v1.0');
+      const apiId = await createPlatform('API');
+      const created = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Оплата',
+          platformIds: [apiId],
+        }),
+      );
+
+      await testDb.db.transaction((tx) =>
+        repository.removeCheckpoint(admin(), tx, projectId, versionId, created.id),
+      );
+
+      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+    });
+  });
 });

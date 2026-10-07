@@ -159,6 +159,26 @@ export class RoadmapRepository {
 
     const version = await this.requireVersion(tx, projectId, versionId);
 
+    // Порядок обратен ссылкам: сначала теги чекпоинтов этой версии,
+    // затем её выпуски, затем сами чекпоинты и версия. На всех ссылках
+    // `restrict`, и без уборки удаление упёрлось бы в целостность.
+    const checkpoints = await tx
+      .select({ id: roadmapCheckpoints.id })
+      .from(roadmapCheckpoints)
+      .where(eq(roadmapCheckpoints.versionId, versionId));
+
+    if (checkpoints.length > 0) {
+      await tx.delete(checkpointPlatforms).where(
+        inArray(
+          checkpointPlatforms.checkpointId,
+          checkpoints.map((checkpoint) => checkpoint.id),
+        ),
+      );
+    }
+
+    await tx
+      .delete(versionPlatformReleases)
+      .where(eq(versionPlatformReleases.versionId, versionId));
     await tx.delete(roadmapCheckpoints).where(eq(roadmapCheckpoints.versionId, versionId));
     await tx.delete(roadmapVersions).where(eq(roadmapVersions.id, versionId));
 
@@ -193,6 +213,10 @@ export class RoadmapRepository {
       })
       .returning();
 
+    if (input.platformIds) {
+      await this.replaceCheckpointPlatforms(tx, projectId, created!.id, input.platformIds);
+    }
+
     return created!;
   }
 
@@ -208,11 +232,21 @@ export class RoadmapRepository {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
     await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
 
+    // Теги — не колонка чекпоинта: без отделения поле уехало бы
+    // в `set()` несуществующей колонкой.
+    const { platformIds, ...fields } = input;
+
     const [updated] = await tx
       .update(roadmapCheckpoints)
-      .set({ ...input, updatedAt: new Date() })
+      .set({ ...fields, updatedAt: new Date() })
       .where(eq(roadmapCheckpoints.id, checkpointId))
       .returning();
+
+    // Поля нет — набор не трогать: ровно так переключается галочка
+    // «закрыт», и буквальная замена снесла бы теги при каждом щелчке.
+    if (platformIds) {
+      await this.replaceCheckpointPlatforms(tx, projectId, checkpointId, platformIds);
+    }
 
     return updated!;
   }
@@ -229,6 +263,7 @@ export class RoadmapRepository {
 
     const checkpoint = await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
 
+    await tx.delete(checkpointPlatforms).where(eq(checkpointPlatforms.checkpointId, checkpointId));
     await tx.delete(roadmapCheckpoints).where(eq(roadmapCheckpoints.id, checkpointId));
 
     return checkpoint;
@@ -317,6 +352,46 @@ export class RoadmapRepository {
       );
 
     return { platformName: platform.name, versionLabel: version.label };
+  }
+
+  /**
+   * Заменяет набор тегов чекпоинта целиком.
+   *
+   * Платформы обязаны принадлежать проекту чекпоинта: иначе субъект
+   * с записью в «Роадмап» вписал бы идентификатор чужого проекта, и
+   * уборка за удалением унесла бы строку оттуда.
+   */
+  private async replaceCheckpointPlatforms(
+    tx: Transaction,
+    projectId: string,
+    checkpointId: string,
+    platformIds: string[],
+  ): Promise<void> {
+    const unique = [...new Set(platformIds)];
+
+    if (unique.length > 0) {
+      const chosen = await tx
+        .select({ id: projectPlatforms.id })
+        .from(projectPlatforms)
+        .where(
+          and(
+            eq(projectPlatforms.projectId, projectId),
+            inArray(projectPlatforms.id, unique),
+          ),
+        );
+
+      if (chosen.length !== unique.length) {
+        throw new SectionNotVisibleError();
+      }
+    }
+
+    await tx.delete(checkpointPlatforms).where(eq(checkpointPlatforms.checkpointId, checkpointId));
+
+    if (unique.length > 0) {
+      await tx
+        .insert(checkpointPlatforms)
+        .values(unique.map((platformId) => ({ checkpointId, platformId })));
+    }
   }
 
   /** Токен действующей публичной ссылки либо `null`. */
