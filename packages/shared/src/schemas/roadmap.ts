@@ -1,12 +1,7 @@
 import { z } from 'zod';
 
 import { RoadmapVersionState } from '../enums';
-
-/** Дата-день без времени: план и факт релиза. */
-const dayDateSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ожидается дата ГГГГ-ММ-ДД')
-  .nullable();
+import { dayDateSchema } from './day-date';
 
 /** Адрес задачи во внешнем трекере. */
 const checkpointUrlSchema = z.string().trim().url().max(2000).nullable();
