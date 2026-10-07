@@ -3,14 +3,18 @@
 import type { ProjectUpdate } from '@cairn/shared';
 import { useState, type FormEvent } from 'react';
 
-import { TextField } from '../TextField';
-import { FIELD_LABELS } from './constants';
-import { LifecycleField } from './LifecycleField';
-import type { IProps, ProjectFormValues } from './types';
 import { FormError } from '../FormError';
+import { ProjectFields } from './ProjectFields';
+import type { IProps, ProjectFormValues } from './types';
 
 /** Форма паспорта проекта: создание и правка (спека 9.1). */
-export function ProjectForm({ initial, onSubmit, error, isSubmitting = false }: IProps) {
+export function ProjectForm({
+  initial,
+  onSubmit,
+  error,
+  isSubmitting = false,
+  platformsSlot,
+}: IProps) {
   const [values, setValues] = useState<ProjectFormValues>(initial);
 
   const canSubmit = values.name.trim().length > 0 && !isSubmitting;
@@ -38,40 +42,9 @@ export function ProjectForm({ initial, onSubmit, error, isSubmitting = false }: 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <TextField
-        id="name"
-        label={FIELD_LABELS.name}
-        value={values.name}
-        onChange={(value) => change('name', value)}
-      />
-      <TextField
-        id="purpose"
-        label={FIELD_LABELS.purpose}
-        value={values.purpose ?? ''}
-        onChange={(value) => change('purpose', value)}
-        multiline
-      />
-      <TextField
-        id="stack"
-        label={FIELD_LABELS.stack}
-        value={values.stack ?? ''}
-        onChange={(value) => change('stack', value)}
-      />
-      <TextField
-        id="repoUrl"
-        label={FIELD_LABELS.repoUrl}
-        value={values.repoUrl ?? ''}
-        onChange={(value) => change('repoUrl', value)}
-      />
-      <TextField
-        id="notes"
-        label={FIELD_LABELS.notes}
-        value={values.notes ?? ''}
-        onChange={(value) => change('notes', value)}
-        multiline
-      />
+      <ProjectFields values={values} onChange={change} />
 
-      <LifecycleField value={values.lifecycle} onChange={(value) => change('lifecycle', value)} />
+      {platformsSlot}
 
       <FormError message={error} />
 

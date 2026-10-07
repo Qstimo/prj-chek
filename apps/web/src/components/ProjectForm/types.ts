@@ -1,4 +1,5 @@
 import type { ProjectLifecycle, ProjectUpdate } from '@cairn/shared';
+import type { ReactNode } from 'react';
 
 /** Значения полей формы. */
 export interface ProjectFormValues {
@@ -25,4 +26,14 @@ export interface IProps {
   error?: string;
   /** Отправка в процессе. */
   isSubmitting?: boolean;
+  /**
+   * Поле платформ — слотом, а не вторым режимом формы.
+   *
+   * Форма держит значения в `useState(initial)` и с пропом не
+   * ресинхронизируется: рисуй она чипы из своего состояния, в режиме
+   * правки новая платформа не появилась бы до перемонтирования панели.
+   * Платформы собирает и отправляет родитель; `projectUpdateSchema`
+   * их и не принимает.
+   */
+  platformsSlot?: ReactNode;
 }

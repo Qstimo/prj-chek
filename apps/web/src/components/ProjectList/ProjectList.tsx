@@ -1,16 +1,14 @@
-import Link from 'next/link';
-
 import { ProjectCard } from '../ProjectCard';
 import type { IProps } from './types';
 
 /** Сводка: все доступные субъекту проекты (спека 9.1). */
-export function ProjectList({ projects, canCreate = false, indicators }: IProps) {
+export function ProjectList({ projects, createSlot, indicators }: IProps) {
   if (projects.length === 0) {
     // Суперадмину пустая система — не отказ в доступе, а приглашение начать.
-    return canCreate ? (
+    return createSlot ? (
       <div className="space-y-3">
         <p className="text-muted-foreground">Пока нет ни одного проекта.</p>
-        <CreateLink />
+        {createSlot}
       </div>
     ) : (
       <p className="text-muted-foreground">
@@ -21,7 +19,7 @@ export function ProjectList({ projects, canCreate = false, indicators }: IProps)
 
   return (
     <div className="space-y-4">
-      {canCreate && <CreateLink />}
+      {createSlot}
 
       <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {projects.map((project) => (
@@ -31,17 +29,5 @@ export function ProjectList({ projects, canCreate = false, indicators }: IProps)
         ))}
       </ul>
     </div>
-  );
-}
-
-/** Ссылка на экран создания проекта. */
-function CreateLink() {
-  return (
-    <Link
-      href="/projects/new"
-      className="inline-block rounded-md bg-primary px-4 py-2 text-primary-foreground"
-    >
-      Создать проект
-    </Link>
   );
 }

@@ -26,27 +26,33 @@ describe('ProjectList', () => {
     expect(screen.getByText(/доступ/i)).toBeInTheDocument();
   });
 
-  it('предлагает создать проект тому, кто вправе', () => {
-    render(<ProjectList projects={[project]} canCreate />);
-
-    expect(screen.getByRole('link', { name: 'Создать проект' })).toHaveAttribute(
-      'href',
-      '/projects/new',
+  it('показывает орган создания, когда он передан', () => {
+    // Слот, а не флаг: кнопка открывает панель, и список из-за этого
+    // не обязан становиться клиентским.
+    render(
+      <ProjectList
+        projects={[project]}
+        createSlot={<button type="button">Создать проект</button>}
+      />,
     );
+
+    expect(screen.getByRole('button', { name: 'Создать проект' })).toBeInTheDocument();
   });
 
-  it('не предлагает создание без права', () => {
+  it('без слота создание не предлагает', () => {
     render(<ProjectList projects={[project]} />);
 
-    expect(screen.queryByRole('link', { name: 'Создать проект' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Создать проект' })).not.toBeInTheDocument();
   });
 
   it('в пустой системе зовёт суперадмина завести первый проект', () => {
     // Иначе администратор в пустой системе решит, что ему не выдали доступ,
     // хотя выдавать его некому и незачем.
-    render(<ProjectList projects={[]} canCreate />);
+    render(
+      <ProjectList projects={[]} createSlot={<button type="button">Создать проект</button>} />,
+    );
 
-    expect(screen.getByRole('link', { name: 'Создать проект' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Создать проект' })).toBeInTheDocument();
     expect(screen.queryByText(/доступ к проектам выдаёт/i)).not.toBeInTheDocument();
   });
 

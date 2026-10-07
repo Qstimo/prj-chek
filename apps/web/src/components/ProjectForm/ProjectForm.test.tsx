@@ -68,4 +68,19 @@ describe('ProjectForm', () => {
 
     expect(screen.getByRole('button', { name: 'Сохранение…' })).toBeDisabled();
   });
+
+  it('показывает слот платформ, когда он передан', () => {
+    // Слот, а не второй режим формы: форма держит значения в useState и
+    // с пропом не ресинхронизируется, поэтому живость чипов решает
+    // родитель.
+    render(<ProjectForm initial={project} onSubmit={vi.fn()} platformsSlot={<p>чипы</p>} />);
+
+    expect(screen.getByText('чипы')).toBeInTheDocument();
+  });
+
+  it('без слота о платформах не знает', () => {
+    render(<ProjectForm initial={project} onSubmit={vi.fn()} />);
+
+    expect(screen.queryByText(/платформ/i)).not.toBeInTheDocument();
+  });
 });

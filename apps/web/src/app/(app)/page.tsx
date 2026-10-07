@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation';
 import { ApiError } from '@/api';
 import { apiServer } from '@/api/server';
 import { ProjectList } from '@/components/ProjectList';
+
+import { CreateProjectPanel } from './CreateProjectPanel';
 import { WarningsPanel, WarningTone } from '@/components/WarningsPanel';
 import { splitWarningsByUrgency } from '@/utils';
 
@@ -44,7 +46,7 @@ export default async function HomePage() {
       <ProjectList
         projects={projects}
         indicators={indicators}
-        canCreate={subject.isSuperadmin}
+        createSlot={subject.isSuperadmin ? <CreateProjectPanel /> : undefined}
       />
     </main>
   );
