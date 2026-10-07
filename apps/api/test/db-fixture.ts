@@ -1,6 +1,7 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { sql } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import type { PgTable } from 'drizzle-orm/pg-core';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
@@ -14,6 +15,13 @@ export interface TestDatabase {
   appDb: PostgresJsDatabase<typeof schema>;
   stop: () => Promise<void>;
   truncate: () => Promise<void>;
+  /**
+   * Все строки таблицы — для проверок уборки за удалением.
+   *
+   * Полными правами, а не ролью приложения: тест проверяет, что строк
+   * не осталось, и отказ в правах выглядел бы как пустая таблица.
+   */
+  rowsOf: <T extends PgTable>(table: T) => Promise<T['$inferSelect'][]>;
 }
 
 /**
@@ -51,6 +59,7 @@ export async function startTestDatabase(): Promise<TestDatabase> {
   return {
     db,
     appDb: drizzle(appClient, { schema }),
+    rowsOf: (table) => db.select().from(table),
     stop: async () => {
       await appClient.end();
       await ownerClient.end();
