@@ -1,18 +1,28 @@
-import { AccessLevel, EnvironmentKind, HealthState, Section, SubjectKind } from '@cairn/shared';
+import {
+  AccessLevel,
+  EnvironmentKind,
+  HealthState,
+  PlatformKind,
+  Section,
+  SubjectKind,
+} from '@cairn/shared';
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccessService } from '../access/access.service';
 import { DomainsRepository } from '../domains/domains.repository';
+import { PlatformsRepository } from '../platforms/platforms.repository';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import {
   domainStatuses,
   domains,
   environmentDomains,
+  environmentPlatforms,
   environments,
   grants,
+  projectPlatforms,
   projects,
   servers,
   subjects,
@@ -32,7 +42,13 @@ describe('репозиторий окружений', () => {
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
-    repository = new EnvironmentsRepository(testDb.db, new AccessService(testDb.db), new DomainsRepository(testDb.db));
+    const access = new AccessService(testDb.db);
+    repository = new EnvironmentsRepository(
+      testDb.db,
+      access,
+      new DomainsRepository(testDb.db),
+      new PlatformsRepository(testDb.db, access),
+    );
   });
 
   afterAll(async () => {
@@ -543,10 +559,12 @@ describe('репозиторий окружений', () => {
       // в транзакции, которая держит окружение.
       const domainsRepository = new DomainsRepository(testDb.db);
       const ensureRoot = vi.spyOn(domainsRepository, 'ensureRoot');
+      const countingAccess = new AccessService(testDb.db);
       const counting = new EnvironmentsRepository(
         testDb.db,
-        new AccessService(testDb.db),
+        countingAccess,
         domainsRepository,
+        new PlatformsRepository(testDb.db, countingAccess),
       );
 
       await testDb.db.transaction((tx) =>
@@ -729,6 +747,87 @@ describe('репозиторий окружений', () => {
           repository.removeDomain(admin(), tx, projectId, id, domain.id),
         ),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('платформы окружения', () => {
+    /** Платформа вставкой: репозиторий платформ потребовал бы «Инфо». */
+    async function createPlatform(
+      name: string,
+      kind = PlatformKind.Server,
+      position = 1,
+    ): Promise<string> {
+      const [created] = await testDb.db
+        .insert(projectPlatforms)
+        .values({ projectId, name, kind, position })
+        .returning();
+
+      return created!.id;
+    }
+
+    it('отдаёт в окружении то, что в нём развёрнуто', async () => {
+      const apiId = await createPlatform('API', PlatformKind.Server, 1);
+      const webId = await createPlatform('Веб', PlatformKind.Server, 2);
+      const environmentId = await createProd();
+      await grant(AccessLevel.Read);
+
+      // Порядок присланных идентификаторов обратный: платформы отдаются
+      // по своей позиции, а у связи порядка нет вовсе.
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, environmentId, { platformIds: [webId, apiId] }),
+      );
+
+      const [environment] = await repository.findForProject(member(), projectId);
+
+      expect(environment).toMatchObject({
+        platforms: [{ name: 'API' }, { name: 'Веб' }],
+      });
+    });
+
+    it('создаёт окружение с платформами', async () => {
+      // `platformIds` попадает в схему создания автоматически, а `create`
+      // вставляет поля как есть: без отдельного снятия поле уехало бы
+      // в Drizzle несуществующей колонкой.
+      const apiId = await createPlatform('API');
+
+      const created = await testDb.db.transaction((tx) =>
+        repository.create(admin(), tx, projectId, {
+          name: 'Прод',
+          kind: EnvironmentKind.Production,
+          platformIds: [apiId],
+        }),
+      );
+
+      expect(created.id).toBeDefined();
+      expect(await testDb.rowsOf(environmentPlatforms)).toHaveLength(1);
+    });
+
+    it('правка без поля платформ их не трогает', async () => {
+      const apiId = await createPlatform('API');
+      const environmentId = await createProd();
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, environmentId, { platformIds: [apiId] }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, environmentId, { notes: 'правка' }),
+      );
+
+      expect(await testDb.rowsOf(environmentPlatforms)).toHaveLength(1);
+    });
+
+    it('удаление окружения снимает его связи с платформами', async () => {
+      const apiId = await createPlatform('API');
+      const environmentId = await createProd();
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, environmentId, { platformIds: [apiId] }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.remove(admin(), tx, projectId, environmentId),
+      );
+
+      expect(await testDb.rowsOf(environmentPlatforms)).toHaveLength(0);
     });
   });
 });

@@ -34,7 +34,7 @@ const domains = ['example.com'];
 
 describe('проекция окружения', () => {
   it('на уровне метаданных показывает имя, вид и домены', () => {
-    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server);
+    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server, []);
 
     expect(projected).toEqual({
       id: row.id,
@@ -46,7 +46,7 @@ describe('проекция окружения', () => {
 
   it('на уровне метаданных не раскрывает машину вовсе', () => {
     // Домен виден каждому, кто откроет сайт; машина и её владелец — нет.
-    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server);
+    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server, []);
 
     expect('server' in projected).toBe(false);
     expect('notes' in projected).toBe(false);
@@ -58,6 +58,7 @@ describe('проекция окружения', () => {
       domains,
       AccessLevel.Read,
       server,
+      [],
     ) as EnvironmentDetail;
 
     expect(projected.server).toEqual({
@@ -78,6 +79,7 @@ describe('проекция окружения', () => {
       domains,
       AccessLevel.Read,
       server,
+      [],
     ) as EnvironmentDetail;
 
     expect(projected.server).not.toHaveProperty('notes');
@@ -90,6 +92,7 @@ describe('проекция окружения', () => {
       domains,
       AccessLevel.Read,
       null,
+      [],
     ) as EnvironmentDetail;
 
     expect(projected.server).toBeNull();
@@ -101,6 +104,7 @@ describe('проекция окружения', () => {
       ['stage.example.com'],
       AccessLevel.Read,
       server,
+      [],
     ) as EnvironmentDetail;
 
     expect(projected).not.toHaveProperty('host');
@@ -116,6 +120,7 @@ describe('проекция окружения', () => {
       domains,
       AccessLevel.Read,
       server,
+      [],
     ) as EnvironmentDetail;
 
     expect(projected.createdAt).toBe('2026-08-27T10:00:00.000Z');

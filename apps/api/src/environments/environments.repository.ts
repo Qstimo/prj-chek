@@ -7,6 +7,7 @@ import {
   type EnvironmentDomainCreate,
   type EnvironmentMetadata,
   type EnvironmentUpdate,
+  type PlatformRef,
 } from '@cairn/shared';
 import {
   ConflictException,
@@ -25,13 +26,16 @@ import type { Database, Executor, Transaction } from '../db/db.types';
 import {
   domainStatuses,
   environmentDomains,
+  environmentPlatforms,
   environments,
+  projectPlatforms,
   servers,
   variables,
   type Environment,
   type Server,
 } from '../db/schema';
 import { DomainsRepository } from '../domains/domains.repository';
+import { PlatformsRepository } from '../platforms/platforms.repository';
 import { environmentProjection } from './environment.projection';
 
 /**
@@ -49,6 +53,7 @@ export class EnvironmentsRepository {
     @Inject(DATABASE) private readonly db: Database,
     private readonly access: AccessService,
     private readonly domainsRepository: DomainsRepository,
+    private readonly platformsRepository: PlatformsRepository,
   ) {}
 
   /**
@@ -79,6 +84,7 @@ export class EnvironmentsRepository {
 
     const domains = await this.domainsOf(rows.map((row) => row.id));
     const machines = await this.serversOf(rows);
+    const platforms = await this.platformsOf(rows.map((row) => row.id));
 
     return rows.map((row) =>
       environmentProjection(
@@ -86,6 +92,7 @@ export class EnvironmentsRepository {
         domains.get(row.id) ?? [],
         level,
         row.serverId ? (machines.get(row.serverId) ?? null) : null,
+        platforms.get(row.id) ?? [],
       ),
     );
   }
@@ -106,12 +113,14 @@ export class EnvironmentsRepository {
     const environment = await this.requireEnvironment(this.db, projectId, environmentId);
     const domains = await this.domainsOf([environmentId]);
     const machines = await this.serversOf([environment]);
+    const platforms = await this.platformsOf([environmentId]);
 
     return environmentProjection(
       environment,
       domains.get(environmentId) ?? [],
       level,
       environment.serverId ? (machines.get(environment.serverId) ?? null) : null,
+      platforms.get(environmentId) ?? [],
     );
   }
 
@@ -132,7 +141,10 @@ export class EnvironmentsRepository {
 
     requireServerAssignmentAllowed(subject, input);
 
-    const { domains, ...fields } = input;
+    // `platformIds` наследуется схемой создания от схемы правки и
+    // колонкой не является: Drizzle пропустил бы его молча, и связи
+    // не появились бы незаметно.
+    const { domains, platformIds, ...fields } = input;
 
     const [created] = await tx
       .insert(environments)
@@ -140,6 +152,10 @@ export class EnvironmentsRepository {
       .returning();
 
     await this.replaceDomains(tx, created!.id, domains ?? []);
+
+    if (platformIds) {
+      await this.platformsRepository.setEnvironmentPlatforms(tx, created!.id, platformIds);
+    }
 
     return created!;
   }
@@ -168,7 +184,7 @@ export class EnvironmentsRepository {
     await this.requireEnvironment(tx, projectId, environmentId);
     requireServerAssignmentAllowed(subject, input);
 
-    const { domains, ...fields } = input;
+    const { domains, platformIds, ...fields } = input;
 
     const [updated] = await tx
       .update(environments)
@@ -178,6 +194,12 @@ export class EnvironmentsRepository {
 
     if (domains) {
       await this.replaceDomains(tx, environmentId, domains);
+    }
+
+    // Поля нет — набор не трогать: правка одной заметки не должна
+    // снимать галочки платформ.
+    if (platformIds) {
+      await this.platformsRepository.setEnvironmentPlatforms(tx, environmentId, platformIds);
     }
 
     return updated!;
@@ -235,6 +257,11 @@ export class EnvironmentsRepository {
     }
 
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
+    // Связи с платформами — явной строкой, как и домены: ссылка стоит
+    // на `restrict`, и без уборки удаление упёрлось бы в целостность.
+    await tx
+      .delete(environmentPlatforms)
+      .where(eq(environmentPlatforms.environmentId, environmentId));
     await tx.delete(environments).where(eq(environments.id, environmentId));
 
     return environment;
@@ -371,6 +398,41 @@ export class EnvironmentsRepository {
 
     for (const row of rows) {
       grouped.set(row.environmentId, [...(grouped.get(row.environmentId) ?? []), row.name]);
+    }
+
+    return grouped;
+  }
+
+  /**
+   * Платформы окружений одним запросом.
+   *
+   * Порядок — по `position` платформы: у самой связи порядка нет, и без
+   * сортировки список прыгал бы между запросами.
+   */
+  private async platformsOf(environmentIds: string[]): Promise<Map<string, PlatformRef[]>> {
+    if (environmentIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      .select({
+        environmentId: environmentPlatforms.environmentId,
+        id: projectPlatforms.id,
+        kind: projectPlatforms.kind,
+        name: projectPlatforms.name,
+      })
+      .from(environmentPlatforms)
+      .innerJoin(projectPlatforms, eq(projectPlatforms.id, environmentPlatforms.platformId))
+      .where(inArray(environmentPlatforms.environmentId, environmentIds))
+      .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt));
+
+    const grouped = new Map<string, PlatformRef[]>();
+
+    for (const row of rows) {
+      grouped.set(row.environmentId, [
+        ...(grouped.get(row.environmentId) ?? []),
+        { id: row.id, kind: row.kind, name: row.name },
+      ]);
     }
 
     return grouped;

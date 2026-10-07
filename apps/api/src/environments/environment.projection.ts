@@ -2,6 +2,7 @@ import {
   AccessLevel,
   type EnvironmentDetail,
   type EnvironmentMetadata,
+  type PlatformRef,
 } from '@cairn/shared';
 
 import { projectByLevel } from '../access/projection';
@@ -23,6 +24,14 @@ export function environmentProjection(
   domains: string[],
   level: AccessLevel,
   server: Server | null,
+  /**
+   * Платформы, развёрнутые в окружении.
+   *
+   * Имя платформы принадлежит паспорту проекта, но раскрывается здесь
+   * намеренно — в той секции, где упомянуто. Тот же приём, что у имени
+   * окружения в переменных (дизайн 4.2 и 9); это не утечка проекции.
+   */
+  platforms: PlatformRef[],
 ): EnvironmentMetadata | EnvironmentDetail {
   return projectByLevel(
     level,
@@ -46,6 +55,7 @@ export function environmentProjection(
             specs: server.specs,
           }
         : null,
+      platforms,
       createdAt: environment.createdAt.toISOString(),
       updatedAt: environment.updatedAt.toISOString(),
     }),
