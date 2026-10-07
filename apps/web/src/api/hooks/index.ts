@@ -13,6 +13,7 @@ export * from './useMutationTotpSetup';
 export * from './useMutationUpdateProject';
 export * from './useMutationUserAction';
 export * from './useMutationVariable';
+export * from './usePlatforms';
 export * from './usePublicLink';
 export * from './useQueryAudit';
 export * from './useQueryChronicle';
