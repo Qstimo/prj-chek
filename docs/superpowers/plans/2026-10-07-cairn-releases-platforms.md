@@ -22,15 +22,66 @@ TDD: сначала падающий тест, затем реализация. 
 | Точечно API | `cd apps/api && npx vitest run src/путь` |
 | Точечно веб | `cd apps/web && npx vitest run src/путь` |
 | Точечно контракт | `cd packages/shared && npx vitest run` |
-| Типы | `pnpm typecheck` |
+| Типы | `pnpm typecheck` **из корня репозитория** |
 | Миграция | `cd apps/api && npx drizzle-kit generate --name=<имя>` |
 | Миграция вручную | `cd apps/api && npx drizzle-kit generate --custom --name=<имя>` |
 
 Соглашения: компонент до 100 строк в своей директории с `index.ts`, пропсы — `IProps` в `types.ts`, TSDoc на русском, `any` запрещён, значения из перечней — `enum`, а не union.
 
+**`pnpm typecheck` только из корня.** В `apps/web` нет пути на `@cairn/shared`, а пакет объявляет `types: ./dist/index.d.ts` — локальный прогон сверит веб со **старым собранным** контрактом и промолчит о расхождениях. Корневой скрипт начинается со сборки `@cairn/shared`, поэтому проверяет то, что нужно.
+
 **Осторожно с `pnpm --filter ... test -- --run <путь>`**: двойное `--` съедает фильтр, и запускается весь набор, включая Testcontainers. Точечно — через `npx vitest run` из каталога приложения.
 
-**Порядок чанков обязателен**: Chunk 1 ломает типы в API и вебе, и `pnpm typecheck` станет зелёным только к концу Chunk 6. Это ожидаемо; внутри чанков тесты зелёные на каждом коммите.
+**Пути с `(app)` и `[id]` в кавычках работают.** Vitest сравнивает фильтр подстрокой, а не регуляркой; кавычки нужны только чтобы их не развернул bash.
+
+**Порядок чанков обязателен**: Chunk 1 ломает типы в API и вебе, и `pnpm typecheck` станет зелёным только к концу Chunk 6. Это ожидаемо; тесты внутри каждого чанка зелёные на каждом коммите.
+
+### Обвязка тестов
+
+Это главный источник ошибок при исполнении: в проекте пять разных обвязок, и писать тест не в той — значит получить несобирающийся файл. Образцы, на которые надо смотреть, и чего в проекте **нет**.
+
+**Интеграционный тест репозитория API** (`roadmap.repository.test.ts`, `environments.repository.test.ts`, `projects.repository.test.ts`):
+
+```ts
+let testDb: TestDatabase;            // из '../../test/db-fixture'
+beforeAll(async () => { testDb = await startTestDatabase();
+  repository = new RoadmapRepository(testDb.db, new AccessService(testDb.db)); });
+afterAll(async () => { await testDb.stop(); });
+beforeEach(async () => { await testDb.truncate(); /* субъекты, пользователи, проекты — вставками */ });
+
+const member = (): RequestSubject => ({ id: subjectId, kind: SubjectKind.User, label: 'user@cairn.local', isSuperadmin: false, isRevoked: false });
+const admin = (): RequestSubject => ({ id: adminSubjectId, …, isSuperadmin: true, isRevoked: false });
+async function grant(level: AccessLevel): Promise<void> { /* insert в grants */ }
+```
+
+Подключение — `testDb.db`, субъекты — фабрики `member()` / `admin()`, выдача — `await grant(AccessLevel.Write)`. Переменных `db`, `reader`, `writer`, `stranger`, `superadmin` в проекте **нет** — не используй их. Хелпера `rowsOf` тоже нет: он заводится в Task 2.2.
+
+**Интеграционный тест службы API** (`roadmap.service.test.ts`, `projects.service.test.ts`): службы собираются **позиционно**, с настоящим `new AuditService()` на той же базе; журнал читается так:
+
+```ts
+async function entriesOf(action: AuditAction) {
+  return testDb.db.select().from(auditLog).where(eq(auditLog.action, action));
+}
+```
+
+`audit.record` как `vi.fn()` в этих файлах **не существует** — `expect(audit.record).toHaveBeenCalledWith(...)` писать нельзя. Добавление зависимости в конструктор службы ломает компиляцию её теста, поэтому каждая такая правка названа в плане отдельным файлом.
+
+**Тест сборки приложения** (`app.module.test.ts`): `Test.createTestingModule({ imports: [AppModule] }).compile()`, затем `moduleRef.get(Службу)`. Хелпера `modulesOf` нет ни в проекте, ни в Nest.
+
+**Тест компонента веба** (`ProjectForm.test.tsx`, `EnvironmentForm.test.tsx`): чистый `render` без провайдеров, данные пропами. Фикстуры называются как в файле: `project` в `ProjectForm.test.tsx`, `initial` в `EnvironmentForm.test.tsx`, `roadmap` в `PublicRoadmapView.test.tsx`.
+
+**Тест экрана веба** (`RoadmapScreen.test.tsx`): `vi.mock('@/api/hooks')` целиком плюс локальные хелперы `query(data)` и `mutation()`; wrapper'а нет. **Мокать нужно все хуки, которые зовёт экран** — автомок вернёт `undefined`, и экран упадёт на `isPending`.
+
+**Тест хука веба** (`useMutationRoadmap.test.tsx`): локальный `wrapper` с `QueryClientProvider` и `vi.stubGlobal('fetch', …)` в каждом тесте. Без заглушки `fetch` мутация не дойдёт до `onSuccess`, и проверять инвалидацию будет нечего; саму инвалидацию видно через `vi.spyOn(client, 'invalidateQueries')`.
+
+**`useRouter` в тестах.** Ни один из десяти файлов с `useRouter` сейчас не покрыт тестом, а `useRouter()` из `next/navigation` в jsdom без контекста роутера бросает прямо на рендере. Тесты панелей проекта — первые такие, и каждому нужен:
+
+```ts
+const push = vi.fn();
+const refresh = vi.fn();
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
+```
 
 ### Структура файлов
 
@@ -40,28 +91,46 @@ TDD: сначала падающий тест, затем реализация. 
 | `packages/shared/src/schemas/day-date.ts` | дата-день, общая для роадмапа и выпусков |
 | `packages/shared/src/schemas/platform.ts` | платформа, выпуск, сводка, допустимые состояния по виду |
 | `packages/shared/src/schemas/roadmap.ts` | сводка в ответе, выпуски у версии, теги у чекпоинта |
-| `packages/shared/src/schemas/project.ts` | платформы при создании проекта |
+| `packages/shared/src/schemas/project.ts` | платформы при создании, строгость правки |
 | `packages/shared/src/schemas/environment.ts` | платформы окружения |
 | `apps/api/src/db/schema/platforms.ts` | четыре таблицы и два перечня базы |
+| `apps/api/src/db/schema/index.ts` | barrel-экспорт новых таблиц |
+| `apps/api/src/db/schema/invariants.test.ts` | новые таблицы в `ALL_TABLES` |
+| `apps/api/test/db-fixture.ts` | хелпер `rowsOf`, новые таблицы в `TRUNCATE` |
+| `apps/api/test/environments-privileges.test.ts` | проверка миграции прав на новые таблицы |
 | `apps/api/drizzle/0025_release_platforms.sql` | таблицы |
 | `apps/api/drizzle/0026_release_platform_privileges.sql` | права роли `cairn_app` |
-| `apps/api/src/platforms/platforms.repository.ts` | платформы проекта: права, уникальность, уборка |
+| `apps/api/src/platforms/platforms.repository.ts` | платформы проекта: права, принадлежность, уникальность, уборка |
 | `apps/api/src/platforms/platforms.service.ts` | транзакция и журнал |
 | `apps/api/src/platforms/platforms.controller.ts` | четыре ручки секции «Инфо» |
 | `apps/api/src/platforms/platforms.module.ts` | сборка модуля |
+| `apps/api/src/audit/audit.types.ts` | пять новых действий |
+| `apps/api/src/app.module.ts` | подключение модуля платформ |
+| `apps/api/src/projects/{projects.repository,projects.service}.ts` | платформы вместе с проектом |
+| `apps/api/src/environments/{environments.repository,environment.projection}.ts` | связи окружения с платформами |
 | `apps/api/src/roadmap/release.summary.ts` | правило сводки: что в релизе, что в пути |
 | `apps/api/src/roadmap/roadmap.projection.ts` | выпуски у версии, дата версии из выпусков |
 | `apps/api/src/roadmap/roadmap.repository.ts` | постановка и снятие выпуска, теги, уборка |
-| `apps/api/src/roadmap/roadmap.controller.ts` | `PUT`/`DELETE` выпуска |
-| `apps/api/src/environments/environments.repository.ts` | связи окружения с платформами |
+| `apps/api/src/roadmap/{roadmap.service,roadmap.controller}.ts` | ручка выпуска и журнал |
+| `apps/api/src/agents/mcp-tools.ts` | описание `get_roadmap` упоминает выпуски |
 | `apps/web/src/components/Drawer/{types,constants}.ts` | третья ширина — половина экрана |
 | `apps/web/src/api/hooks/usePlatforms.ts` | запрос и мутации платформ |
 | `apps/web/src/api/hooks/useMutationRelease.ts` | постановка и снятие выпуска |
-| `apps/web/src/components/ProjectForm/PlatformsField.tsx` | чипы платформ и подсказки |
+| `apps/web/src/components/PlatformChips/` | чипы платформ только на чтение |
+| `apps/web/src/components/PlatformsField/` | чипы с крестиком, подсказки, своя платформа |
+| `apps/web/src/components/ProjectForm/ProjectForm.tsx` | слот платформ |
 | `apps/web/src/app/(app)/CreateProjectPanel.tsx` | создание проекта в панели |
 | `apps/web/src/app/(app)/projects/[id]/EditProjectPanel.tsx` | правка проекта в панели |
+| `apps/web/src/components/ProjectList/ProjectList.tsx` | слот создания вместо ссылки |
+| `apps/web/src/components/ProjectSections/ProjectSections.tsx` | платформы в паспорте |
+| `apps/web/src/components/EnvironmentForm/PlatformsCheckboxes.tsx` | «что здесь развёрнуто» |
+| `apps/web/src/app/(app)/projects/[id]/infrastructure/{Create,Edit}EnvironmentPanel.tsx` | форма окружения в панели |
 | `apps/web/src/components/ReleaseSummary/` | сводка релизов |
-| `apps/web/src/components/VersionDrawer/ReleaseList.tsx` | выпуски версии в панели |
+| `apps/web/src/components/VersionDrawer/{ReleaseList,ReleaseRow}.tsx` | выпуски версии в панели |
+| `apps/web/src/components/CheckpointForm/CheckpointForm.tsx` | создание **и правка** чекпоинта |
+| `apps/web/src/components/VersionDrawer/{CheckpointList,CheckpointItem}.tsx` | теги и кнопка правки |
+
+Удаляются: `apps/web/src/app/(app)/projects/new/`, `apps/web/src/app/(app)/projects/[id]/edit/`.
 
 ---
 
@@ -73,13 +142,19 @@ TDD: сначала падающий тест, затем реализация. 
 - Modify: `packages/shared/src/enums.ts`
 - Modify: `packages/shared/src/enums.test.ts`
 
-- [ ] **Step 1: Падающий тест**
+- [ ] **Step 1: Падающие тесты**
 
-В `enums.test.ts`:
+В `enums.test.ts` дописать в импорт (строка 3) `PlatformKind` и `PlatformReleaseState`, затем добавить набор:
 
 ```ts
-describe('PlatformReleaseState', () => {
-  it('не повторяет состояний версии', () => {
+describe('платформы', () => {
+  it('вид отвечает на два вопроса поведения, а не перечисляет магазины', () => {
+    // Магазинов много и новые появляются каждый год: значением перечня
+    // их не удержать, поэтому имя платформы свободное.
+    expect(Object.values(PlatformKind)).toEqual(['server', 'store', 'other']);
+  });
+
+  it('состояние выпуска не повторяет состояний версии', () => {
     // «Запланирована» и «в работе» — это состояние версии. Строка выпуска
     // с таким значением не сообщала бы ничего нового, и её отсутствие
     // как раз и означает «платформа идёт вместе с версией».
@@ -95,7 +170,7 @@ describe('PlatformReleaseState', () => {
 - [ ] **Step 2: Запустить, убедиться что падает**
 
 Run: `cd packages/shared && npx vitest run src/enums.test.ts`
-Expected: FAIL — `PlatformReleaseState` не определён.
+Expected: FAIL на этапе разбора файла — `PlatformKind` не экспортируется из `./enums`.
 
 - [ ] **Step 3: Реализация**
 
@@ -161,7 +236,7 @@ git commit -m "Назвать виды платформ и состояния в
 - Modify: `packages/shared/src/schemas/roadmap.ts`
 - Modify: `packages/shared/src/index.ts`
 
-- [ ] **Step 1: Падающий тест**
+- [ ] **Step 1: Падающие тесты**
 
 `packages/shared/src/schemas/platform.test.ts`:
 
@@ -171,10 +246,14 @@ import { describe, expect, it } from 'vitest';
 import { PlatformKind, PlatformReleaseState } from '../enums';
 import {
   platformCreateSchema,
+  platformIdsSchema,
   platformReleaseSetSchema,
+  platformUpdateSchema,
   releaseStatesFor,
   releaseSummaryRowSchema,
 } from './platform';
+
+const PLATFORM_ID = '00000000-0000-0000-0000-000000000001';
 
 describe('platformCreateSchema', () => {
   it('обрезает имя и отвергает лишние поля', () => {
@@ -186,6 +265,29 @@ describe('platformCreateSchema', () => {
     expect(() =>
       platformCreateSchema.parse({ kind: PlatformKind.Store, name: 'RuStore', position: 1 }),
     ).toThrow();
+  });
+});
+
+describe('platformUpdateSchema', () => {
+  it('правит только имя', () => {
+    // Вид несёт два инварианта, проверяемых при записи выпуска и при
+    // привязке к окружению; смена вида прошла бы мимо обеих проверок.
+    // Позиция не правится без перенумерации соседей — порядок сводки
+    // стал бы недетерминированным.
+    expect(platformUpdateSchema.parse({ name: 'Веб-админка' }).name).toBe('Веб-админка');
+
+    expect(() => platformUpdateSchema.parse({ kind: PlatformKind.Server })).toThrow();
+    expect(() => platformUpdateSchema.parse({ position: 1 })).toThrow();
+  });
+});
+
+describe('platformIdsSchema', () => {
+  it('без повторов и не длиннее двадцати', () => {
+    expect(() => platformIdsSchema.parse([PLATFORM_ID, PLATFORM_ID])).toThrow();
+    expect(() =>
+      platformIdsSchema.parse(Array.from({ length: 21 }, () => PLATFORM_ID)),
+    ).toThrow();
+    expect(platformIdsSchema.parse([])).toEqual([]);
   });
 });
 
@@ -213,24 +315,23 @@ describe('releaseStatesFor', () => {
 });
 
 describe('platformReleaseSetSchema', () => {
-  it('принимает состояние без даты', () => {
+  it('принимает состояние без даты и отвергает лишнее', () => {
     // «Вышла, дата неизвестна» — честное состояние, как у версий,
     // оставшихся без фактической даты после прошлой миграции.
     expect(platformReleaseSetSchema.parse({ state: PlatformReleaseState.Released })).toEqual({
       state: PlatformReleaseState.Released,
     });
+
+    expect(() =>
+      platformReleaseSetSchema.parse({ state: PlatformReleaseState.Released, platformId: PLATFORM_ID }),
+    ).toThrow();
   });
 });
 
 describe('releaseSummaryRowSchema', () => {
   it('описывает платформу без релизов', () => {
     const row = releaseSummaryRowSchema.parse({
-      platform: {
-        id: '00000000-0000-0000-0000-000000000001',
-        kind: PlatformKind.Store,
-        name: 'RuStore',
-        position: 3,
-      },
+      platform: { id: PLATFORM_ID, kind: PlatformKind.Store, name: 'RuStore', position: 3 },
       released: null,
       pending: [],
     });
@@ -256,7 +357,8 @@ import { z } from 'zod';
  * Дата-день без времени: план, факт релиза, выход на платформе.
  *
  * Общая схема, а не копия в каждом файле: иначе формат неизбежно
- * разошёлся бы между версией и её выпусками.
+ * разошёлся бы между версией и её выпусками. `isoDateSchema`
+ * в `server.ts` сюда не сводится — это отдельная работа.
  */
 export const dayDateSchema = z
   .string()
@@ -272,7 +374,14 @@ import { z } from 'zod';
 import { PlatformKind, PlatformReleaseState } from '../enums';
 import { dayDateSchema } from './day-date';
 
-/** Имя платформы: своё в каждом проекте («Веб-админка», «RuStore»). */
+/**
+ * Имя платформы: своё в каждом проекте («Веб-админка», «RuStore»).
+ *
+ * Регистр не нормализуется: уникальность `(project_id, name)`
+ * регистрозависима, и «API» с «api» пройдут обеими записями. Имя —
+ * то, что человек видит в сводке, и приводить его к нижнему регистру
+ * значило бы показывать «app store».
+ */
 const platformNameSchema = z.string().trim().min(1).max(100);
 
 /**
@@ -300,14 +409,33 @@ export const platformCreateSchema = z
   .object({ kind: z.nativeEnum(PlatformKind), name: platformNameSchema })
   .strict();
 
-/** Правка платформы, включая место в порядке. */
-export const platformUpdateSchema = z
-  .object({
-    kind: z.nativeEnum(PlatformKind).optional(),
-    name: platformNameSchema.optional(),
-    position: z.number().int().positive().optional(),
-  })
-  .strict();
+/**
+ * Правка платформы: только имя.
+ *
+ * Вида здесь нет намеренно. Он несёт два инварианта — «у магазина бывает
+ * модерация» и «в окружении живёт только наше», — и оба проверяются при
+ * записи выпуска и при привязке к окружению. Смена вида прошла бы мимо
+ * обеих проверок и оставила бы «на модерации» у нашей машины либо стор
+ * в окружении. Сменить вид — удалить платформу и завести заново.
+ *
+ * Позиции нет по той же причине, по которой переупорядочивание вне
+ * объёма: без перенумерации соседей две платформы встали бы на одно
+ * место, и порядок сводки стал бы недетерминированным.
+ */
+export const platformUpdateSchema = z.object({ name: platformNameSchema }).strict();
+
+/**
+ * Набор платформ: без повторов, правится целиком.
+ *
+ * Один на всех, кто его принимает, — теги чекпоинта и платформы
+ * окружения: два почти одинаковых определения разошлись бы ограничениями.
+ * Отсутствие поля и пустой массив различаются по смыслу: поля нет — набор
+ * не трогать, пустой — снять все.
+ */
+export const platformIdsSchema = z
+  .array(z.string().uuid())
+  .max(20)
+  .refine((ids) => new Set(ids).size === ids.length, 'Платформы повторяются');
 
 /** Выпуск версии на платформе. */
 export const platformReleaseSchema = z.object({
@@ -322,17 +450,6 @@ export const platformReleaseSchema = z.object({
   buildLabel: z.string().nullable(),
 });
 
-/**
- * Набор платформ: без повторов, правится целиком.
- *
- * Один на всех, кто его принимает, — теги чекпоинта и платформы
- * окружения: два почти одинаковых определения разошлись бы ограничениями.
- */
-export const platformIdsSchema = z
-  .array(z.string().uuid())
-  .max(20)
-  .refine((ids) => new Set(ids).size === ids.length, 'Платформы повторяются');
-
 /** Постановка выпуска: состояние обязательно, остальное дополняется позже. */
 export const platformReleaseSetSchema = z
   .object({
@@ -342,7 +459,12 @@ export const platformReleaseSetSchema = z
   })
   .strict();
 
-/** Выпуск в сводке: на какую версию он ссылается. */
+/**
+ * Выпуск в сводке: на какую версию он ссылается.
+ *
+ * `date` у того, что в пути, пуста: даты выхода у отправленного на
+ * модерацию ещё нет.
+ */
 export const releaseRefSchema = z.object({
   versionId: z.string().uuid(),
   versionLabel: z.string(),
@@ -360,6 +482,11 @@ export const releasePendingSchema = releaseRefSchema.extend({
  *
  * Сводка смотрит вперёд от текущего релиза: отклонённая полгода назад
  * версия, которую уже обогнали, в ней не висит.
+ *
+ * `platform` — полная схема, а не ссылка: экрану нужен `kind` (скрыть
+ * модерацию у серверной платформы), а панели версии — весь список
+ * платформ проекта, и сводка оказывается единственным местом, откуда
+ * роадмап его берёт, не обращаясь к «Инфо».
  */
 export const releaseSummaryRowSchema = z.object({
   platform: platformSchema,
@@ -415,18 +542,18 @@ export type ReleasePending = z.infer<typeof releasePendingSchema>;
 export type ReleaseSummaryRow = z.infer<typeof releaseSummaryRowSchema>;
 ```
 
-В `roadmap.ts` убрать собственное определение `dayDateSchema` и импортировать общее:
+В `roadmap.ts` удалить собственный `const dayDateSchema` (строка 6) и импортировать общий:
 
 ```ts
 import { dayDateSchema } from './day-date';
 ```
 
-В `packages/shared/src/index.ts` добавить экспорты `./schemas/platform` и `./schemas/day-date` рядом с остальными (порядок — как в файле, по алфавиту).
+В `packages/shared/src/index.ts` добавить две строки по алфавиту: `export * from './schemas/day-date';` после `chronicle`, `export * from './schemas/platform';` после `intake`.
 
 - [ ] **Step 4: Запустить**
 
 Run: `cd packages/shared && npx vitest run`
-Expected: PASS, включая существующие тесты роадмапа — формат даты не изменился.
+Expected: PASS, включая существующие тесты роадмапа — формат даты не изменился, а `dayDateSchema` был непубличным и внешних импортёров не имел.
 
 - [ ] **Step 5: Коммит**
 
@@ -441,9 +568,15 @@ git commit -m "Описать платформу, выпуск и сводку �
 - Modify: `packages/shared/src/schemas/roadmap.ts`
 - Modify: `packages/shared/src/schemas/roadmap.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [ ] **Step 1: Падающие тесты и правка существующих фикстур**
 
-В `roadmap.test.ts`:
+Сначала **дополнить существующие фикстуры** — иначе прогон следующего шага упадёт не там, где нужно:
+
+- в импорт файла добавить `publicCheckpointSchema`, `roadmapCheckpointUpdateSchema`, `roadmapResponseSchema`;
+- в фикстуру `checkpoint` (строки 93–98) добавить `platformIds: []`;
+- в оба вызова `publicRoadmapSchema.parse` добавить `summary: []`, а в их версии — `releases: []`.
+
+Затем новые тесты:
 
 ```ts
 it('чекпоинт несёт теги платформ, а публичный — без ссылки', () => {
@@ -461,9 +594,14 @@ it('чекпоинт несёт теги платформ, а публичный
   expect(() => publicCheckpointSchema.parse({ ...fields, url: 'https://tracker/1' })).toThrow();
 });
 
-it('правка чекпоинта отвергает повторяющиеся теги', () => {
+it('правка чекпоинта принимает набор тегов и отвергает повторы', () => {
   const platformId = '00000000-0000-0000-0000-000000000002';
 
+  // Положительный случай обязателен: схема и так `.strict()`, и без него
+  // тест прошёл бы на неизвестном ключе, а не на проверке повторов.
+  expect(roadmapCheckpointUpdateSchema.parse({ platformIds: [platformId] }).platformIds).toEqual([
+    platformId,
+  ]);
   expect(() =>
     roadmapCheckpointUpdateSchema.parse({ platformIds: [platformId, platformId] }),
   ).toThrow();
@@ -483,41 +621,42 @@ it('ответ роадмапа несёт сводку релизов', () => {
 - [ ] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd packages/shared && npx vitest run src/schemas/roadmap.test.ts`
-Expected: FAIL — `platformIds` в разобранном объекте отсутствует, `summary` тоже.
+Expected: FAIL. Первый тест падает на строгой публичной схеме, которая пока не знает `platformIds`; второй — на том же (`platformIds` неизвестен строгой схеме правки); третий — на отсутствии `summary`; дополненные фикстуры — на неизвестных ключах `summary` и `releases`.
 
 - [ ] **Step 3: Реализация**
 
-В `roadmap.ts`:
+В `roadmap.ts` добавить импорт и набор тегов:
 
 ```ts
 import { platformIdsSchema, platformReleaseSchema, releaseSummaryRowSchema } from './platform';
 ```
 
-- в `roadmapCheckpointSchema` добавить `platformIds: z.array(z.string().uuid())`;
-- в `roadmapCheckpointCreateSchema` и `roadmapCheckpointUpdateSchema` добавить
-  `platformIds: platformIdsSchema.optional()`;
-- в `roadmapVersionDetailSchema` добавить `releases: z.array(platformReleaseSchema)`
-  (уровень чтения: это содержимое версии, как и чекпоинты);
-- в `publicVersionSchema` добавить то же поле — публичная панель версии
-  показывает тот же блок;
-- в `roadmapResponseSchema` и `publicRoadmapSchema` добавить
-  `summary: z.array(releaseSummaryRowSchema)`.
+Затем:
 
-TSDoc к `platformIds` в чекпоинте:
+- в `roadmapCheckpointSchema` — `platformIds: z.array(z.string().uuid())` с TSDoc:
 
 ```ts
   /**
    * Платформы, на которые едет результат. Необязательно и больше одной.
    *
-   * Набор присылается целиком, а не по одному: он правится целиком в одной
-   * форме чекпоинта, и затирать здесь нечего.
+   * Набор присылается целиком: он правится целиком в одной форме
+   * чекпоинта. Отсутствие поля в правке означает «не трогать», пустой
+   * массив — «снять все»; иначе переключение галочки «закрыт» снесло бы
+   * теги.
    */
 ```
+
+- в `roadmapCheckpointCreateSchema` и `roadmapCheckpointUpdateSchema` — `platformIds: platformIdsSchema.optional()`;
+- в `roadmapVersionDetailSchema` — `releases: z.array(platformReleaseSchema)`;
+- в `publicVersionSchema` — то же поле: публичная панель версии показывает тот же блок (дизайн 12.5);
+- в `roadmapResponseSchema` и `publicRoadmapSchema` — `summary: z.array(releaseSummaryRowSchema)`.
+
+**Осторожно с union.** `roadmapResponseSchema.versions` — это `z.union([detail, metadata])`. Новое обязательное `releases` в detail-ветке создаёт путь тихой деградации: проекция уровня чтения, забывшая `releases`, молча провалится в ветку метаданных и **потеряет чекпоинты** вместо ошибки. Тест на это стоит в Chunk 4 (Task 4.2).
 
 - [ ] **Step 4: Запустить**
 
 Run: `cd packages/shared && npx vitest run`
-Expected: PASS. Существующие тесты роадмапа, разбирающие чекпоинт, придётся дополнить `platformIds: []`, а ответ — `summary: []`.
+Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
@@ -532,10 +671,11 @@ git commit -m "Включить выпуски и сводку в контрак
 - Modify: `packages/shared/src/schemas/project.ts`
 - Modify: `packages/shared/src/schemas/environment.ts`
 - Modify: `packages/shared/src/schemas/environment.test.ts`
+- Create: `packages/shared/src/schemas/project.test.ts` (файла ещё нет)
 
-- [ ] **Step 1: Падающий тест**
+- [ ] **Step 1: Падающие тесты и правка фикстуры**
 
-В `environment.test.ts`:
+В `environment.test.ts` **сначала** дополнить фикстуру `BASE` (строки 166–175) полем `platforms: []` — она идёт в `environmentDetailSchema.parse` в двух тестах, и новое обязательное поле их уронит. Затем:
 
 ```ts
 it('окружение принимает платформы, которые в нём живут', () => {
@@ -545,23 +685,41 @@ it('окружение принимает платформы, которые в 
     platformId,
   ]);
 
+  expect(() => environmentUpdateSchema.parse({ platformIds: [platformId, platformId] })).toThrow();
+});
+```
+
+Для проекта:
+
+```ts
+it('платформы принимаются при создании и отвергаются в правке', () => {
+  // Правка стала строгой намеренно: без этого присланные платформы
+  // молча отбросились бы — ровно та тихая потеря, от которой строгие
+  // схемы и защищают.
+  expect(
+    projectCreateSchema.parse({
+      name: 'Касса',
+      platforms: [{ kind: PlatformKind.Server, name: 'API' }],
+    }).platforms,
+  ).toHaveLength(1);
+
   expect(() =>
-    environmentUpdateSchema.parse({ platformIds: [platformId, platformId] }),
+    projectUpdateSchema.parse({ platforms: [{ kind: PlatformKind.Server, name: 'API' }] }),
   ).toThrow();
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падает**
+- [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd packages/shared && npx vitest run src/schemas/environment.test.ts`
-Expected: FAIL — `platformIds` отсутствует.
+Run: `cd packages/shared && npx vitest run src/schemas/environment.test.ts src/schemas/project.test.ts`
+Expected: FAIL — `platformIds` и `platforms` схемам неизвестны, а правка проекта пока не строгая и лишнее поле не отвергает.
 
 - [ ] **Step 3: Реализация**
 
-В `environment.ts`:
+В `environment.ts` добавить импорт `platformIdsSchema, platformRefSchema` из `./platform`, затем:
 
-- в `environmentDetailSchema` добавить `platforms: z.array(platformRefSchema)`;
-- в `environmentUpdateSchema` добавить:
+- в `environmentDetailSchema` — `platforms: z.array(platformRefSchema)`;
+- в `environmentUpdateSchema`:
 
 ```ts
   /**
@@ -575,9 +733,19 @@ Expected: FAIL — `platformIds` отсутствует.
   platformIds: platformIdsSchema.optional(),
 ```
 
-В `project.ts` — только в создании:
+В `project.ts` добавить импорт `platformCreateSchema` из `./platform` и сделать правку строгой:
 
 ```ts
+/**
+ * Поля, доступные для правки при уровне записи.
+ *
+ * Строгая намеренно: платформы здесь не принимаются, и без `.strict()`
+ * присланное поле молча отбросилось бы вместо отказа.
+ */
+export const projectUpdateSchema = z
+  .object({ /* как было */ })
+  .strict();
+
 /**
  * Поля для создания проекта. Слаг генерируется сервером.
  *
@@ -614,8 +782,11 @@ git commit -m "Принимать платформы в проекте и окр
 - Create: `apps/api/src/db/schema/platforms.ts`
 - Create: `apps/api/src/db/schema/platforms.test.ts`
 - Modify: `apps/api/src/db/schema/index.ts`
+- Modify: `apps/api/src/db/schema/invariants.test.ts`
 
 - [ ] **Step 1: Падающие тесты**
+
+Сначала **в `invariants.test.ts`** добавить импорт из `./platforms` и четыре записи в `ALL_TABLES` (после `environment_domains`): `project_platforms`, `environment_platforms`, `version_platform_releases`, `checkpoint_platforms`. Список там явный именно затем, чтобы новую таблицу включали осознанно; без этого правило «никаких каскадов» новых ссылок не увидит.
 
 `apps/api/src/db/schema/platforms.test.ts`:
 
@@ -646,6 +817,12 @@ describe('платформы проекта', () => {
 
     expect(unique?.columns.map((column) => column.name).sort()).toEqual(['name', 'project_id']);
   });
+
+  it('требует вид, имя и позицию', () => {
+    expect(projectPlatforms.kind.notNull).toBe(true);
+    expect(projectPlatforms.name.notNull).toBe(true);
+    expect(projectPlatforms.position.notNull).toBe(true);
+  });
 });
 
 describe('выпуски', () => {
@@ -662,25 +839,46 @@ describe('выпуски', () => {
     ]);
   });
 
-  it('дата выпуска необязательна', () => {
-    // «Вышла, дата неизвестна» — честное состояние.
-    expect(versionPlatformReleases.releasedDate.notNull).toBe(false);
+  it('состояние обязательно, дата и обозначение сборки — нет', () => {
+    // «Вышла, дата неизвестна» — честное состояние; пустое обозначение
+    // сборки означает «как у версии».
     expect(versionPlatformReleases.state.notNull).toBe(true);
+    expect(versionPlatformReleases.releasedDate.notNull).toBe(false);
+    expect(versionPlatformReleases.buildLabel.notNull).toBe(false);
+  });
+
+  it('дата выпуска — календарный день, а не отметка времени', () => {
+    expect(versionPlatformReleases.releasedDate.getSQLType()).toBe('date');
   });
 });
 
 describe('связи', () => {
-  it('связь окружения и тег чекпоинта — пары без своего ключа', () => {
-    expect(getTableConfig(environmentPlatforms).primaryKeys).toHaveLength(1);
-    expect(getTableConfig(checkpointPlatforms).primaryKeys).toHaveLength(1);
+  it('связь окружения — пара без своего ключа', () => {
+    // Состав ключа важен: проверка только на количество прошла бы и при
+    // ключе на неправильных колонках.
+    const [primary] = getTableConfig(environmentPlatforms).primaryKeys;
+
+    expect(primary?.columns.map((column) => column.name).sort()).toEqual([
+      'environment_id',
+      'platform_id',
+    ]);
+  });
+
+  it('тег чекпоинта — тоже пара', () => {
+    const [primary] = getTableConfig(checkpointPlatforms).primaryKeys;
+
+    expect(primary?.columns.map((column) => column.name).sort()).toEqual([
+      'checkpoint_id',
+      'platform_id',
+    ]);
   });
 });
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd apps/api && npx vitest run src/db/schema/platforms.test.ts`
-Expected: FAIL — модуль `./platforms` не найден.
+Run: `cd apps/api && npx vitest run src/db/schema`
+Expected: FAIL — модуль `./platforms` не найден (и `platforms.test.ts`, и `invariants.test.ts` не собираются).
 
 - [ ] **Step 3: Реализация**
 
@@ -799,7 +997,6 @@ export const versionPlatformReleases = pgTable(
   },
   (table) => [
     unique('version_platform_releases_version_platform').on(table.versionId, table.platformId),
-    index('version_platform_releases_version_idx').on(table.versionId),
     index('version_platform_releases_platform_idx').on(table.platformId),
   ],
 );
@@ -833,12 +1030,14 @@ export type ProjectPlatformRow = typeof projectPlatforms.$inferSelect;
 export type PlatformReleaseRow = typeof versionPlatformReleases.$inferSelect;
 ```
 
-В `apps/api/src/db/schema/index.ts` добавить `export * from './platforms';` после `'./invitations'` (по алфавиту между `invitations` и `projects`).
+Индекс по версии у выпусков не заводится: левый префикс уникального ограничения `(version_id, platform_id)` уже обслуживает выборку по версии, и второй индекс был бы мёртвым весом на записи. По той же причине у `project_platforms` индекс по проекту **нужен**: там уникальное ограничение начинается с `project_id`, но выборка идёт с сортировкой, и индекс используется — оставить.
+
+В `apps/api/src/db/schema/index.ts` добавить `export * from './platforms';` после `'./invitations'`.
 
 - [ ] **Step 4: Запустить**
 
 Run: `cd apps/api && npx vitest run src/db/schema`
-Expected: PASS, включая `invariants.test.ts`.
+Expected: PASS, включая `invariants.test.ts` — все новые ссылки объявлены с `restrict`.
 
 - [ ] **Step 5: Коммит**
 
@@ -847,29 +1046,102 @@ git add apps/api/src/db
 git commit -m "Завести таблицы платформ, связей и выпусков"
 ```
 
-### Task 2.2: Миграции
+### Task 2.2: Обвязка тестов: чтение таблиц и очистка
+
+**Files:**
+- Modify: `apps/api/test/db-fixture.ts`
+
+Хелпер, которым пользуются тесты Chunk 3 и 4. Заводится отдельной задачей, чтобы не появляться наполовину в каждой.
+
+- [ ] **Step 1: Дополнить фикстуру**
+
+В `TestDatabase` добавить:
+
+```ts
+  /**
+   * Все строки таблицы — для проверок уборки за удалением.
+   *
+   * Полными правами, а не ролью приложения: тест проверяет, что строк
+   * не осталось, и отказ в правах выглядел бы как пустая таблица.
+   */
+  rowsOf: <T extends PgTable>(table: T) => Promise<T['$inferSelect'][]>;
+```
+
+и в возвращаемом объекте — `rowsOf: (table) => db.select().from(table)`.
+
+В `TRUNCATE` добавить четыре таблицы перед `roadmap_public_links`: `checkpoint_platforms`, `version_platform_releases`, `environment_platforms`, `project_platforms`. Каскад от `projects` унёс бы их и так, но список в этом файле называет зависимые таблицы явно (`environment_domains`, `domain_statuses`), и расхождение сбивало бы с толку.
+
+- [ ] **Step 2: Проверить, что фикстура собирается**
+
+Run: `cd apps/api && npx vitest run src/db/schema`
+Expected: PASS (этот набор контейнер не поднимает — проверяется только компиляция изменённого файла при его импорте в других наборах).
+
+- [ ] **Step 3: Проверить на живом наборе**
+
+Run: `cd apps/api && npx vitest run src/roadmap/roadmap.repository.test.ts`
+Expected: PASS. Набор поднимает PostgreSQL через Testcontainers и применяет миграции, поэтому заодно проверяет, что `TRUNCATE` с новыми таблицами выполняется.
+
+- [ ] **Step 4: Коммит**
+
+```bash
+git add apps/api/test/db-fixture.ts
+git commit -m "Дать тестам читать таблицы и чистить платформы"
+```
+
+### Task 2.3: Миграции
 
 **Files:**
 - Create: `apps/api/drizzle/0025_release_platforms.sql`
 - Create: `apps/api/drizzle/0026_release_platform_privileges.sql`
-- Modify: `apps/api/drizzle/meta/_journal.json` (генератором)
+- Modify: `apps/api/drizzle/meta/_journal.json`, `apps/api/drizzle/meta/0025_snapshot.json`, `apps/api/drizzle/meta/0026_snapshot.json` (генератором)
+- Modify: `apps/api/test/environments-privileges.test.ts`
 
-- [ ] **Step 1: Сгенерировать миграцию таблиц**
+- [ ] **Step 1: Падающий тест прав**
+
+В `environments-privileges.test.ts` добавить случай:
+
+```ts
+it('роль приложения читает и пишет платформы, связи и выпуски', async () => {
+  // Единственная автоматическая проверка миграции прав: забытый GRANT
+  // иначе всплывёт только в бою.
+  await expect(
+    testDb.appDb.execute(sql`SELECT count(*) FROM project_platforms`),
+  ).resolves.toBeDefined();
+  await expect(
+    testDb.appDb.execute(sql`SELECT count(*) FROM environment_platforms`),
+  ).resolves.toBeDefined();
+  await expect(
+    testDb.appDb.execute(sql`SELECT count(*) FROM version_platform_releases`),
+  ).resolves.toBeDefined();
+  await expect(
+    testDb.appDb.execute(sql`SELECT count(*) FROM checkpoint_platforms`),
+  ).resolves.toBeDefined();
+});
+```
+
+- [ ] **Step 2: Запустить, убедиться что падает**
+
+Run: `cd apps/api && npx vitest run test/environments-privileges.test.ts`
+Expected: FAIL — таблиц в базе ещё нет («relation does not exist»).
+
+- [ ] **Step 3: Сгенерировать миграцию таблиц**
 
 Run: `cd apps/api && npx drizzle-kit generate --name=release_platforms`
-Expected: файл `0025_release_platforms.sql` с `CREATE TYPE` на два перечня и `CREATE TABLE` на четыре таблицы.
+Expected: `0025_release_platforms.sql` с двумя `CREATE TYPE` и четырьмя `CREATE TABLE`, плюс запись в `meta/_journal.json` и `meta/0025_snapshot.json`.
 
-Прочитать файл глазами: в нём не должно быть ни `DROP`, ни `ALTER` существующих таблиц. Если генератор предложил что-то ещё — значит схема разошлась с базой до этой работы, и это разбирается отдельно, а не правкой миграции.
+Прочитать файл глазами. `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` на **новых** таблицах — норма: drizzle-kit так оформляет внешние ключи. Насторожиться следует на любом `DROP` и на любом `ALTER` таблицы, которой нет в списке четырёх новых: это значило бы, что схема разошлась с базой до этой работы, и разбирается такое отдельно, а не правкой миграции.
 
-- [ ] **Step 2: Добавить миграцию прав**
+- [ ] **Step 4: Добавить миграцию прав**
 
 Run: `cd apps/api && npx drizzle-kit generate --custom --name=release_platform_privileges`
 
-В созданный `0026_release_platform_privileges.sql`:
+Генератор создаст файл с телом-заглушкой `-- Custom SQL migration file, put your code below! --`, запись в журнале и `meta/0026_snapshot.json`. Снапшота у прежних миграций прав нет (они писались руками), но лишний снапшот безвреден: его содержимое совпадает с `0025`, и следующий `generate` отсчитается от него верно. Заглушку заменить на:
 
 ```sql
 --> Роль приложения получает права на новые таблицы отдельной миграцией:
 --> drizzle-kit их не выдаёт, а без них приложение упадёт на первом запросе.
+--> Права на секвенции и типы не нужны: ключи — uuid с gen_random_uuid(),
+--> а USAGE на enum-типы есть у PUBLIC по умолчанию.
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   project_platforms,
   environment_platforms,
@@ -878,22 +1150,24 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
 TO cairn_app;
 ```
 
-- [ ] **Step 3: Применить на поднятой базе**
+- [ ] **Step 5: Запустить тест прав**
 
-Run: `cd apps/api && npx tsx src/db/migrate.ts`
-Expected: обе миграции применились, ошибок нет. База должна быть поднята (`docker compose up -d postgres`).
+Run: `cd apps/api && npx vitest run test/environments-privileges.test.ts`
+Expected: PASS. Тест поднимает чистую базу и применяет миграции из репозитория, поэтому проверяет именно их, а не состояние чьей-то локальной базы.
 
-Если базы под рукой нет — шаг откладывается до Chunk 3, где интеграционные тесты поднимут PostgreSQL через Testcontainers и применят миграции сами.
+- [ ] **Step 6: Убедиться, что схема и снапшот сошлись**
 
-- [ ] **Step 4: Проверить, что схема и база сошлись**
+Run: `cd apps/api && npx drizzle-kit generate --name=release_platforms_check`
+Expected: `No schema changes, nothing to migrate` — и **ничего не создано**: при пустом наборе операторов без `--custom` генератор не пишет ни файла, ни записи в журнале, ни снапшота.
 
-Run: `cd apps/api && npx drizzle-kit generate --name=should_be_empty`
-Expected: «No schema changes, nothing to migrate». Созданный пустой файл удалить вместе с его записью в `meta/_journal.json`, если генератор его всё же создал.
+Если файл всё же появился — значит расхождение реально. Работа останавливается и расхождение разбирается; удалять файл нельзя, это выбросило бы настоящую правку схемы вместе с несогласованным `meta/`.
 
-- [ ] **Step 5: Коммит**
+Сравнение идёт со снапшотом, а не с базой: `generate` в базу не ходит вовсе. Схему с базой сверяет применение миграций — это Step 5.
+
+- [ ] **Step 7: Коммит**
 
 ```bash
-git add apps/api/drizzle
+git add apps/api/drizzle apps/api/test/environments-privileges.test.ts
 git commit -m "Применить таблицы платформ миграцией"
 ```
 
@@ -907,49 +1181,125 @@ git commit -m "Применить таблицы платформ миграци
 - Create: `apps/api/src/platforms/platforms.repository.ts`
 - Create: `apps/api/src/platforms/platforms.repository.test.ts`
 
+Обвязка — как в `roadmap.repository.test.ts`: `testDb`, фабрики `member()` / `admin()`, `grant(level)` (с `Section.Info`), платформы заводятся вставкой в `projectPlatforms` напрямую, потому что репозиторий платформ требует доступа к «Инфо», которого у части субъектов в тестах нет.
+
 - [ ] **Step 1: Падающие тесты**
 
-Образец для интеграционного теста — `apps/api/src/roadmap/roadmap.repository.test.ts`: та же обвязка Testcontainers, те же вспомогательные функции заведения проекта и выдачи.
-
 ```ts
-describe('PlatformsRepository', () => {
-  it('скрывает платформы от субъекта без доступа к «Инфо»', async () => {
+describe('репозиторий платформ', () => {
+  // … testDb, projectId, otherProjectId, subjectId, adminUserId — как в роадмапе
+
+  async function createPlatform(
+    name: string,
+    kind = PlatformKind.Server,
+    target = projectId,
+  ): Promise<string> {
+    const [created] = await testDb.db
+      .insert(projectPlatforms)
+      .values({ projectId: target, name, kind, position: 1 })
+      .returning();
+
+    return created!.id;
+  }
+
+  it('скрывает платформы от субъекта без выдачи', async () => {
     // Отсутствие доступа — 404, а не 403: ответ 403 сообщил бы, что
     // проект существует (ТЗ 4.2).
-    await expect(repository.findForProject(stranger, projectId)).rejects.toThrow(
+    await expect(repository.findForProject(member(), projectId)).rejects.toBeInstanceOf(
       SectionNotVisibleError,
     );
   });
 
+  it('отказывает уровню ниже требуемого отдельной ошибкой', async () => {
+    await grant(AccessLevel.Read);
+
+    await expect(
+      testDb.db.transaction((tx) =>
+        repository.create(member(), tx, projectId, { kind: PlatformKind.Server, name: 'API' }),
+      ),
+    ).rejects.toBeInstanceOf(InsufficientLevelError);
+  });
+
   it('отдаёт платформы по порядку на уровне метаданных', async () => {
-    const platforms = await repository.findForProject(metadataSubject, projectId);
+    await grant(AccessLevel.Metadata);
+    await testDb.db.transaction(async (tx) => {
+      await repository.create(admin(), tx, projectId, { kind: PlatformKind.Server, name: 'API' });
+      await repository.create(admin(), tx, projectId, { kind: PlatformKind.Server, name: 'Веб' });
+    });
+
+    const platforms = await repository.findForProject(member(), projectId);
 
     expect(platforms.map((platform) => platform.name)).toEqual(['API', 'Веб']);
     expect(platforms.map((platform) => platform.position)).toEqual([1, 2]);
   });
 
   it('отказывает повторному имени внятно', async () => {
+    await createPlatform('API');
+
     await expect(
-      db.transaction((tx) =>
-        repository.create(writer, tx, projectId, { kind: PlatformKind.Server, name: 'API' }),
+      testDb.db.transaction((tx) =>
+        repository.create(admin(), tx, projectId, { kind: PlatformKind.Server, name: 'API' }),
       ),
-    ).rejects.toThrow(ConflictException);
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('не видит платформу чужого проекта в правке и удалении', async () => {
+    // Уровень проверяется по проекту из адреса: без проверки
+    // принадлежности запись в своём проекте давала бы править чужой.
+    const foreign = await createPlatform('API', PlatformKind.Server, otherProjectId);
+
+    await expect(
+      testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, foreign, { name: 'Веб' }),
+      ),
+    ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    await expect(
+      testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, foreign)),
+    ).rejects.toBeInstanceOf(SectionNotVisibleError);
   });
 
   it('удаление платформы снимает выпуски, теги и связи', async () => {
     // На всех ссылках `restrict`: без явной уборки удаление упёрлось бы
     // в ссылочную целостность и ответило 500 вместо того, чтобы сработать.
-    await db.transaction((tx) => repository.remove(writer, tx, projectId, platformId));
+    const platformId = await createPlatform('API');
+    // … завести версию, чекпоинт, окружение и строки связей вставками
 
-    expect(await rowsOf(versionPlatformReleases)).toHaveLength(0);
-    expect(await rowsOf(checkpointPlatforms)).toHaveLength(0);
-    expect(await rowsOf(environmentPlatforms)).toHaveLength(0);
+    await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, platformId));
+
+    expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
+    expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+    expect(await testDb.rowsOf(environmentPlatforms)).toHaveLength(0);
+    expect(await testDb.rowsOf(projectPlatforms)).toHaveLength(0);
   });
 
   it('не ставит магазин в окружение', async () => {
+    const storeId = await createPlatform('App Store', PlatformKind.Store);
+
     await expect(
-      db.transaction((tx) => repository.setEnvironmentPlatforms(tx, environmentId, [storeId])),
-    ).rejects.toThrow(ConflictException);
+      testDb.db.transaction((tx) =>
+        repository.setEnvironmentPlatforms(tx, environmentId, [storeId]),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('не ставит в окружение платформу чужого проекта', async () => {
+    const foreign = await createPlatform('API', PlatformKind.Server, otherProjectId);
+
+    await expect(
+      testDb.db.transaction((tx) =>
+        repository.setEnvironmentPlatforms(tx, environmentId, [foreign]),
+      ),
+    ).rejects.toBeInstanceOf(SectionNotVisibleError);
+  });
+
+  it('заводит платформы вместе с проектом только суперадмину', async () => {
+    await expect(
+      testDb.db.transaction((tx) =>
+        repository.createMany(member(), tx, projectId, [
+          { kind: PlatformKind.Server, name: 'API' },
+        ]),
+      ),
+    ).rejects.toBeInstanceOf(InsufficientLevelError);
   });
 });
 ```
@@ -957,25 +1307,25 @@ describe('PlatformsRepository', () => {
 - [ ] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/api && npx vitest run src/platforms/platforms.repository.test.ts`
-Expected: FAIL — модуль не найден.
+Expected: FAIL — модуль `./platforms.repository` не найден.
 
 - [ ] **Step 3: Реализация**
 
-`apps/api/src/platforms/platforms.repository.ts`. Устройство — как у `RoadmapRepository`: конструктор берёт `DATABASE` и `AccessService`, каждый метод с субъектом сам проверяет уровень тем же исполнителем, которым работает.
-
-Методы:
+Устройство — как у `RoadmapRepository`: конструктор берёт `DATABASE` и `AccessService`, каждый метод с субъектом сам проверяет уровень **тем же исполнителем**, которым работает (внутри транзакции обращение к другому подключению увидело бы состояние до неё).
 
 | Метод | Право | Что делает |
 |---|---|---|
 | `findForProject(subject, projectId)` | «Инфо», метаданные | платформы по `position`, затем `createdAt` |
 | `create(subject, tx, projectId, input)` | «Инфо», запись | повторное имя → `ConflictException`; `position` = максимум + 1 |
-| `createMany(tx, projectId, inputs)` | — | для создания проекта: право уже проверено созданием проекта, которого до него не существовало |
-| `update(subject, tx, projectId, platformId, input)` | «Инфо», запись | повторное имя → `ConflictException` |
-| `remove(subject, tx, projectId, platformId)` | «Инфо», запись | уборка выпусков, тегов, связей, затем платформа |
-| `setEnvironmentPlatforms(tx, environmentId, platformIds)` | — | вызывается из репозитория окружений, который уже проверил «Инфраструктуру» |
+| `createMany(subject, tx, projectId, inputs)` | признак суперадмина напрямую | для создания проекта: выдачи на только что созданный проект ещё не существует. Возвращает созданные строки — службе нужны `id` и имена для журнала |
+| `update(subject, tx, projectId, platformId, input)` | «Инфо», запись | `requireInProject`, затем повторное имя → `ConflictException` |
+| `remove(subject, tx, projectId, platformId)` | «Инфо», запись | `requireInProject`, уборка выпусков, тегов, связей, затем платформа |
+| `setEnvironmentPlatforms(tx, environmentId, platformIds)` | — | зовётся из репозитория окружений, который уже проверил «Инфраструктуру» и принадлежность окружения проекту |
 | `requireInProject(executor, projectId, platformId)` | — | платформа чужого проекта → `SectionNotVisibleError` |
 
-Ключевые решения в коде:
+`createMany` принимает субъект и проверяет `subject.isSuperadmin`, как `ProjectsRepository.create`: метод экспортируется вместе с модулем, и без проверки любой будущий вызывающий заводил бы платформы в любом проекте.
+
+Ключевой метод целиком:
 
 ```ts
   /**
@@ -1000,21 +1350,24 @@ Expected: FAIL — модуль не найден.
       throw new SectionNotVisibleError();
     }
 
-    const chosen = platformIds.length
+    const unique = [...new Set(platformIds)];
+
+    const chosen = unique.length
       ? await tx
           .select()
           .from(projectPlatforms)
           .where(
             and(
               eq(projectPlatforms.projectId, environment.projectId),
-              inArray(projectPlatforms.id, platformIds),
+              inArray(projectPlatforms.id, unique),
             ),
           )
       : [];
 
-    // Платформа чужого проекта не найдётся — и это 404 по месту вызова,
-    // а не 400: иначе ответ подтвердил бы, что она где-то существует.
-    if (chosen.length !== platformIds.length) {
+    // Сравнение с размером множества, а не длиной массива: повтор
+    // в запросе иначе дал бы ложный 404. Схема повторы и так отвергает,
+    // но точка контроля — репозиторий.
+    if (chosen.length !== unique.length) {
       throw new SectionNotVisibleError();
     }
 
@@ -1030,10 +1383,10 @@ Expected: FAIL — модуль не найден.
       .delete(environmentPlatforms)
       .where(eq(environmentPlatforms.environmentId, environmentId));
 
-    if (platformIds.length) {
+    if (unique.length) {
       await tx
         .insert(environmentPlatforms)
-        .values(platformIds.map((platformId) => ({ environmentId, platformId })));
+        .values(unique.map((platformId) => ({ environmentId, platformId })));
     }
   }
 ```
@@ -1050,30 +1403,54 @@ git add apps/api/src/platforms
 git commit -m "Вести платформы проекта в репозитории"
 ```
 
-### Task 3.2: Служба, журнал и ручки
+### Task 3.2: Служба платформ и журнал
 
 **Files:**
 - Create: `apps/api/src/platforms/platforms.service.ts`
-- Create: `apps/api/src/platforms/platforms.controller.ts`
-- Create: `apps/api/src/platforms/platforms.module.ts`
+- Create: `apps/api/src/platforms/platforms.service.test.ts`
 - Modify: `apps/api/src/audit/audit.types.ts`
-- Modify: `apps/api/src/app.module.ts`
-- Modify: `apps/api/src/app.module.test.ts`
 
-- [ ] **Step 1: Падающий тест**
+- [ ] **Step 1: Падающие тесты**
 
-В `app.module.test.ts` — к существующему набору, проверяющему состав модулей:
+Обвязка — как в `roadmap.service.test.ts`: служба собирается позиционно с настоящим `new AuditService()`, журнал читается хелпером `entriesOf(action)`.
 
 ```ts
-it('подключает модуль платформ', () => {
-  expect(modulesOf(AppModule)).toContain(PlatformsModule);
+it('пишет заведение платформы в журнал', async () => {
+  await service.create(admin(), projectId, { kind: PlatformKind.Store, name: 'RuStore' });
+
+  const [entry] = await entriesOf(AuditAction.PlatformCreated);
+
+  expect(entry?.metadata).toMatchObject({ name: 'RuStore' });
+});
+
+it('помнит имя удалённой платформы', async () => {
+  // После удаления имя взять уже негде, а запись в журнале без имени
+  // ссылается на то, чего не найти.
+  const created = await service.create(admin(), projectId, {
+    kind: PlatformKind.Server,
+    name: 'API',
+  });
+
+  await service.remove(admin(), projectId, created.id);
+
+  const [entry] = await entriesOf(AuditAction.PlatformDeleted);
+
+  expect(entry?.metadata).toMatchObject({ name: 'API' });
+});
+
+it('при отказе в правах ничего не пишет', async () => {
+  await expect(
+    service.create(member(), projectId, { kind: PlatformKind.Server, name: 'API' }),
+  ).rejects.toThrow();
+
+  expect(await entriesOf(AuditAction.PlatformCreated)).toHaveLength(0);
 });
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падает**
+- [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd apps/api && npx vitest run src/app.module.test.ts`
-Expected: FAIL — `PlatformsModule` не существует.
+Run: `cd apps/api && npx vitest run src/platforms/platforms.service.test.ts`
+Expected: FAIL — модуль `./platforms.service` не найден.
 
 - [ ] **Step 3: Реализация**
 
@@ -1087,7 +1464,42 @@ Expected: FAIL — `PlatformsModule` не существует.
   PlatformReleaseCleared = 'platform_release.cleared',
 ```
 
-`platforms.service.ts` — по образцу `RoadmapService`: транзакция, вызов репозитория, запись в журнал. В метаданных — `name` платформы, у удаления тоже (после удаления имя взять уже негде).
+`platforms.service.ts` — по образцу `RoadmapService`: транзакция, вызов репозитория, запись в журнал. `entityType: 'platform'`, в метаданных `name`; у удаления имя берётся из строки, которую вернул репозиторий.
+
+- [ ] **Step 4: Запустить**
+
+Run: `cd apps/api && npx vitest run src/platforms`
+Expected: PASS.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add apps/api/src/platforms apps/api/src/audit/audit.types.ts
+git commit -m "Писать платформы в журнал"
+```
+
+### Task 3.3: Ручки платформ и сборка модуля
+
+**Files:**
+- Create: `apps/api/src/platforms/platforms.controller.ts`
+- Create: `apps/api/src/platforms/platforms.module.ts`
+- Modify: `apps/api/src/app.module.ts`
+- Modify: `apps/api/src/app.module.test.ts`
+
+- [ ] **Step 1: Падающий тест**
+
+В существующий тест `app.module.test.ts` («собирается со всеми модулями») добавить строку в том же стиле — проверка идёт через `moduleRef.get`, хелпера `modulesOf` в проекте нет:
+
+```ts
+    expect(moduleRef.get(PlatformsService)).toBeDefined();
+```
+
+- [ ] **Step 2: Запустить, убедиться что падает**
+
+Run: `cd apps/api && npx vitest run src/app.module.test.ts`
+Expected: FAIL — `PlatformsService` не разрешается: модуль не подключён.
+
+- [ ] **Step 3: Реализация**
 
 `platforms.controller.ts`:
 
@@ -1107,21 +1519,15 @@ export class PlatformsController {
     return this.platforms.findForProject(subject, projectId);
   }
 
-  @Post()
-  async create(/* ZodValidationPipe(platformCreateSchema) */): Promise<Platform> {}
-
-  @Patch(':platformId')
-  async update(/* ZodValidationPipe(platformUpdateSchema) */): Promise<Platform> {}
-
-  @Delete(':platformId')
-  @HttpCode(204)
-  async remove(): Promise<void> {}
+  // POST с ZodValidationPipe(platformCreateSchema),
+  // PATCH ':platformId' с ZodValidationPipe(platformUpdateSchema),
+  // DELETE ':platformId' с @HttpCode(204).
 }
 ```
 
 Проекция строки в `Platform` — явным объектом (`id`, `kind`, `name`, `position`), а не разворотом строки: иначе наружу уйдут `projectId` и отметки времени.
 
-`platforms.module.ts` экспортирует `PlatformsRepository` — он понадобится модулю окружений.
+`platforms.module.ts` импортирует `DbModule`, `AccessModule`, `AuditModule` и `AuthModule` (последний обязателен: контроллер висит на `SessionGuard`, и без него падает именно тест сборки) и **экспортирует** `PlatformsRepository` — он понадобится модулям проектов и окружений.
 
 В `app.module.ts` добавить `PlatformsModule` в `imports`.
 
@@ -1133,48 +1539,60 @@ Expected: PASS.
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add apps/api/src
-git commit -m "Открыть ручки платформ и писать их в журнал"
+git add apps/api/src/platforms apps/api/src/app.module.ts apps/api/src/app.module.test.ts
+git commit -m "Открыть ручки платформ"
 ```
 
-### Task 3.3: Платформы при создании проекта
+### Task 3.4: Платформы при создании проекта
 
 **Files:**
 - Modify: `apps/api/src/projects/projects.repository.ts`
 - Modify: `apps/api/src/projects/projects.service.ts`
-- Modify: `apps/api/src/projects/projects.repository.test.ts`
+- Modify: `apps/api/src/projects/projects.service.test.ts`
 - Modify: `apps/api/src/projects/projects.module.ts`
+
+Платформы заводит **служба**, а не репозиторий проектов: репозиторий лишь перестаёт спотыкаться о лишнее поле. Поэтому и тест — в тесте службы, а не репозитория.
 
 - [ ] **Step 1: Падающий тест**
 
-```ts
-it('создаёт проект вместе с платформами', async () => {
-  const created = await db.transaction((tx) =>
-    repository.create(superadmin, tx, {
-      name: 'Касса',
-      platforms: [
-        { kind: PlatformKind.Server, name: 'API' },
-        { kind: PlatformKind.Store, name: 'App Store' },
-      ],
-    }),
-  );
+В `projects.service.test.ts` (конструктор службы получает четвёртым аргументом `PlatformsRepository` — файл придётся поправить вместе с этим):
 
-  const platforms = await platformsRepository.findForProject(superadmin, created.id);
+```ts
+it('создаёт проект вместе с платформами и пишет каждую в журнал', async () => {
+  const created = await service.create(admin(), {
+    name: 'Касса',
+    platforms: [
+      { kind: PlatformKind.Server, name: 'API' },
+      { kind: PlatformKind.Store, name: 'App Store' },
+    ],
+  });
+
+  const platforms = await testDb.rowsOf(projectPlatforms);
 
   expect(platforms.map((platform) => platform.name)).toEqual(['API', 'App Store']);
+  expect(platforms.every((platform) => platform.projectId === created.id)).toBe(true);
+  expect(await entriesOf(AuditAction.PlatformCreated)).toHaveLength(2);
+});
+
+it('создаёт проект без платформ, когда их не прислали', async () => {
+  await service.create(admin(), { name: 'Касса' });
+
+  expect(await testDb.rowsOf(projectPlatforms)).toHaveLength(0);
 });
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падает**
 
-Run: `cd apps/api && npx vitest run src/projects/projects.repository.test.ts`
-Expected: FAIL — платформы не созданы. Возможен и падёж вставки: `platforms` уйдёт в `values()` как несуществующая колонка.
+Run: `cd apps/api && npx vitest run src/projects/projects.service.test.ts`
+Expected: FAIL. Вероятнее всего — на вставке: `platforms` уйдёт в `values()` как несуществующая колонка. Если конструктор ещё не принимает новую зависимость, падение будет на компиляции — это тоже ожидаемо.
 
 - [ ] **Step 3: Реализация**
 
-В `projects.repository.ts`, в `create`, отделить платформы от полей проекта — **обязательно**, иначе Drizzle получит несуществующую колонку:
+В `projects.repository.ts`, в `create`, **обязательно** отделить платформы от полей проекта:
 
 ```ts
+    // Платформы — не колонка таблицы: без этого Drizzle получит
+    // несуществующее поле и вставка упадёт.
     const { platforms: _platforms, ...fields } = input;
     const slug = await this.findFreeSlug(tx, generateSlug(fields.name));
 
@@ -1184,7 +1602,7 @@ Expected: FAIL — платформы не созданы. Возможен и �
       .returning();
 ```
 
-Сами платформы заводит служба — после проекта, в той же транзакции, через `PlatformsRepository.createMany`; её же журнал пишет отдельной записью на каждую платформу. Право не перепроверяется: проект только что создан суперадмином, и выдачи на него ещё не существует.
+В `ProjectsService.create` — после создания проекта, в той же транзакции: `platformsRepository.createMany(subject, tx, created.id, input.platforms)` и запись `platform.created` на каждую возвращённую строку. Служба работает с **репозиторием** платформ, а не со службой: вложенная транзакция здесь не нужна и привела бы к транзакции в транзакции.
 
 `ProjectsModule` импортирует `PlatformsModule`.
 
@@ -1200,55 +1618,96 @@ git add apps/api/src/projects
 git commit -m "Заводить платформы вместе с проектом"
 ```
 
-### Task 3.4: Платформы окружения
+### Task 3.5: Платформы окружения
 
 **Files:**
 - Modify: `apps/api/src/environments/environments.repository.ts`
 - Modify: `apps/api/src/environments/environment.projection.ts`
 - Modify: `apps/api/src/environments/environments.repository.test.ts`
+- Modify: `apps/api/src/environments/environments.service.test.ts`
 - Modify: `apps/api/src/environments/environments.module.ts`
 
 - [ ] **Step 1: Падающие тесты**
 
+Тест службы правится только из-за конструктора (`EnvironmentsRepository` получает `PlatformsRepository`) — поведение там не меняется.
+
 ```ts
 it('отдаёт в окружении то, что в нём развёрнуто', async () => {
-  await db.transaction((tx) =>
-    repository.update(writer, tx, projectId, environmentId, { platformIds: [apiId, webId] }),
+  await grant(AccessLevel.Write);
+  await testDb.db.transaction((tx) =>
+    repository.update(member(), tx, projectId, environmentId, { platformIds: [webId, apiId] }),
   );
 
-  const [environment] = await repository.findForProject(reader, projectId);
+  const [environment] = await repository.findForProject(member(), projectId);
 
-  expect(environment.platforms.map((platform) => platform.name)).toEqual(['API', 'Веб']);
+  // toMatchObject, а не обращение к полю: findForProject возвращает union,
+  // и у проекции метаданных поля нет — существующие тесты файла делают так же.
+  expect(environment).toMatchObject({
+    platforms: [{ name: 'API' }, { name: 'Веб' }],
+  });
+});
+
+it('создаёт окружение с платформами', async () => {
+  // `platformIds` попадает в схему создания автоматически, а `create`
+  // вставляет поля как есть: без отдельного снятия Drizzle получит
+  // несуществующую колонку.
+  await grant(AccessLevel.Write);
+
+  const created = await testDb.db.transaction((tx) =>
+    repository.create(member(), tx, projectId, {
+      name: 'Прод',
+      kind: EnvironmentKind.Production,
+      platformIds: [apiId],
+    }),
+  );
+
+  expect(created.id).toBeDefined();
+  expect(await testDb.rowsOf(environmentPlatforms)).toHaveLength(1);
 });
 
 it('удаление окружения снимает его связи с платформами', async () => {
-  await db.transaction((tx) => repository.remove(writer, tx, projectId, environmentId));
+  await grant(AccessLevel.Write);
+  await testDb.db.transaction((tx) =>
+    repository.update(member(), tx, projectId, environmentId, { platformIds: [apiId] }),
+  );
 
-  expect(await rowsOf(environmentPlatforms)).toHaveLength(0);
+  await testDb.db.transaction((tx) =>
+    repository.remove(member(), tx, projectId, environmentId),
+  );
+
+  expect(await testDb.rowsOf(environmentPlatforms)).toHaveLength(0);
 });
 ```
 
+Порядок в первом тесте значим: платформы отдаются по `position` платформы, а не по порядку присланных идентификаторов — у самой связи порядка нет, и без сортировки список прыгал бы между запросами.
+
 - [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd apps/api && npx vitest run src/environments/environments.repository.test.ts`
-Expected: FAIL — `platforms` в окружении нет; удаление падает на ссылочной целостности.
+Run: `cd apps/api && npx vitest run src/environments`
+Expected: FAIL — `platforms` в окружении нет, создание с `platformIds` падает на вставке, удаление — на ссылочной целостности.
 
 - [ ] **Step 3: Реализация**
 
-- `update` и `create`: если `platformIds` присланы — вызвать
-  `PlatformsRepository.setEnvironmentPlatforms` тем же `tx`; поле не должно
-  попасть в `values()`/`set()` окружения (отделить, как `platforms` у проекта);
+- `create` и `update`: отделить `platformIds` от полей окружения (как уже
+  сделано с `domains`), и если поле **присутствует** — вызвать
+  `PlatformsRepository.setEnvironmentPlatforms` тем же `tx`. Отсутствие
+  поля не трогает набор;
 - `remove`: перед удалением окружения снять строки `environmentPlatforms`;
-- `findForProject` и `findById`: подгрузить платформы окружений одним запросом
-  (`inArray` по идентификаторам окружений, как уже сделано с доменами)
-  и передать в проекцию;
-- `environment.projection.ts`: `platforms` появляется только на уровне чтения,
-  рядом с `server` — на уровне метаданных у окружения есть лишь имя, вид
-  и адреса.
+- `findForProject` и `findById`: подгрузить платформы окружений одним
+  запросом (`inArray` по идентификаторам окружений, как уже сделано с
+  доменами), с сортировкой по `projectPlatforms.position`, и передать
+  в проекцию;
+- `environment.projection.ts`: `platforms` появляется только на уровне
+  чтения, рядом с `server`. Рядом — комментарий о том, что имя платформы
+  намеренно видно из «Инфраструктуры» без выдачи на «Инфо» (тот же приём,
+  что у имени окружения в переменных), иначе это выглядит как утечка
+  проекции и будет «исправлено» при следующем проходе по правам.
+
+`EnvironmentsModule` импортирует `PlatformsModule`.
 
 - [ ] **Step 4: Запустить**
 
-Run: `cd apps/api && npx vitest run src/environments`
+Run: `cd apps/api && npx vitest run src/environments src/platforms src/projects`
 Expected: PASS.
 
 - [ ] **Step 5: Коммит**
@@ -1268,7 +1727,7 @@ git commit -m "Отмечать в окружении развёрнутые п�
 - Create: `apps/api/src/roadmap/release.summary.ts`
 - Create: `apps/api/src/roadmap/release.summary.test.ts`
 
-Чистая функция без базы: правило сводки проверяется таблицей случаев, а не поднятым PostgreSQL.
+Чистая функция без базы: правило проверяется таблицей случаев, а не поднятым PostgreSQL.
 
 - [ ] **Step 1: Падающие тесты**
 
@@ -1281,8 +1740,19 @@ import { releaseSummaryOf } from './release.summary';
 const API = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
 const STORE = { id: 'p2', kind: PlatformKind.Store, name: 'App Store', position: 2 };
 
-const V1 = { id: 'v1', label: 'v1.2', position: 1 };
-const V2 = { id: 'v2', label: 'v1.3', position: 2 };
+const V1 = { id: 'v1', label: 'v1.2' };
+const V2 = { id: 'v2', label: 'v1.3' };
+
+/** Строка выпуска в том виде, в каком её читает правило. */
+function release(
+  version: { id: string },
+  platform: { id: string },
+  state: PlatformReleaseState,
+  releasedDate: string | null,
+  buildLabel: string | null = null,
+) {
+  return { versionId: version.id, platformId: platform.id, state, releasedDate, buildLabel };
+}
 
 describe('releaseSummaryOf', () => {
   it('строка есть у каждой платформы, даже без релизов', () => {
@@ -1291,6 +1761,13 @@ describe('releaseSummaryOf', () => {
     expect(summary).toHaveLength(2);
     expect(summary[0]?.released).toBeNull();
     expect(summary[0]?.pending).toEqual([]);
+  });
+
+  it('строки идут в порядке платформ', () => {
+    const summary = releaseSummaryOf([STORE, API], [V1], []);
+
+    // Порядок приходит из списка платформ, уже упорядоченного выборкой.
+    expect(summary.map((row) => row.platform.name)).toEqual(['App Store', 'API']);
   });
 
   it('в релизе — выпущенный выпуск самой поздней версии', () => {
@@ -1304,6 +1781,7 @@ describe('releaseSummaryOf', () => {
     );
 
     expect(row?.released?.versionLabel).toBe('v1.3');
+    expect(row?.released?.date).toBe('2026-03-16');
   });
 
   it('в пути — только то, что стоит после релиза', () => {
@@ -1322,7 +1800,7 @@ describe('releaseSummaryOf', () => {
     expect(row?.pending).toEqual([]);
   });
 
-  it('показывает модерацию и тест после текущего релиза', () => {
+  it('показывает модерацию после текущего релиза', () => {
     const [row] = releaseSummaryOf(
       [STORE],
       [V1, V2],
@@ -1334,6 +1812,7 @@ describe('releaseSummaryOf', () => {
 
     expect(row?.pending.map((entry) => entry.state)).toEqual([PlatformReleaseState.InReview]);
     expect(row?.pending[0]?.versionLabel).toBe('v1.3');
+    expect(row?.pending[0]?.date).toBeNull();
   });
 
   it('без релиза показывает всё, что в пути, по порядку версий', () => {
@@ -1353,15 +1832,25 @@ describe('releaseSummaryOf', () => {
     const [row] = releaseSummaryOf(
       [STORE],
       [V1],
-      [{ ...release(V1, STORE, PlatformReleaseState.Released, '2026-03-14'), buildLabel: '1.2 (45)' }],
+      [release(V1, STORE, PlatformReleaseState.Released, '2026-03-14', '1.2 (45)')],
     );
 
     expect(row?.released?.buildLabel).toBe('1.2 (45)');
   });
+
+  it('молча пропускает выпуск неизвестной версии', () => {
+    // Такого быть не может, пока выпуски уходят вместе с версией,
+    // но падать на этом в сводке хуже, чем не показать строку.
+    const [row] = releaseSummaryOf(
+      [API],
+      [V1],
+      [release({ id: 'нет такой' }, API, PlatformReleaseState.Released, '2026-03-14')],
+    );
+
+    expect(row?.released).toBeNull();
+  });
 });
 ```
-
-Вспомогательная `release(version, platform, state, date)` собирает строку выпуска с `buildLabel: null`.
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
@@ -1381,6 +1870,12 @@ Expected: FAIL — модуль не найден.
  *
  * Принимает не строки базы, а то немногое, что ей нужно: так правило
  * проверяется таблицей случаев без поднятого PostgreSQL.
+ *
+ * Порядок версий берётся из **порядка списка**, а не из поля `position`:
+ * уникальности по позиции у версий нет, правка позиции соседей не
+ * перенумеровывает, и две версии могут встать на одно место. Список
+ * приходит упорядоченным из выборки (`position`, затем `createdAt`),
+ * и его индекс — единственный детерминированный порядковый номер.
  */
 export function releaseSummaryOf(
   platforms: SummaryPlatform[],
@@ -1391,18 +1886,16 @@ export function releaseSummaryOf(
 
 Правило:
 
-1. версии разложить в `Map` по идентификатору — из неё берутся `label`
-   и `position`;
-2. выпуски сгруппировать по платформе;
-3. в каждой группе найти выпущенный выпуск с наибольшей `position` — это
-   `released`;
-4. `pending` — выпуски в состояниях, отличных от `Released`, у версий с
-   `position` больше, чем у найденной (нет `released` — все), по возрастанию
-   `position`;
-5. строки сводки — по порядку `position` платформ; платформа без выпусков
+1. построить `Map` «идентификатор версии → `{ label, ordinal }`», где
+   `ordinal` — индекс в пришедшем списке;
+2. выпуски сгруппировать по платформе, выпуски неизвестных версий
+   отбросить;
+3. в каждой группе найти выпуск в состоянии `Released` с наибольшим
+   `ordinal` — это `released`;
+4. `pending` — выпуски в прочих состояниях с `ordinal` больше, чем у
+   найденного (нет `released` — все), по возрастанию `ordinal`;
+5. строки — по порядку пришедшего списка платформ; платформа без выпусков
    даёт `{ released: null, pending: [] }`.
-
-Выпуск, ссылающийся на неизвестную версию, пропускается молча: такого быть не может, пока выпуски удаляются вместе с версией, а падать на этом в сводке — хуже, чем не показать строку.
 
 - [ ] **Step 4: Запустить**
 
@@ -1416,13 +1909,17 @@ git add apps/api/src/roadmap
 git commit -m "Вычислять сводку релизов по выпускам"
 ```
 
-### Task 4.2: Выпуски и теги в проекции версии
+### Task 4.2: Выпуски, теги и дата в проекции версии
 
 **Files:**
 - Modify: `apps/api/src/roadmap/roadmap.projection.ts`
 - Modify: `apps/api/src/roadmap/roadmap.projection.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [ ] **Step 1: Падающие тесты и правка существующих вызовов**
+
+Подпись меняется, поэтому **сначала** поправить девять существующих вызовов в файле: третьим аргументом добавить `[]` (выпусков нет), а три вызова вида `versionProjection(version, checkpoints, AccessLevel.Read, false)` переписать на объект настроек — `versionProjection(version, checkpoints, [], AccessLevel.Read, { withLinks: false })`.
+
+Новые тесты (приведение типа обязательно: функция возвращает union, и тесты файла уже пишут `as RoadmapVersionDetail`):
 
 ```ts
 it('дата версии берётся из выпусков, когда они есть', () => {
@@ -1441,6 +1938,19 @@ it('дата версии берётся из выпусков, когда он�
   expect(projected.releasedDate).toBe('2026-03-16');
 });
 
+it('не теряет хранимую дату, когда выпуски выпущены без дат', () => {
+  // «Вышла, дата неизвестна» — допустимое состояние выпуска, и оно
+  // не должно стирать то, что уже известно о версии.
+  const projected = versionProjection(
+    { ...version, releasedDate: '2026-01-01' },
+    [],
+    [{ platformId: 'p1', state: PlatformReleaseState.Released, releasedDate: null, buildLabel: null }],
+    AccessLevel.Read,
+  );
+
+  expect(projected.releasedDate).toBe('2026-01-01');
+});
+
 it('без выпущенных выпусков дата остаётся хранимой', () => {
   const projected = versionProjection(
     { ...version, releasedDate: '2026-01-01' },
@@ -1452,37 +1962,78 @@ it('без выпущенных выпусков дата остаётся хр�
   expect(projected.releasedDate).toBe('2026-01-01');
 });
 
+it('дата из выпусков видна и на уровне метаданных', () => {
+  // Публичная схема расширяет метаданные: положи вычисление в блок
+  // чтения — и наружу уйдёт устаревшая хранимая дата.
+  const projected = versionProjection(
+    { ...version, releasedDate: '2026-01-01' },
+    [],
+    [{ platformId: 'p1', state: PlatformReleaseState.Released, releasedDate: '2026-03-16', buildLabel: null }],
+    AccessLevel.Metadata,
+  );
+
+  expect(projected.releasedDate).toBe('2026-03-16');
+});
+
 it('выпуски и теги открываются уровнем чтения', () => {
+  const releases = [
+    { platformId: 'p1', state: PlatformReleaseState.OnTest, releasedDate: null, buildLabel: null },
+  ];
+  const tags = new Map([[checkpoints[0]!.id, ['p1']]]);
+
   const metadata = versionProjection(version, checkpoints, releases, AccessLevel.Metadata);
-  const read = versionProjection(version, checkpoints, releases, AccessLevel.Read);
+  const read = versionProjection(version, checkpoints, releases, AccessLevel.Read, {
+    platformsByCheckpoint: tags,
+  }) as RoadmapVersionDetail;
 
   expect('releases' in metadata).toBe(false);
   expect(read.releases).toHaveLength(1);
   expect(read.checkpoints[0]?.platformIds).toEqual(['p1']);
+});
+
+it('чекпоинт без тегов получает пустой набор, а не отсутствие поля', () => {
+  // Публичная схема строгая и поле ждёт; отсутствие провалило бы разбор.
+  const read = versionProjection(version, checkpoints, [], AccessLevel.Read) as RoadmapVersionDetail;
+
+  expect(read.checkpoints[0]?.platformIds).toEqual([]);
 });
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/api && npx vitest run src/roadmap/roadmap.projection.test.ts`
-Expected: FAIL — у `versionProjection` нет третьего параметра.
+Expected: FAIL — у `versionProjection` нет третьего параметра и нет объекта настроек.
 
 - [ ] **Step 3: Реализация**
 
-`versionProjection` получает выпуски и теги:
+Подпись: выпуски — позиционно, остальное — объектом настроек.
 
 ```ts
+/** Настройки проекции, которые легко перепутать позициями. */
+interface VersionProjectionOptions {
+  /**
+   * Отдавать ли ссылки на задачи. По умолчанию да.
+   *
+   * Объектом, а не шестым позиционным аргументом: этот флаг —
+   * единственное, что держит адрес внутреннего трекера внутри, и
+   * позиционный булев легко уехал бы не туда при следующей правке
+   * подписи.
+   */
+  withLinks?: boolean;
+  /** Теги чекпоинтов: идентификатор чекпоинта → платформы. */
+  platformsByCheckpoint?: Map<string, string[]>;
+}
+
 export function versionProjection(
   version: RoadmapVersionRow,
   checkpoints: RoadmapCheckpointRow[],
   releases: PlatformRelease[],
   level: AccessLevel,
-  platformsByCheckpoint: Map<string, string[]> = new Map(),
-  withLinks = true,
+  { withLinks = true, platformsByCheckpoint }: VersionProjectionOptions = {},
 ): RoadmapVersionMetadata | RoadmapVersionDetail
 ```
 
-Фактическая дата — отдельной чистой функцией в том же файле:
+`releasedDate` считается **в блоке метаданных** отдельной чистой функцией:
 
 ```ts
 /**
@@ -1490,28 +2041,31 @@ export function versionProjection(
  * хранимая.
  *
  * Выпуски точнее: у версии одна дата, а платформы выходят вразнобой.
- * Хранимая колонка остаётся ответом, пока выпусков нет, — иначе дата
- * проектов без платформ исчезла бы вместе с полем формы.
+ * Хранимая колонка остаётся ответом, пока точнее ответить нечем, —
+ * в том числе когда выпуски выпущены, но даты у них не заполнены.
  */
 function releasedDateOf(version: RoadmapVersionRow, releases: PlatformRelease[]): string | null {
+  // Фильтр пустых дат идёт **до** проверки на пустоту: иначе выпуск
+  // «вышла, дата неизвестна» затёр бы хранимую дату на null.
   const dates = releases
     .filter((release) => release.state === PlatformReleaseState.Released)
-    .map((release) => release.releasedDate);
+    .map((release) => release.releasedDate)
+    .filter((date): date is string => date !== null);
 
-  if (dates.length === 0) {
-    return version.releasedDate;
-  }
-
-  return dates.filter((date): date is string => date !== null).sort().at(-1) ?? null;
+  // Строки `ГГГГ-ММ-ДД` сравниваются лексикографически верно: нули-
+  // заполнители на месте. Не «починить» это на localeCompare.
+  return dates.length > 0 ? dates.sort().at(-1)! : version.releasedDate;
 }
 ```
 
-Теги в чекпоинте — `platformIds: platformsByCheckpoint.get(checkpoint.id) ?? []`, рядом с `url`. Поле добавляется всегда, в отличие от `url`: публичная схема его ждёт.
+Теги — `platformIds: platformsByCheckpoint?.get(checkpoint.id) ?? []`, рядом с `url`. Поле добавляется **всегда**, в отличие от `url`: публичная схема его ждёт.
+
+`releases` добавляется в блок уровня чтения, рядом с `checkpoints`.
 
 - [ ] **Step 4: Запустить**
 
-Run: `cd apps/api && npx vitest run src/roadmap`
-Expected: PASS после правки вызовов в репозитории (следующая задача ещё не написана — на этом шаге допустимо передавать `[]`).
+Run: `cd apps/api && npx vitest run src/roadmap/roadmap.projection.test.ts`
+Expected: PASS. Репозиторий на этом шаге ещё передаёт `[]` — `summary` в ответе появится в Task 4.3.
 
 - [ ] **Step 5: Коммит**
 
@@ -1520,7 +2074,7 @@ git add apps/api/src/roadmap
 git commit -m "Показывать в версии её выпуски и теги чекпоинтов"
 ```
 
-### Task 4.3: Чтение роадмапа с выпусками и сводкой
+### Task 4.3: Чтение роадмапа со сводкой
 
 **Files:**
 - Modify: `apps/api/src/roadmap/roadmap.repository.ts`
@@ -1528,26 +2082,64 @@ git commit -m "Показывать в версии её выпуски и те�
 
 - [ ] **Step 1: Падающие тесты**
 
+Платформы в тестах заводятся вставкой в `projectPlatforms` (репозиторий платформ потребовал бы «Инфо»).
+
 ```ts
 it('отдаёт сводку рядом с версиями', async () => {
-  const roadmap = await repository.findForProject(reader, projectId);
+  await grant(AccessLevel.Read);
+  await createPlatform('API');
+  await createPlatform('App Store', PlatformKind.Store);
+
+  const roadmap = await repository.findForProject(member(), projectId);
 
   expect(roadmap.summary.map((row) => row.platform.name)).toEqual(['API', 'App Store']);
 });
 
-it('отдаёт сводку и в публичной выдаче, без ссылок на задачи', async () => {
+it('отдаёт сводку и на уровне метаданных', async () => {
+  // Обозначения версий и даты метаданными и являются; формулировок
+  // чекпоинтов в сводке нет.
+  await grant(AccessLevel.Metadata);
+  await createPlatform('API');
+
+  const roadmap = await repository.findForProject(member(), projectId);
+
+  expect(roadmap.summary).toHaveLength(1);
+});
+
+it('отдаёт сводку тому, у кого нет доступа к «Инфо»', async () => {
+  // Платформы — поле паспорта, но их имена раскрываются в той секции,
+  // где упомянуты: тот же приём, что у имени окружения в переменных.
+  await grant(AccessLevel.Read); // выдача только на Section.Roadmap
+  await createPlatform('API');
+
+  const roadmap = await repository.findForProject(member(), projectId);
+
+  expect(roadmap.summary).toHaveLength(1);
+});
+
+it('отдаёт сводку в публичной выдаче, без ссылок на задачи', async () => {
+  await createPlatform('API');
+  const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
+
   const roadmap = await repository.publicRoadmap(token);
 
-  expect(roadmap?.summary).toHaveLength(2);
+  expect(roadmap?.summary).toHaveLength(1);
   expect(roadmap?.versions[0]?.checkpoints[0]).not.toHaveProperty('url');
 });
 
-it('показывает сводку тому, у кого нет доступа к «Инфо»', async () => {
-  // Платформы — поле паспорта, но их имена раскрываются в той секции,
-  // где упомянуты: тот же приём, что у имени окружения в переменных.
-  const roadmap = await repository.findForProject(roadmapOnlySubject, projectId);
+it('версия уровня чтения сохраняет чекпоинты', async () => {
+  // Страховка от тихой деградации union: проекция, забывшая `releases`,
+  // провалилась бы в ветку метаданных и потеряла чекпоинты вместо ошибки.
+  await grant(AccessLevel.Read);
+  const versionId = await createVersion('v1.0');
+  await testDb.db.transaction((tx) =>
+    repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Оплата' }),
+  );
 
-  expect(roadmap.summary).toHaveLength(2);
+  const roadmap = await repository.findForProject(member(), projectId);
+
+  expect(roadmap.versions[0]).toHaveProperty('checkpoints');
+  expect(roadmap.versions[0]).toHaveProperty('releases');
 });
 ```
 
@@ -1563,7 +2155,7 @@ Expected: FAIL — `summary` в ответе нет.
 ```ts
     // Платформы читаются таблицей, а не репозиторием платформ: тот
     // проверяет доступ к «Инфо», которого у подрядчика с одним роадмапом
-    // нет. Право на эти данные даёт сама секция «Роадмап».
+    // нет. Право на эти данные даёт сама секция «Роадмап» (дизайн 9).
     const platforms = await executor
       .select()
       .from(projectPlatforms)
@@ -1571,7 +2163,7 @@ Expected: FAIL — `summary` в ответе нет.
       .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt));
 ```
 
-`findForProject` и `publicRoadmap` возвращают `summary: releaseSummaryOf(...)`. Проекции версий передаются выпуски этой версии и карта тегов.
+`findForProject` и `publicRoadmap` возвращают `summary: releaseSummaryOf(platforms, versions, releases)` — `versions` передаются в том же порядке, в котором пришли из выборки. Проекции версий получают выпуски своей версии и карту тегов; публичный путь сохраняет `{ withLinks: false, platformsByCheckpoint }`.
 
 - [ ] **Step 4: Запустить**
 
@@ -1597,57 +2189,115 @@ git commit -m "Отдавать сводку релизов вместе с ро
 it('ставит выпуск и переставляет его той же ручкой', async () => {
   // Выпуск — не отдельная вещь со своим адресом, а значение в клетке
   // «версия × платформа»: повторный вызов меняет её, а не плодит вторую.
-  await db.transaction((tx) =>
-    repository.setRelease(writer, tx, projectId, versionId, apiId, {
+  const versionId = await createVersion('v1.0');
+  const apiId = await createPlatform('API');
+
+  await testDb.db.transaction((tx) =>
+    repository.setRelease(admin(), tx, projectId, versionId, apiId, {
       state: PlatformReleaseState.OnTest,
     }),
   );
-  await db.transaction((tx) =>
-    repository.setRelease(writer, tx, projectId, versionId, apiId, {
+  await testDb.db.transaction((tx) =>
+    repository.setRelease(admin(), tx, projectId, versionId, apiId, {
       state: PlatformReleaseState.Released,
       releasedDate: '2026-03-12',
     }),
   );
 
-  const releases = await rowsOf(versionPlatformReleases);
+  const releases = await testDb.rowsOf(versionPlatformReleases);
 
   expect(releases).toHaveLength(1);
   expect(releases[0]?.state).toBe(PlatformReleaseState.Released);
+  expect(releases[0]?.releasedDate).toBe('2026-03-12');
+});
+
+it('не присланные поля обнуляет, а не оставляет прежними', async () => {
+  // Иначе переход «выпущена 12.03 → на тесте» сохранил бы дату релиза,
+  // и PUT перестал бы быть заменой значения в клетке.
+  const versionId = await createVersion('v1.0');
+  const apiId = await createPlatform('API');
+
+  await testDb.db.transaction((tx) =>
+    repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+      state: PlatformReleaseState.Released,
+      releasedDate: '2026-03-12',
+      buildLabel: '1.0 (7)',
+    }),
+  );
+  await testDb.db.transaction((tx) =>
+    repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+      state: PlatformReleaseState.OnTest,
+    }),
+  );
+
+  const [release] = await testDb.rowsOf(versionPlatformReleases);
+
+  expect(release?.releasedDate).toBeNull();
+  expect(release?.buildLabel).toBeNull();
 });
 
 it('не ставит модерацию серверной платформе', async () => {
+  const versionId = await createVersion('v1.0');
+  const apiId = await createPlatform('API');
+
   await expect(
-    db.transaction((tx) =>
-      repository.setRelease(writer, tx, projectId, versionId, apiId, {
+    testDb.db.transaction((tx) =>
+      repository.setRelease(admin(), tx, projectId, versionId, apiId, {
         state: PlatformReleaseState.InReview,
       }),
     ),
-  ).rejects.toThrow(ConflictException);
+  ).rejects.toBeInstanceOf(ConflictException);
 });
 
 it('не видит платформу чужого проекта', async () => {
+  const versionId = await createVersion('v1.0');
+  const foreign = await createPlatform('API', PlatformKind.Server, otherProjectId);
+
   await expect(
-    db.transaction((tx) =>
-      repository.setRelease(writer, tx, projectId, versionId, foreignPlatformId, {
+    testDb.db.transaction((tx) =>
+      repository.setRelease(admin(), tx, projectId, versionId, foreign, {
         state: PlatformReleaseState.OnTest,
       }),
     ),
-  ).rejects.toThrow(SectionNotVisibleError);
+  ).rejects.toBeInstanceOf(SectionNotVisibleError);
 });
 
-it('снятие возвращает платформу «как у версии»', async () => {
-  await db.transaction((tx) =>
-    repository.clearRelease(writer, tx, projectId, versionId, apiId),
+it('возвращает имя платформы и обозначение версии для журнала', async () => {
+  // Служба их не достаёт сама: вызов репозитория платформ потребовал бы
+  // доступа к «Инфо», которого у подрядчика с записью в роадмап нет.
+  const versionId = await createVersion('v1.0');
+  const apiId = await createPlatform('API');
+
+  const set = await testDb.db.transaction((tx) =>
+    repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+      state: PlatformReleaseState.OnTest,
+    }),
   );
 
-  expect(await rowsOf(versionPlatformReleases)).toHaveLength(0);
+  expect(set).toMatchObject({ platformName: 'API', versionLabel: 'v1.0' });
 });
 
-it('снятие того, чего нет, — не ошибка', async () => {
+it('снятие возвращает платформу «как у версии» и не считает отсутствие ошибкой', async () => {
+  const versionId = await createVersion('v1.0');
+  const apiId = await createPlatform('API');
+
+  await testDb.db.transaction((tx) =>
+    repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+      state: PlatformReleaseState.OnTest,
+    }),
+  );
+  await testDb.db.transaction((tx) =>
+    repository.clearRelease(admin(), tx, projectId, versionId, apiId),
+  );
+
+  expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
+
   // Ручка идемпотентна: «как у версии» и до, и после вызова.
   await expect(
-    db.transaction((tx) => repository.clearRelease(writer, tx, projectId, versionId, apiId)),
-  ).resolves.toBeUndefined();
+    testDb.db.transaction((tx) =>
+      repository.clearRelease(admin(), tx, projectId, versionId, apiId),
+    ),
+  ).resolves.toBeDefined();
 });
 ```
 
@@ -1663,8 +2313,13 @@ Expected: FAIL — методов нет.
    * Ставит выпуск платформы в версии.
    *
    * Строка одна на пару «версия × платформа»: повторный вызов меняет её.
-   * Допустимость состояния определяется видом платформы — `releaseStatesFor`
-   * из контракта, тот же список, по которому интерфейс рисует выбор.
+   * Допустимость состояния определяется видом платформы —
+   * `releaseStatesFor` из контракта, тот же список, по которому интерфейс
+   * рисует выбор.
+   *
+   * Возвращает строку вместе с именем платформы и обозначением версии:
+   * они нужны журналу, а достать их отдельным запросом служба не может —
+   * репозиторий платформ требует доступа к «Инфо».
    */
   async setRelease(
     subject: RequestSubject,
@@ -1673,12 +2328,27 @@ Expected: FAIL — методов нет.
     versionId: string,
     platformId: string,
     input: PlatformReleaseSet,
-  ): Promise<PlatformReleaseRow>
+  ): Promise<PlatformReleaseRow & { platformName: string; versionLabel: string }>
 ```
 
-Порядок внутри: `requireLevel(Роадмап, Write)` → `requireVersion` → платформа того же проекта (иначе `SectionNotVisibleError`) → проверка состояния по виду (иначе `ConflictException` с текстом «Модерации у платформы «API» не бывает: она живёт на нашей машине») → `insert ... onConflictDoUpdate` по паре.
+Порядок внутри: `requireLevel(Роадмап, Write, tx)` → `requireVersion(tx, projectId, versionId)` → платформа того же проекта (иначе `SectionNotVisibleError`) → проверка состояния по виду через `releaseStatesFor` (иначе `ConflictException` с текстом вида «Модерации у платформы «API» не бывает: она живёт на нашей машине») → `insert … onConflictDoUpdate` по паре.
 
-`clearRelease` — те же проверки и `delete`; отсутствие строки ошибкой не считается.
+Присланные поля нормализуются **явно**, по образцу `url: input.url ?? null` в `createCheckpoint`:
+
+```ts
+    const values = {
+      versionId,
+      platformId,
+      state: input.state,
+      // `?? null`, а не `input.releasedDate`: Drizzle пропускает
+      // `undefined`, и прежняя дата осталась бы в клетке после смены
+      // состояния.
+      releasedDate: input.releasedDate ?? null,
+      buildLabel: input.buildLabel ?? null,
+    };
+```
+
+`clearRelease` — те же проверки и `delete`; отсутствие строки ошибкой не считается, но имя платформы и обозначение версии возвращаются так же (журналу они нужны и при снятии).
 
 - [ ] **Step 4: Запустить**
 
@@ -1701,65 +2371,100 @@ git commit -m "Ставить и снимать выпуск платформы"
 - [ ] **Step 1: Падающие тесты**
 
 ```ts
-it('ставит теги при создании чекпоинта и заменяет при правке', async () => {
-  const created = await db.transaction((tx) =>
-    repository.createCheckpoint(writer, tx, projectId, versionId, {
+it('ставит теги при создании и заменяет при правке', async () => {
+  const versionId = await createVersion('v1.0');
+  const iosId = await createPlatform('App Store', PlatformKind.Store);
+  const androidId = await createPlatform('Google Play', PlatformKind.Store);
+  await grant(AccessLevel.Read);
+
+  const created = await testDb.db.transaction((tx) =>
+    repository.createCheckpoint(admin(), tx, projectId, versionId, {
       title: 'Вход по телефону',
       platformIds: [iosId, androidId],
     }),
   );
 
-  await db.transaction((tx) =>
-    repository.updateCheckpoint(writer, tx, projectId, versionId, created.id, {
+  await testDb.db.transaction((tx) =>
+    repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
       platformIds: [iosId],
     }),
   );
 
-  const roadmap = await repository.findForProject(reader, projectId);
+  const roadmap = await repository.findForProject(member(), projectId);
 
-  expect(roadmap.versions[0]?.checkpoints[0]?.platformIds).toEqual([iosId]);
+  expect((roadmap.versions[0] as RoadmapVersionDetail).checkpoints[0]?.platformIds).toEqual([
+    iosId,
+  ]);
 });
 
 it('пустой набор тегов снимает все', async () => {
-  await db.transaction((tx) =>
-    repository.updateCheckpoint(writer, tx, projectId, versionId, checkpointId, {
+  // … чекпоинт с тегом
+  await testDb.db.transaction((tx) =>
+    repository.updateCheckpoint(admin(), tx, projectId, versionId, checkpointId, {
       platformIds: [],
     }),
   );
 
-  expect(await rowsOf(checkpointPlatforms)).toHaveLength(0);
+  expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+});
+
+it('правка без тегов их не трогает', async () => {
+  // Ровно так переключается галочка «закрыт»: буквальная замена набора
+  // снесла бы теги при каждом щелчке.
+  // … чекпоинт с тегом
+  await testDb.db.transaction((tx) =>
+    repository.updateCheckpoint(admin(), tx, projectId, versionId, checkpointId, { isDone: true }),
+  );
+
+  expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(1);
+});
+
+it('не ставит тег платформы чужого проекта', async () => {
+  const foreign = await createPlatform('API', PlatformKind.Server, otherProjectId);
+
+  await expect(
+    testDb.db.transaction((tx) =>
+      repository.createCheckpoint(admin(), tx, projectId, versionId, {
+        title: 'Оплата',
+        platformIds: [foreign],
+      }),
+    ),
+  ).rejects.toBeInstanceOf(SectionNotVisibleError);
 });
 
 it('удаление версии уносит выпуски и теги её чекпоинтов', async () => {
-  await db.transaction((tx) => repository.removeVersion(writer, tx, projectId, versionId));
+  // … версия с чекпоинтом с тегом и выпуском
+  await testDb.db.transaction((tx) => repository.removeVersion(admin(), tx, projectId, versionId));
 
-  expect(await rowsOf(versionPlatformReleases)).toHaveLength(0);
-  expect(await rowsOf(checkpointPlatforms)).toHaveLength(0);
+  expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
+  expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
 });
 
 it('удаление чекпоинта уносит его теги', async () => {
-  await db.transaction((tx) =>
-    repository.removeCheckpoint(writer, tx, projectId, versionId, checkpointId),
+  await testDb.db.transaction((tx) =>
+    repository.removeCheckpoint(admin(), tx, projectId, versionId, checkpointId),
   );
 
-  expect(await rowsOf(checkpointPlatforms)).toHaveLength(0);
+  expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
 });
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/api && npx vitest run src/roadmap/roadmap.repository.test.ts`
-Expected: FAIL — теги не записываются; удаление падает на ссылочной целостности.
+Expected: FAIL. Первый тест — теги не записываются; тесты удаления — падение на ссылочной целостности; правка с `platformIds` может упасть на вставке несуществующей колонки.
 
 - [ ] **Step 3: Реализация**
 
 - `createCheckpoint` и `updateCheckpoint`: отделить `platformIds` от полей
-  чекпоинта (в `values()`/`set()` они попасть не должны), присланный набор
-  заменить целиком — `delete` по чекпоинту, затем `insert`. Платформы
-  обязаны принадлежать тому же проекту, иначе `SectionNotVisibleError`;
-- `removeVersion`: перед удалением чекпоинтов снять их теги, затем выпуски
-  версии, затем чекпоинты и версию — порядок важен, он обратный ссылкам;
-- `removeCheckpoint`: снять теги, затем чекпоинт.
+  чекпоинта (в `values()`/`set()` они попасть не должны). **`undefined`
+  и пустой массив различаются**: поля нет — набор не трогать, пустой —
+  снять все. Присланный набор заменяется целиком: `delete` по чекпоинту,
+  затем `insert`. Платформы обязаны принадлежать тому же проекту, иначе
+  `SectionNotVisibleError`;
+- `removeVersion`: порядок обратен ссылкам — сначала теги чекпоинтов этой
+  версии, затем выпуски версии, затем чекпоинты, затем версия;
+- `removeCheckpoint`: сначала теги, затем чекпоинт.
 
 - [ ] **Step 4: Запустить**
 
@@ -1773,43 +2478,55 @@ git add apps/api/src/roadmap
 git commit -m "Помечать чекпоинты платформами и убирать за удалением"
 ```
 
-### Task 4.6: Ручки выпуска и журнал
+### Task 4.6: Ручка выпуска, журнал и описание инструмента
 
 **Files:**
 - Modify: `apps/api/src/roadmap/roadmap.service.ts`
-- Modify: `apps/api/src/roadmap/roadmap.controller.ts`
 - Modify: `apps/api/src/roadmap/roadmap.service.test.ts`
+- Modify: `apps/api/src/roadmap/roadmap.controller.ts`
+- Modify: `apps/api/src/agents/mcp-tools.ts`
+- Modify: `apps/web/src/components/AuditTable/constants.ts`
 
 - [ ] **Step 1: Падающий тест**
 
+В стиле файла — настоящий `AuditService` и хелпер `entriesOf`, без `vi.fn()`:
+
 ```ts
 it('пишет постановку выпуска в журнал', async () => {
-  await service.setRelease(subject, projectId, versionId, platformId, {
+  const versionId = /* создать версию службой */;
+  const platformId = /* завести платформу вставкой */;
+
+  await service.setRelease(admin(), projectId, versionId, platformId, {
     state: PlatformReleaseState.InReview,
   });
 
-  expect(audit.record).toHaveBeenCalledWith(
-    expect.anything(),
-    expect.anything(),
-    expect.objectContaining({
-      action: AuditAction.PlatformReleaseSet,
-      entityType: 'platform_release',
-      metadata: expect.objectContaining({ state: PlatformReleaseState.InReview }),
-    }),
-  );
+  const [entry] = await entriesOf(AuditAction.PlatformReleaseSet);
+
+  expect(entry?.metadata).toMatchObject({
+    state: PlatformReleaseState.InReview,
+    platform: 'App Store',
+    label: 'v1.0',
+  });
+});
+
+it('пишет снятие выпуска', async () => {
+  // … после setRelease
+  await service.clearRelease(admin(), projectId, versionId, platformId);
+
+  expect(await entriesOf(AuditAction.PlatformReleaseCleared)).toHaveLength(1);
 });
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падает**
 
 Run: `cd apps/api && npx vitest run src/roadmap/roadmap.service.test.ts`
-Expected: FAIL — метода нет.
+Expected: FAIL — методов службы нет.
 
 - [ ] **Step 3: Реализация**
 
-В службу — `setRelease` и `clearRelease` по образцу остальных: транзакция, репозиторий, журнал (`PlatformReleaseSet` / `PlatformReleaseCleared`, в метаданных обозначение версии, имя платформы и состояние).
+В службу — `setRelease` и `clearRelease` по образцу остальных: транзакция, репозиторий, журнал (`PlatformReleaseSet` / `PlatformReleaseCleared`, `entityType: 'platform_release'`, в метаданных обозначение версии, имя платформы и состояние — всё из того, что вернул репозиторий).
 
-В контроллер:
+В контроллер — две ручки; `Put` нужно **добавить в импорт** из `@nestjs/common` (сейчас там только `Post`, `Patch`, `Delete`):
 
 ```ts
   /**
@@ -1834,15 +2551,21 @@ Expected: FAIL — метода нет.
   async clearRelease(/* те же параметры без тела */): Promise<void> {}
 ```
 
+Ответ собирается явным объектом `PlatformRelease` — наружу не должны уйти `platformName`, `versionLabel` и отметки времени.
+
+В `mcp-tools.ts` описание инструмента `get_roadmap` дополнить выпусками: «Роадмап: версии, чекпоинты, выпуски по платформам и текущая стадия». Модель выбирает инструмент по описанию, а ответ уже содержит сводку — `findForProject` возвращает её сам.
+
+В `AuditTable/constants.ts` добавить подписи пяти новых действий — иначе строка журнала покажется сырым `platform.created`.
+
 - [ ] **Step 4: Запустить**
 
-Run: `cd apps/api && npx vitest run src && pnpm typecheck`
-Expected: тесты API зелёные; `typecheck` ещё красный в вебе — это Chunk 5 и 6.
+Run: `cd apps/api && npx vitest run src`
+Expected: PASS. `pnpm typecheck` из корня ещё красный в вебе — это Chunk 5 и 6.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add apps/api/src/roadmap
+git add apps/api/src apps/web/src/components/AuditTable/constants.ts
 git commit -m "Открыть ручку выпуска и писать её в журнал"
 ```
 
@@ -1859,16 +2582,23 @@ git commit -m "Открыть ручку выпуска и писать её в 
 
 - [ ] **Step 1: Падающий тест**
 
+В стиле файла — `toHaveClass`, как в остальных пяти тестах:
+
 ```ts
-it('половинная ширина не сжимает панель на телефоне', () => {
-  // `max-w-[50vw]` без условия отдал бы форме половину телефона.
+it('половинная ширина не сжимает панель ни на телефоне, ни на планшете', () => {
+  // На телефоне ограничения быть не должно вовсе, а 50vw на планшете —
+  // это 384px, уже нынешних 480px: «половина экрана» обернулась бы
+  // сужением.
   render(
     <Drawer isOpen onClose={() => {}} title="Новый проект" width={DrawerWidth.Half}>
       поле
     </Drawer>,
   );
 
-  expect(screen.getByRole('dialog').className).toContain('md:max-w-[50vw]');
+  const dialog = screen.getByRole('dialog');
+
+  expect(dialog).toHaveClass('md:max-w-[max(480px,50vw)]');
+  expect(dialog.className).not.toMatch(/(^|\s)max-w-/);
 });
 ```
 
@@ -1889,9 +2619,10 @@ Expected: FAIL — `DrawerWidth.Half` не определён.
 В `constants.ts`:
 
 ```ts
-  // Ограничение только с `md`: на телефоне половина экрана — это половина
-  // телефона, и форма в неё не влезает.
-  [DrawerWidth.Half]: 'md:max-w-[50vw]',
+  // Ограничение только с `md`, и не меньше узкой панели: на телефоне
+  // половина экрана — это половина телефона, а на планшете 50vw меньше
+  // нынешних 480px.
+  [DrawerWidth.Half]: 'md:max-w-[max(480px,50vw)]',
 ```
 
 - [ ] **Step 4: Запустить**
@@ -1906,23 +2637,35 @@ git add apps/web/src/components/Drawer
 git commit -m "Дать панели ширину в половину экрана"
 ```
 
-### Task 5.2: Хуки платформ и выпусков
+### Task 5.2: Хуки платформ
 
 **Files:**
 - Create: `apps/web/src/api/hooks/usePlatforms.ts`
 - Create: `apps/web/src/api/hooks/usePlatforms.test.tsx`
-- Create: `apps/web/src/api/hooks/useMutationRelease.ts`
 - Modify: `apps/web/src/api/hooks/index.ts`
 
 - [ ] **Step 1: Падающий тест**
 
-Образец обвязки — `apps/web/src/api/hooks/useMutationRoadmap.test.tsx`.
+Обвязка — как в `useMutationRoadmap.test.tsx`: локальный `wrapper` с `QueryClientProvider`, `vi.stubGlobal('fetch', …)` в тесте, инвалидация — через шпиона на клиенте.
 
 ```ts
-it('после заведения платформы обновляет и список, и роадмап', async () => {
+it('после заведения платформы сбрасывает и список, и роадмап', async () => {
   // Сводка релизов живёт в ответе роадмапа: без её сброса новая
   // платформа не появилась бы в сводке до перезагрузки страницы.
-  const { result } = renderHook(() => useMutationCreatePlatform('p1'), { wrapper });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidated: unknown[] = [];
+
+  vi.spyOn(client, 'invalidateQueries').mockImplementation(async (filters) => {
+    invalidated.push(filters?.queryKey?.[0]);
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'p1' }), { status: 200 })),
+  );
+
+  const { result } = renderHook(() => useMutationCreatePlatform('project-1'), {
+    wrapper: wrapperWith(client),
+  });
 
   result.current.mutate({ kind: PlatformKind.Server, name: 'API' });
 
@@ -1934,15 +2677,23 @@ it('после заведения платформы обновляет и сп�
 - [ ] **Step 2: Запустить, убедиться что падает**
 
 Run: `cd apps/web && npx vitest run src/api/hooks/usePlatforms.test.tsx`
-Expected: FAIL — модуль не найден.
+Expected: FAIL — модуль `./usePlatforms` не найден.
 
 - [ ] **Step 3: Реализация**
 
-`usePlatforms.ts`: ключи `PLATFORM_KEYS.forProject`, запрос `useQueryPlatforms(projectId, { enabled })` и мутации `useMutationCreatePlatform`, `useMutationUpdatePlatform`, `useMutationDeletePlatform`. Общая функция инвалидации сбрасывает **оба** ключа — платформ и роадмапа (в роадмапе живёт сводка).
+`usePlatforms.ts`: ключи `PLATFORM_KEYS.forProject(projectId)`, запрос `useQueryPlatforms(projectId, { enabled = true } = {})` (признак нужен там, где доступа к «Инфо» может не быть — экран инфраструктуры) и мутации `useMutationCreatePlatform`, `useMutationUpdatePlatform`, `useMutationDeletePlatform`. Общая функция инвалидации сбрасывает **оба** ключа — платформ и роадмапа:
 
-`useMutationRelease.ts`: `useMutationSetRelease(projectId)` и `useMutationClearRelease(projectId)`, оба сбрасывают ключ роадмапа. Параметры мутации — `{ versionId, platformId, input }`.
+```ts
+/**
+ * Сброс после правки платформ.
+ *
+ * Сбрасывается и роадмап: в его ответе живёт сводка релизов, и без этого
+ * новая платформа не появилась бы в сводке до перезагрузки страницы.
+ */
+function usePlatformInvalidation(projectId: string) { … }
+```
 
-Оба файла дописать в `index.ts` по алфавиту.
+В `index.ts` добавить `export * from './usePlatforms';` между `useMutationVariable` и `usePublicLink`.
 
 - [ ] **Step 4: Запустить**
 
@@ -1953,27 +2704,92 @@ Expected: PASS.
 
 ```bash
 git add apps/web/src/api/hooks
-git commit -m "Завести хуки платформ и выпусков"
+git commit -m "Завести хуки платформ"
 ```
 
-### Task 5.3: Поле платформ в форме проекта
+### Task 5.3: Хуки выпуска
 
 **Files:**
-- Create: `apps/web/src/components/ProjectForm/PlatformsField.tsx`
-- Create: `apps/web/src/components/ProjectForm/PlatformChip.tsx`
-- Create: `apps/web/src/components/ProjectForm/PlatformSuggestions.tsx`
-- Create: `apps/web/src/components/ProjectForm/CustomPlatformForm.tsx`
-- Create: `apps/web/src/components/ProjectForm/PlatformsField.test.tsx`
-- Modify: `apps/web/src/components/ProjectForm/constants.ts`
-- Modify: `apps/web/src/components/ProjectForm/types.ts`
-- Modify: `apps/web/src/components/ProjectForm/ProjectForm.tsx`
-- Modify: `apps/web/src/components/ProjectForm/ProjectForm.test.tsx`
+- Create: `apps/web/src/api/hooks/useMutationRelease.ts`
+- Create: `apps/web/src/api/hooks/useMutationRelease.test.tsx`
+- Modify: `apps/web/src/api/hooks/index.ts`
 
-Образец устройства — `DomainsField`: само поле, список выбранного, список подсказок, каждый файл до сотни строк.
+- [ ] **Step 1: Падающие тесты**
+
+Та же обвязка, что в Task 5.2.
+
+```ts
+it('ставит выпуск методом PUT и сбрасывает роадмап', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+
+  const { result } = renderHook(() => useMutationSetRelease('project-1'), { wrapper });
+
+  result.current.mutate({
+    versionId: 'v1',
+    platformId: 'p1',
+    input: { state: PlatformReleaseState.OnTest },
+  });
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+  const [url, init] = fetchMock.mock.calls[0]!;
+
+  expect(url).toContain('/projects/project-1/roadmap/versions/v1/releases/p1');
+  expect(init).toMatchObject({ method: 'PUT' });
+});
+
+it('снимает выпуск методом DELETE', async () => { /* то же с useMutationClearRelease */ });
+```
+
+- [ ] **Step 2: Запустить, убедиться что падают**
+
+Run: `cd apps/web && npx vitest run src/api/hooks/useMutationRelease.test.tsx`
+Expected: FAIL — модуль не найден.
+
+- [ ] **Step 3: Реализация**
+
+`useMutationSetRelease(projectId)` и `useMutationClearRelease(projectId)`; параметры мутации — `{ versionId, platformId, input }` и `{ versionId, platformId }`. Оба сбрасывают ключ роадмапа (`ROADMAP_KEYS.forProject`). В `index.ts` — между `useMutationIntakeAddress` и `useMutationRoadmap`.
+
+- [ ] **Step 4: Запустить**
+
+Run: `cd apps/web && npx vitest run src/api/hooks`
+Expected: PASS.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add apps/web/src/api/hooks
+git commit -m "Завести хуки выпуска платформы"
+```
+
+### Task 5.4: Чипы платформ и поле платформ
+
+**Files:**
+- Create: `apps/web/src/components/PlatformChips/{PlatformChips.tsx,types.ts,constants.ts,index.ts,PlatformChips.test.tsx}`
+- Create: `apps/web/src/components/PlatformsField/{PlatformsField.tsx,PlatformSuggestions.tsx,CustomPlatformForm.tsx,types.ts,constants.ts,index.ts,PlatformsField.test.tsx}`
+
+Два разных компонента, а не один с флагом: чипы «только на чтение» показывают паспорт проекта (серверный компонент), карточка окружения и строка чекпоинта, а чипы с крестиком живут лишь в форме. Подкомпоненты покрываются тестом родителя — как `DomainOptions` и `SelectedDomains` через `DomainsField.test.tsx`. Их `IProps` объявляются **локально в их `.tsx`**, а не в общем `types.ts`: иначе в файле оказалось бы два `export interface IProps`, и он бы не собрался.
 
 - [ ] **Step 1: Падающие тесты**
 
 ```ts
+describe('PlatformChips', () => {
+  it('показывает имена платформ и ничего не предлагает убрать', () => {
+    render(<PlatformChips platforms={[API, STORE]} />);
+
+    expect(screen.getByText('API')).toBeInTheDocument();
+    expect(screen.getByText('App Store')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('без платформ не рисует ничего', () => {
+    const { container } = render(<PlatformChips platforms={[]} />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
 describe('PlatformsField', () => {
   it('подсказка превращается в платформу и исчезает из подсказок', async () => {
     const onAdd = vi.fn();
@@ -2010,50 +2826,43 @@ describe('PlatformsField', () => {
     expect(onAdd).toHaveBeenCalledWith({ kind: PlatformKind.Store, name: 'Galaxy Store' });
   });
 
-  it('снимает платформу', async () => {
+  it('снимает платформу целиком, а не по имени', async () => {
+    // В режиме правки нужен идентификатор для мутации, и искать его
+    // повторно по имени значило бы заводить второй способ сослаться
+    // на строку.
     const onRemove = vi.fn();
+    const platform = { id: 'p2', kind: PlatformKind.Store, name: 'RuStore' };
 
-    render(
-      <PlatformsField
-        platforms={[{ kind: PlatformKind.Store, name: 'RuStore' }]}
-        onAdd={vi.fn()}
-        onRemove={onRemove}
-      />,
-    );
+    render(<PlatformsField platforms={[platform]} onAdd={vi.fn()} onRemove={onRemove} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Убрать RuStore' }));
 
-    expect(onRemove).toHaveBeenCalledWith('RuStore');
+    expect(onRemove).toHaveBeenCalledWith(platform);
   });
-});
-```
-
-В `ProjectForm.test.tsx`:
-
-```ts
-it('отправляет платформы вместе с новым проектом', async () => {
-  const onSubmit = vi.fn();
-
-  render(<ProjectForm initial={EMPTY} onSubmit={onSubmit} />);
-
-  await userEvent.type(screen.getByLabelText('Название'), 'Касса');
-  await userEvent.click(screen.getByRole('button', { name: '+ API' }));
-  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
-
-  expect(onSubmit).toHaveBeenCalledWith(
-    expect.objectContaining({ platforms: [{ kind: PlatformKind.Server, name: 'API' }] }),
-  );
 });
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd apps/web && npx vitest run src/components/ProjectForm`
-Expected: FAIL — компонента нет.
+Run: `cd apps/web && npx vitest run src/components/PlatformChips src/components/PlatformsField`
+Expected: FAIL — компонентов нет.
 
 - [ ] **Step 3: Реализация**
 
-В `constants.ts`:
+`PlatformChips/constants.ts` — подписи видов (нужны и чипам, и выбору вида):
+
+```ts
+/** Подписи видов платформы. */
+export const PLATFORM_KIND_LABELS: Record<PlatformKind, string> = {
+  [PlatformKind.Server]: 'На наших машинах',
+  [PlatformKind.Store]: 'Магазин',
+  [PlatformKind.Other]: 'Другое',
+};
+```
+
+`PlatformChips` — маленький презентационный компонент: список имён чипами, пустой список → `null`. Без `'use client'`: его рендерит серверный паспорт проекта.
+
+`PlatformsField/constants.ts`:
 
 ```ts
 /**
@@ -2069,60 +2878,104 @@ export const PLATFORM_PRESETS: PlatformCreate[] = [
   { kind: PlatformKind.Store, name: 'Google Play' },
   { kind: PlatformKind.Store, name: 'RuStore' },
 ];
-
-/** Подписи видов платформы. */
-export const PLATFORM_KIND_LABELS: Record<PlatformKind, string> = {
-  [PlatformKind.Server]: 'На наших машинах',
-  [PlatformKind.Store]: 'Магазин',
-  [PlatformKind.Other]: 'Другое',
-};
 ```
 
-`PlatformsField` принимает:
+`PlatformsField/types.ts`:
 
 ```ts
+/** Платформа в поле: с идентификатором при правке, без — при создании. */
+export type FieldPlatform = PlatformCreate & { id?: string };
+
 /** Пропсы поля платформ. */
 export interface IProps {
-  /** Заведённые платформы: с идентификатором при правке, без — при создании. */
-  platforms: (PlatformCreate & { id?: string })[];
+  platforms: FieldPlatform[];
   onAdd: (input: PlatformCreate) => void;
-  /** Снятие по имени: оно уникально в проекте, и идентификатора при создании ещё нет. */
-  onRemove: (name: string) => void;
+  /** Снятие платформы целиком: в режиме правки нужен её идентификатор. */
+  onRemove: (platform: FieldPlatform) => void;
 }
 ```
 
-Что делают `onAdd` и `onRemove`, решает родитель: при создании они меняют состояние формы, при правке вызывают мутации сразу — по образцу галочек чекпоинтов, которые тоже переключаются без кнопки «сохранить».
+Что делают колбэки, решает родитель: панель создания меняет своё состояние, панель правки вызывает мутации сразу — как галочки чекпоинтов, которые тоже действуют без кнопки «сохранить».
 
-`ProjectForm` держит платформы в своих значениях (`ProjectFormValues.platforms`) и отправляет их в `onSubmit` — но только если родитель не передал `platformActions`. Проще и честнее: форма получает необязательный проп `platformActions?: { onAdd, onRemove }`; передан — поле работает через него и в `onSubmit` платформы не уходят, не передан — поле работает по состоянию формы и платформы уходят с отправкой.
+Поля «Своя платформа» и «Вид» получают `id` и `htmlFor`: тесты ищут их по подписи. Крестик чипа — `aria-label` вида «Убрать RuStore».
 
 - [ ] **Step 4: Запустить**
 
-Run: `cd apps/web && npx vitest run src/components/ProjectForm`
+Run: `cd apps/web && npx vitest run src/components/PlatformChips src/components/PlatformsField`
 Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add apps/web/src/components/ProjectForm
-git commit -m "Собирать платформы прямо в форме проекта"
+git add apps/web/src/components/PlatformChips apps/web/src/components/PlatformsField
+git commit -m "Собирать платформы чипами с подсказками"
 ```
 
-### Task 5.4: Создание проекта в панели
+### Task 5.5: Создание проекта в панели
 
 **Files:**
 - Create: `apps/web/src/app/(app)/CreateProjectPanel.tsx`
 - Create: `apps/web/src/app/(app)/CreateProjectPanel.test.tsx`
-- Modify: `apps/web/src/components/ProjectList/ProjectList.tsx`
-- Modify: `apps/web/src/components/ProjectList/types.ts`
-- Modify: `apps/web/src/components/ProjectList/ProjectList.test.tsx`
+- Modify: `apps/web/src/components/ProjectForm/{ProjectForm.tsx,types.ts,ProjectForm.test.tsx}`
+- Modify: `apps/web/src/components/ProjectList/{ProjectList.tsx,types.ts,ProjectList.test.tsx}`
 - Modify: `apps/web/src/app/(app)/page.tsx`
 - Delete: `apps/web/src/app/(app)/projects/new/`
 
-- [ ] **Step 1: Падающий тест**
+- [ ] **Step 1: Падающие тесты**
+
+В `ProjectForm.test.tsx` (фикстура в файле называется `project`):
 
 ```ts
+it('показывает слот платформ, когда он передан', () => {
+  // Слот, а не второй режим формы: форма держит значения в useState и
+  // с пропом не ресинхронизируется, поэтому живость чипов решает
+  // родитель.
+  render(<ProjectForm initial={project} onSubmit={vi.fn()} platformsSlot={<p>чипы</p>} />);
+
+  expect(screen.getByText('чипы')).toBeInTheDocument();
+});
+
+it('без слота о платформах не знает', () => {
+  render(<ProjectForm initial={project} onSubmit={vi.fn()} />);
+
+  expect(screen.queryByText(/платформ/i)).not.toBeInTheDocument();
+});
+```
+
+В `ProjectList.test.tsx` **переписать** три существующих теста: `canCreate` и ссылка на `/projects/new` исчезают, вместо них слот.
+
+```ts
+it('показывает орган создания, когда он передан', () => {
+  render(<ProjectList projects={[project]} createSlot={<button type="button">Создать проект</button>} />);
+
+  expect(screen.getByRole('button', { name: 'Создать проект' })).toBeInTheDocument();
+});
+
+it('без слота создание не предлагает', () => {
+  render(<ProjectList projects={[project]} />);
+
+  expect(screen.queryByRole('button', { name: 'Создать проект' })).not.toBeInTheDocument();
+});
+
+it('в пустой системе зовёт завести первый проект, когда слот есть', () => {
+  render(<ProjectList projects={[]} createSlot={<button type="button">Создать проект</button>} />);
+
+  expect(screen.getByRole('button', { name: 'Создать проект' })).toBeInTheDocument();
+  expect(screen.queryByText(/доступ к проектам выдаёт/i)).not.toBeInTheDocument();
+});
+```
+
+`CreateProjectPanel.test.tsx` — экранный стиль (`vi.mock('@/api/hooks')`) **плюс мок роутера**, без которого `useRouter` бросит на рендере:
+
+```ts
+const push = vi.fn();
+const refresh = vi.fn();
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
+vi.mock('@/api/hooks');
+
 it('открывает панель создания и закрывает по Esc', async () => {
-  render(<CreateProjectPanel />, { wrapper });
+  render(<CreateProjectPanel />);
 
   await userEvent.click(screen.getByRole('button', { name: 'Создать проект' }));
 
@@ -2132,18 +2985,36 @@ it('открывает панель создания и закрывает по 
 
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
+it('отправляет платформы вместе с новым проектом и уходит на его карточку', async () => {
+  const mutate = vi.fn((_input, options) => options?.onSuccess?.({ id: 'new-id' }));
+  vi.mocked(hooks.useMutationCreateProject).mockReturnValue({ mutate, isPending: false, error: null } as never);
+
+  render(<CreateProjectPanel />);
+
+  await userEvent.click(screen.getByRole('button', { name: 'Создать проект' }));
+  await userEvent.type(screen.getByLabelText('Название'), 'Касса');
+  await userEvent.click(screen.getByRole('button', { name: '+ API' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+  expect(mutate.mock.calls[0]?.[0]).toMatchObject({
+    name: 'Касса',
+    platforms: [{ kind: PlatformKind.Server, name: 'API' }],
+  });
+  expect(push).toHaveBeenCalledWith('/projects/new-id');
+});
 ```
 
-- [ ] **Step 2: Запустить, убедиться что падает**
+- [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd apps/web && npx vitest run "src/app/(app)/CreateProjectPanel.test.tsx"`
-Expected: FAIL — компонента нет.
+Run: `cd apps/web && npx vitest run src/components/ProjectForm src/components/ProjectList "src/app/(app)/CreateProjectPanel.test.tsx"`
+Expected: FAIL — пропа `platformsSlot` нет, `createSlot` нет, компонента панели нет.
 
 - [ ] **Step 3: Реализация**
 
-`CreateProjectPanel` — клиентский островок: кнопка «Создать проект», `Drawer` шириной `DrawerWidth.Half`, внутри `ProjectForm`. Мутация — `useMutationCreateProject`; после успеха `router.push('/projects/<id>')` и `router.refresh()`, как сейчас в `NewProjectScreen`.
+`ProjectForm`: новый необязательный проп `platformsSlot?: ReactNode`, рендерится после полей паспорта. Сами платформы форма **не хранит и не отправляет** — их добавляет к данным родитель. Шесть `TextField` при этом выносятся в подкомпонент `ProjectFields.tsx`: файл сейчас 94 строки, и со слотом перевалил бы за сотню.
 
-`ProjectList` вместо собственной ссылки получает слот:
+`ProjectList`: вместо `canCreate` и внутреннего `CreateLink` — проп
 
 ```ts
   /**
@@ -2153,13 +3024,17 @@ Expected: FAIL — компонента нет.
   createSlot?: ReactNode;
 ```
 
-`CreateLink` и проп `canCreate` удаляются; пустой список показывает слот, если он передан, и прежнюю подсказку, если нет. `page.tsx` передаёт `createSlot={subject.isSuperadmin ? <CreateProjectPanel /> : undefined}`.
+Пустой список показывает слот, если он есть, и прежнюю подсказку о доступах, если нет.
+
+`CreateProjectPanel` — клиентский островок: кнопка «Создать проект», `Drawer` шириной `Half` с заголовком «Новый проект», внутри `ProjectForm` со слотом `PlatformsField`, платформы — в состоянии панели. На отправке платформы добавляются к данным формы, мутация — `useMutationCreateProject`, после успеха `router.push('/projects/<id>')` и `router.refresh()`.
+
+`page.tsx` передаёт `createSlot={subject.isSuperadmin ? <CreateProjectPanel /> : undefined}`.
 
 Каталог `projects/new` удалить целиком.
 
 - [ ] **Step 4: Запустить**
 
-Run: `cd apps/web && npx vitest run src/components/ProjectList "src/app/(app)"`
+Run: `cd apps/web && npx vitest run src/components/ProjectForm src/components/ProjectList "src/app/(app)"`
 Expected: PASS.
 
 - [ ] **Step 5: Коммит**
@@ -2169,35 +3044,69 @@ git add -A apps/web/src
 git commit -m "Создавать проект в выезжающей панели"
 ```
 
-### Task 5.5: Правка проекта в панели
+### Task 5.6: Правка проекта в панели
 
 **Files:**
 - Create: `apps/web/src/app/(app)/projects/[id]/EditProjectPanel.tsx`
 - Create: `apps/web/src/app/(app)/projects/[id]/EditProjectPanel.test.tsx`
 - Modify: `apps/web/src/app/(app)/projects/[id]/page.tsx`
-- Modify: `apps/web/src/components/ProjectSections/ProjectSections.tsx`
-- Modify: `apps/web/src/components/ProjectSections/types.ts`
-- Modify: `apps/web/src/components/ProjectSections/ProjectSections.test.tsx`
+- Modify: `apps/web/src/components/ProjectSections/{ProjectSections.tsx,types.ts,ProjectSections.test.tsx}`
 - Delete: `apps/web/src/app/(app)/projects/[id]/edit/`
 
 - [ ] **Step 1: Падающие тесты**
 
 ```ts
+const push = vi.fn();
+const refresh = vi.fn();
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
+vi.mock('@/api/hooks');
+
+it('сохраняет паспорт и закрывает панель', async () => {
+  const mutate = vi.fn((_input, options) => options?.onSuccess?.());
+  vi.mocked(hooks.useMutationUpdateProject).mockReturnValue({ mutate, isPending: false, error: null } as never);
+
+  render(<EditProjectPanel projectId="p1" initial={INITIAL} canWrite />);
+
+  await userEvent.click(screen.getByRole('button', { name: 'Править' }));
+  await userEvent.clear(screen.getByLabelText('Название'));
+  await userEvent.type(screen.getByLabelText('Название'), 'Касса+');
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+  expect(mutate.mock.calls[0]?.[0]).toMatchObject({ name: 'Касса+' });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(refresh).toHaveBeenCalled();
+});
+
 it('правит платформы сразу, без отправки формы', async () => {
   // Чип действует мутацией, как галочка чекпоинта: отправлять паспорт
   // целиком ради одной платформы незачем, и чужую правку это не затрёт.
-  render(<EditProjectPanel projectId="p1" initial={INITIAL} />, { wrapper });
+  const create = vi.fn();
+  vi.mocked(hooks.useMutationCreatePlatform).mockReturnValue({ mutate: create, isPending: false, error: null } as never);
+
+  render(<EditProjectPanel projectId="p1" initial={INITIAL} canWrite />);
 
   await userEvent.click(screen.getByRole('button', { name: 'Править' }));
   await userEvent.click(screen.getByRole('button', { name: '+ Веб' }));
 
-  expect(createPlatform).toHaveBeenCalledWith({ kind: PlatformKind.Server, name: 'Веб' });
+  expect(create).toHaveBeenCalledWith({ kind: PlatformKind.Server, name: 'Веб' });
+});
+
+it('снимает платформу мутацией по её идентификатору', async () => {
+  vi.mocked(hooks.useQueryPlatforms).mockReturnValue(query([{ id: 'p9', kind: PlatformKind.Store, name: 'RuStore', position: 1 }]));
+  const remove = vi.fn();
+  vi.mocked(hooks.useMutationDeletePlatform).mockReturnValue({ mutate: remove, isPending: false, error: null } as never);
+
+  render(<EditProjectPanel projectId="p1" initial={INITIAL} canWrite />);
+
+  await userEvent.click(screen.getByRole('button', { name: 'Править' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Убрать RuStore' }));
+
+  expect(remove).toHaveBeenCalledWith('p9');
 });
 
 it('не показывает кнопку правки без уровня записи', () => {
-  sections.mockReturnValue(query({ [Section.Info]: AccessLevel.Read }));
-
-  render(<EditProjectPanel projectId="p1" initial={INITIAL} />, { wrapper });
+  render(<EditProjectPanel projectId="p1" initial={INITIAL} canWrite={false} />);
 
   expect(screen.queryByRole('button', { name: 'Править' })).not.toBeInTheDocument();
 });
@@ -2220,16 +3129,26 @@ it('показывает платформы проекта', () => {
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd apps/web && npx vitest run "src/app/(app)/projects" src/components/ProjectSections`
-Expected: FAIL — компонента нет, проп не принимается.
+Run: `cd apps/web && npx vitest run "src/app/(app)/projects/[id]/EditProjectPanel.test.tsx" src/components/ProjectSections`
+Expected: FAIL — компонента нет, проп `platforms` не принимается.
 
 - [ ] **Step 3: Реализация**
 
-`EditProjectPanel` — клиентский островок: `useQuerySections(projectId)` решает, показывать ли кнопку «Править» (нужен `AccessLevel.Write` в `Section.Info`); `Drawer` шириной `Half`; внутри `ProjectForm` с `platformActions`, собранными из мутаций платформ. Платформы берутся `useQueryPlatforms(projectId)`.
+`EditProjectPanel` — клиентский островок: `canWrite` **пропом**, а не запросом. Страница и так серверная, и `/projects/:id/sections` ей дешевле третьего клиентского запроса прав на каждой карточке; заодно кнопка не мигает на время загрузки. Тот же приём уже применён на странице роадмапа, которая передаёт вниз `isSuperadmin`.
 
-`page.tsx` запрашивает платформы рядом с проектом (`apiServer<Platform[]>` с `.catch(() => [])` — уровень метаданных их не отдаст, и это не повод валить страницу), передаёт в `ProjectSections` и рендерит `EditProjectPanel` с начальными значениями, когда пришла полная проекция.
+Внутри: кнопка «Править», `Drawer` шириной `Half`, `ProjectForm` со слотом `PlatformsField`. Платформы приходят из `useQueryPlatforms(projectId)`, а `onAdd` / `onRemove` вызывают мутации платформ — поэтому чипы перерисовываются от кэша, а не от состояния формы. После сохранения паспорта — закрытие панели и `router.refresh()`.
 
-`ProjectSections` получает необязательный `platforms` и показывает их чипами в паспорте.
+`page.tsx` запрашивает рядом с проектом уровни доступа и платформы:
+
+```ts
+  // Уровень метаданных платформ не отдаст, и это не повод валить
+  // страницу: паспорт показывается и без них.
+  const platforms = await apiServer<Platform[]>(`/projects/${id}/platforms`).catch(
+    (): Platform[] => [],
+  );
+```
+
+Платформы уходят в `ProjectSections` (чипами через `PlatformChips`) и в `EditProjectPanel` как `initialData` для `useQueryPlatforms` — иначе один и тот же список тянулся бы дважды.
 
 Каталог `projects/[id]/edit` удалить целиком — на него и сейчас не ведёт ни одна ссылка.
 
@@ -2249,39 +3168,34 @@ git commit -m "Править проект в панели с его карто�
 
 ## Chunk 6: Веб — окружение и роадмап
 
-### Task 6.1: Окружение в панели, платформы галочками
+### Task 6.1: Платформы в форме окружения
 
 **Files:**
 - Create: `apps/web/src/components/EnvironmentForm/PlatformsCheckboxes.tsx`
-- Modify: `apps/web/src/components/EnvironmentForm/EnvironmentForm.tsx`
-- Modify: `apps/web/src/components/EnvironmentForm/types.ts`
-- Modify: `apps/web/src/components/EnvironmentForm/constants.ts`
-- Modify: `apps/web/src/components/EnvironmentForm/EnvironmentForm.test.tsx`
-- Modify: `apps/web/src/app/(app)/projects/[id]/infrastructure/InfrastructureScreen.tsx`
-- Modify: `apps/web/src/components/EnvironmentCard/EnvironmentCard.tsx`
+- Modify: `apps/web/src/components/EnvironmentForm/{EnvironmentForm.tsx,types.ts,constants.ts,EnvironmentForm.test.tsx}`
 
 - [ ] **Step 1: Падающие тесты**
 
+Фикстура в файле называется `initial`.
+
 ```ts
+const API = { id: 'p1', kind: PlatformKind.Server, name: 'API' };
+const STORE = { id: 'p2', kind: PlatformKind.Store, name: 'App Store' };
+
 it('предлагает галочками только платформы наших машин', () => {
-  render(
-    <EnvironmentForm
-      initial={EMPTY}
-      onSubmit={vi.fn()}
-      platforms={[
-        { id: 'p1', kind: PlatformKind.Server, name: 'API' },
-        { id: 'p2', kind: PlatformKind.Store, name: 'App Store' },
-      ]}
-    />,
-  );
+  render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} platforms={[API, STORE]} />);
 
   // У магазина нет ни машины, ни адреса: ставить его в окружение нечем.
   expect(screen.getByLabelText('API')).toBeInTheDocument();
   expect(screen.queryByLabelText('App Store')).not.toBeInTheDocument();
 });
 
-it('без платформ группы не показывает', () => {
-  render(<EnvironmentForm initial={EMPTY} onSubmit={vi.fn()} />);
+it('без пропа платформ группы не показывает и набор не отправляет', () => {
+  // «Пропа нет» означает «список недоступен»: пустой набор снял бы
+  // привязки, сделанные тем, у кого доступ к «Инфо» есть.
+  const onSubmit = vi.fn();
+
+  render(<EnvironmentForm initial={initial} onSubmit={onSubmit} />);
 
   expect(screen.queryByText('Что здесь развёрнуто')).not.toBeInTheDocument();
 });
@@ -2289,7 +3203,7 @@ it('без платформ группы не показывает', () => {
 it('отправляет отмеченные платформы', async () => {
   const onSubmit = vi.fn();
 
-  render(<EnvironmentForm initial={EMPTY} onSubmit={onSubmit} platforms={[API]} />);
+  render(<EnvironmentForm initial={initial} onSubmit={onSubmit} platforms={[API]} />);
 
   await userEvent.type(screen.getByLabelText('Название'), 'Прод');
   await userEvent.click(screen.getByLabelText('API'));
@@ -2297,11 +3211,85 @@ it('отправляет отмеченные платформы', async () => {
 
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ platformIds: ['p1'] }));
 });
+
+it('сохраняет уже стоящие галочки', async () => {
+  // Самое опасное место: правка любого поля окружения не должна снимать
+  // привязки платформ.
+  const onSubmit = vi.fn();
+
+  render(
+    <EnvironmentForm
+      initial={{ ...initial, name: 'Прод', platformIds: ['p1'] }}
+      onSubmit={onSubmit}
+      platforms={[API]}
+    />,
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ platformIds: ['p1'] }));
+});
 ```
 
-Для экрана:
+- [ ] **Step 2: Запустить, убедиться что падают**
+
+Run: `cd apps/web && npx vitest run src/components/EnvironmentForm`
+Expected: FAIL — пропа `platforms` нет, `platformIds` в значениях формы нет.
+
+- [ ] **Step 3: Реализация**
+
+- `PlatformsCheckboxes` — `fieldset` с `legend` «Что здесь развёрнуто»
+  (читалке нужна именно группировка); из пришедших платформ оставляет
+  только `PlatformKind.Server`; пусто — возвращает `null`. Подпись
+  чекбокса — имя платформы;
+- `EnvironmentFormValues` получает `platformIds: string[]`, `IProps` —
+  необязательный `platforms?: PlatformRef[]`;
+- `handleSubmit` отправляет `platformIds` **только когда проп платформ
+  передан** (`platforms !== undefined`);
+- `EnvironmentForm.tsx` сейчас 117 строк — уже сверх лимита. Поля
+  «Проверка», «Заметки» и домены выносятся в подкомпонент
+  `EnvironmentFields.tsx`, чтобы форма осталась в сотне строк.
+
+- [ ] **Step 4: Запустить**
+
+Run: `cd apps/web && npx vitest run src/components/EnvironmentForm`
+Expected: PASS.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add apps/web/src/components/EnvironmentForm
+git commit -m "Отмечать в форме окружения развёрнутые платформы"
+```
+
+### Task 6.2: Окружение в панели
+
+**Files:**
+- Create: `apps/web/src/app/(app)/projects/[id]/infrastructure/{CreateEnvironmentPanel.tsx,EditEnvironmentPanel.tsx}`
+- Create: `apps/web/src/app/(app)/projects/[id]/infrastructure/InfrastructureScreen.test.tsx`
+- Modify: `apps/web/src/app/(app)/projects/[id]/infrastructure/InfrastructureScreen.tsx`
+- Modify: `apps/web/src/components/EnvironmentCard/{EnvironmentCard.tsx,EnvironmentCard.test.tsx}`
+
+Экран сейчас 142 строки и с панелью вырос бы до полутора сотен, поэтому форма уезжает в две панели по образцу `CreateVersionPanel`.
+
+- [ ] **Step 1: Падающие тесты**
+
+Теста у экрана нет вовсе — файл создаётся. Экран зовёт семь хуков, и замокать нужно **все**: автомок вернёт `undefined`, и экран упадёт на `environments.isPending`.
 
 ```ts
+vi.mock('@/api/hooks');
+
+beforeEach(() => {
+  vi.mocked(hooks.useQueryEnvironments).mockReturnValue(query([]));
+  vi.mocked(hooks.useQuerySections).mockReturnValue(query({ [Section.Infrastructure]: AccessLevel.Write }));
+  vi.mocked(hooks.useQueryServers).mockReturnValue(query([]));
+  vi.mocked(hooks.useQueryDomains).mockReturnValue(query([]));
+  vi.mocked(hooks.useQueryPlatforms).mockReturnValue(query([]));
+  vi.mocked(hooks.useMutationCreateEnvironment).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationUpdateEnvironment).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationDeleteEnvironment).mockReturnValue(mutation());
+});
+
 it('открывает форму окружения в панели', async () => {
   render(<InfrastructureScreen projectId="p1" isSuperadmin={false} />);
 
@@ -2309,55 +3297,81 @@ it('открывает форму окружения в панели', async () 
 
   expect(screen.getByRole('dialog', { name: 'Новое окружение' })).toBeInTheDocument();
 });
+
+it('не показывает кнопку добавления без уровня записи', () => {
+  vi.mocked(hooks.useQuerySections).mockReturnValue(query({ [Section.Infrastructure]: AccessLevel.Read }));
+
+  render(<InfrastructureScreen projectId="p1" isSuperadmin={false} />);
+
+  expect(screen.queryByRole('button', { name: 'Добавить окружение' })).not.toBeInTheDocument();
+});
+```
+
+В `EnvironmentCard.test.tsx`:
+
+```ts
+it('показывает развёрнутые платформы', () => {
+  render(<EnvironmentCard environment={{ ...environment, platforms: [API] }} canWrite={false} />);
+
+  expect(screen.getByText('API')).toBeInTheDocument();
+});
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd apps/web && npx vitest run src/components/EnvironmentForm "src/app/(app)/projects/[id]/infrastructure"`
-Expected: FAIL — пропа нет, формы в панели нет.
+Run: `cd apps/web && npx vitest run "src/app/(app)/projects/[id]/infrastructure" src/components/EnvironmentCard`
+Expected: FAIL — форма показывается инлайново, диалога нет; чипов на карточке нет.
 
 - [ ] **Step 3: Реализация**
 
-- `PlatformsCheckboxes` — группа с заголовком «Что здесь развёрнуто»; из
-  пришедших платформ оставляет только `PlatformKind.Server`; пусто —
-  возвращает `null`;
-- `EnvironmentFormValues` получает `platformIds: string[]`, `IProps` —
-  необязательный `platforms?: PlatformRef[]`; `handleSubmit` отправляет
-  `platformIds` только когда список платформ передан (иначе поле не
-  показывалось, и отправлять пустой набор значило бы снять чужие галочки);
-- `InfrastructureScreen` оборачивает форму в `Drawer` шириной `Half` с
-  заголовком «Новое окружение» либо «Правка окружения»; закрытие панели
-  сбрасывает `isCreating` и `editingId`. Платформы берутся
-  `useQueryPlatforms(projectId)` — доступа к «Инфо» может не быть, и тогда
-  группы просто нет;
-- `EnvironmentCard` показывает развёрнутые платформы чипами.
+- `CreateEnvironmentPanel` и `EditEnvironmentPanel` — `Drawer` шириной
+  `Half` с заголовками «Новое окружение» и «Правка окружения», внутри
+  `EnvironmentForm`; мутации и состояния форм собираются в них;
+- `InfrastructureScreen` держит только `isCreating` / `editingId`, список
+  и две панели; закрытие панели сбрасывает оба состояния;
+- платформы берутся `useQueryPlatforms(projectId, { enabled: ... })` —
+  как рядом уже сделано для реестра машин: подрядчику без «Инфо» ручка
+  ответит отказом, и бить в неё незачем. В форму передаётся
+  `platforms.data` **как есть**, без `?? []`: иначе проп всегда окажется
+  «переданным», и правка начнёт снимать чужие галочки;
+- `formValuesOf` заполняет `platformIds` из `environment.platforms`
+  (поле есть только у проекции чтения — брать через тот же приём, что
+  `detail?.server?.id`);
+- `EnvironmentCard` показывает платформы через `PlatformChips`.
 
 - [ ] **Step 4: Запустить**
 
-Run: `cd apps/web && npx vitest run src/components/EnvironmentForm src/components/EnvironmentCard "src/app/(app)/projects/[id]/infrastructure"`
+Run: `cd apps/web && npx vitest run "src/app/(app)/projects/[id]/infrastructure" src/components/EnvironmentCard src/components/EnvironmentForm`
 Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
 git add apps/web/src
-git commit -m "Отмечать в окружении развёрнутые платформы"
+git commit -m "Открывать окружение в выезжающей панели"
 ```
 
-### Task 6.2: Сводка релизов
+### Task 6.3: Сводка релизов
 
 **Files:**
-- Create: `apps/web/src/components/ReleaseSummary/ReleaseSummary.tsx`
-- Create: `apps/web/src/components/ReleaseSummary/SummaryRow.tsx`
-- Create: `apps/web/src/components/ReleaseSummary/ReleaseBadge.tsx`
-- Create: `apps/web/src/components/ReleaseSummary/constants.ts`
-- Create: `apps/web/src/components/ReleaseSummary/types.ts`
-- Create: `apps/web/src/components/ReleaseSummary/index.ts`
-- Create: `apps/web/src/components/ReleaseSummary/ReleaseSummary.test.tsx`
+- Create: `apps/web/src/components/ReleaseSummary/{ReleaseSummary.tsx,SummaryRow.tsx,ReleaseBadge.tsx,constants.ts,types.ts,index.ts,ReleaseSummary.test.tsx}`
 
 - [ ] **Step 1: Падающие тесты**
 
 ```ts
+const STORE = { id: 'p2', kind: PlatformKind.Store, name: 'App Store', position: 2 };
+const API = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
+
+/** Ссылка на выпуск в сводке. */
+function ref(versionLabel: string, date: string | null, buildLabel: string | null = null) {
+  return { versionId: 'v', versionLabel, buildLabel, date };
+}
+
+/** Строка сводки. */
+function row(platform: Platform, released: ReleaseRef | null, pending: ReleasePending[]) {
+  return { platform, released, pending };
+}
+
 describe('ReleaseSummary', () => {
   it('отвечает «релизов ещё не было»', () => {
     render(<ReleaseSummary summary={[row(STORE, null, [])]} />);
@@ -2388,6 +3402,14 @@ describe('ReleaseSummary', () => {
     expect(screen.getByText('в релизе 1.2 (45)')).toBeInTheDocument();
   });
 
+  it('держит порядок строк, пришедший от сервера', () => {
+    render(<ReleaseSummary summary={[row(API, null, []), row(STORE, null, [])]} />);
+
+    const names = screen.getAllByRole('term').map((node) => node.textContent);
+
+    expect(names).toEqual(['API', 'App Store']);
+  });
+
   it('без платформ не рисует ничего', () => {
     const { container } = render(<ReleaseSummary summary={[]} />);
 
@@ -2403,7 +3425,7 @@ Expected: FAIL — компонента нет.
 
 - [ ] **Step 3: Реализация**
 
-Презентационный компонент, данные только пропами: тот же экземпляр работает на внутреннем экране (из кэша TanStack Query) и на публичной странице (пропом из RSC).
+Презентационный компонент, данные только пропами: тот же экземпляр работает на внутреннем экране (из кэша TanStack Query) и на публичной странице (пропом из RSC, без TanStack Query).
 
 `constants.ts`:
 
@@ -2422,17 +3444,20 @@ export const RELEASE_STATE_LABELS: Record<PlatformReleaseState, string> = {
  *
  * Палитра та же, что у точек статуса (`INDICATOR_COLORS`): зелёный —
  * вышло, жёлтый — ждёт, красный — встало. Токенов `success` и `warning`
- * в теме нет, и заводить их ради плашек — отдельная работа.
+ * в теме нет, и заводить их ради плашек — отдельная работа. Красный —
+ * `-400`, а не `-500`: на подложке `/15` пятисотый даёт контраст 4.44:1
+ * и не проходит AA для мелкого текста, четырёхсотый — 6.04:1. Тема
+ * `destructive` хуже обоих (4.35:1).
  */
 export const RELEASE_STATE_CLASSES: Record<PlatformReleaseState, string> = {
   [PlatformReleaseState.OnTest]: 'bg-muted text-muted-foreground',
   [PlatformReleaseState.InReview]: 'bg-amber-500/15 text-amber-500',
   [PlatformReleaseState.Released]: 'bg-green-500/15 text-green-500',
-  [PlatformReleaseState.Rejected]: 'bg-red-500/15 text-red-500',
+  [PlatformReleaseState.Rejected]: 'bg-red-500/15 text-red-400',
 };
 ```
 
-Дата — существующей утилитой `formatDate` из `@/utils`. Состояние читается подписью, а не только цветом.
+Разметка — список определений (`dl` / `dt` / `dd`): имя платформы `dt`, релиз и плашки `dd`. Дата — существующей утилитой `formatDate` из `@/utils` (она даёт `ДД.ММ.ГГГГ` и уже закреплена в тестах часовым поясом из конфига). Состояние читается подписью, а не одним цветом. `RELEASE_STATE_LABELS` понадобятся и панели версии — она импортирует их глубоким импортом, как `VersionForm` делает со `STATE_LABELS`.
 
 - [ ] **Step 4: Запустить**
 
@@ -2446,15 +3471,15 @@ git add apps/web/src/components/ReleaseSummary
 git commit -m "Показать сводку релизов одной таблицей"
 ```
 
-### Task 6.3: Сводка на экране и на публичной странице
+### Task 6.4: Сводка на экране и на публичной странице
 
 **Files:**
-- Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapScreen.tsx`
-- Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapScreen.test.tsx`
-- Modify: `apps/web/src/app/roadmap/[token]/PublicRoadmapView.tsx`
-- Modify: `apps/web/src/app/roadmap/[token]/PublicRoadmapView.test.tsx`
+- Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/{RoadmapScreen.tsx,RoadmapScreen.test.tsx}`
+- Modify: `apps/web/src/app/roadmap/[token]/{PublicRoadmapView.tsx,PublicRoadmapView.test.tsx}`
 
 - [ ] **Step 1: Падающие тесты**
+
+Сначала **дополнить фикстуры**: в `RoadmapScreen.test.tsx` объекту `roadmap` добавить `summary` со строкой по «App Store», версиям — `releases: []`; в `PublicRoadmapView.test.tsx` фикстуре `roadmap` — то же.
 
 ```ts
 it('ставит сводку над диаграммой', () => {
@@ -2472,15 +3497,27 @@ it('подсказывает, где заводятся платформы, ко
 
   render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
 
-  expect(screen.getByText(/Платформы задаются в паспорте проекта/)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: /Платформы задаются в паспорте проекта/ })).toHaveAttribute(
+    'href',
+    '/projects/p1',
+  );
+});
+
+it('без права записи о паспорте не подсказывает', () => {
+  vi.mocked(hooks.useQueryRoadmap).mockReturnValue(query({ ...roadmap, summary: [] }));
+  vi.mocked(hooks.useQuerySections).mockReturnValue(query({ [Section.Roadmap]: AccessLevel.Read }));
+
+  render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
+
+  expect(screen.queryByText(/Платформы задаются/)).not.toBeInTheDocument();
 });
 ```
 
-Для публичной страницы — сводка показана, адресов и здоровья нет:
+Для публичной страницы:
 
 ```ts
 it('показывает сводку без адресов', () => {
-  render(<PublicRoadmapView roadmap={PUBLIC_ROADMAP} />);
+  render(<PublicRoadmapView roadmap={roadmap} />);
 
   expect(screen.getByText('в релизе v1.2')).toBeInTheDocument();
   expect(screen.queryByText(/example\.com/)).not.toBeInTheDocument();
@@ -2489,12 +3526,12 @@ it('показывает сводку без адресов', () => {
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
-Run: `cd apps/web && npx vitest run "src/app/(app)/projects/[id]/roadmap" "src/app/roadmap"`
+Run: `cd apps/web && npx vitest run "src/app/(app)/projects/[id]/roadmap" src/app/roadmap`
 Expected: FAIL — сводки на экранах нет.
 
 - [ ] **Step 3: Реализация**
 
-`RoadmapScreen` рендерит `ReleaseSummary` первым блоком; подсказка о паспорте — только при пустой сводке и уровне записи. `PublicRoadmapView` — то же, из `roadmap.summary`, без подсказки: публичному читателю заводить платформы негде.
+`RoadmapScreen` рендерит `ReleaseSummary` первым блоком; подсказка о паспорте — только при пустой сводке и уровне записи, ссылкой на `/projects/<id>`. `PublicRoadmapView` — то же из `roadmap.summary`, без подсказки: публичному читателю заводить платформы негде.
 
 - [ ] **Step 4: Запустить**
 
@@ -2508,23 +3545,29 @@ git add apps/web/src/app
 git commit -m "Поставить сводку релизов над диаграммой"
 ```
 
-### Task 6.4: Выпуски в панели версии
+### Task 6.5: Выпуски в панели версии
 
 **Files:**
-- Create: `apps/web/src/components/VersionDrawer/ReleaseList.tsx`
-- Create: `apps/web/src/components/VersionDrawer/ReleaseRow.tsx`
-- Modify: `apps/web/src/components/VersionDrawer/VersionDrawer.tsx`
-- Modify: `apps/web/src/components/VersionDrawer/types.ts`
-- Modify: `apps/web/src/components/VersionDrawer/constants.ts`
-- Modify: `apps/web/src/components/VersionDrawer/VersionDrawer.test.tsx`
-- Modify: `apps/web/src/components/VersionForm/VersionForm.tsx`
-- Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapVersionPanel.tsx`
+- Create: `apps/web/src/components/VersionDrawer/{ReleaseList.tsx,ReleaseRow.tsx}`
+- Modify: `apps/web/src/components/VersionDrawer/{VersionDrawer.tsx,types.ts,VersionDrawer.test.tsx}`
+- Modify: `apps/web/src/components/VersionForm/{VersionForm.tsx,types.ts,VersionForm.test.tsx}`
+- Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/{RoadmapScreen.tsx,RoadmapVersionPanel.tsx,CreateVersionPanel.tsx}`
 - Modify: `apps/web/src/app/roadmap/[token]/PublicRoadmapView.tsx`
 
 - [ ] **Step 1: Падающие тесты**
 
+Хелпер и фикстуры объявляются в тесте:
+
 ```ts
-it('предлагает модерацию только магазину', async () => {
+/** Подписи опций селекта — по ним проверяется состав выбора. */
+function optionsOf(select: HTMLElement): string[] {
+  return Array.from(select.querySelectorAll('option')).map((option) => option.textContent ?? '');
+}
+
+const API = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
+const STORE = { id: 'p2', kind: PlatformKind.Store, name: 'App Store', position: 2 };
+
+it('предлагает модерацию только магазину', () => {
   render(<VersionDrawer version={VERSION} platforms={[API, STORE]} isCurrent isOpen onClose={vi.fn()} actions={ACTIONS} />);
 
   expect(optionsOf(screen.getByLabelText('Состояние API'))).toEqual([
@@ -2543,6 +3586,19 @@ it('выбор состояния ставит выпуск сразу', async (
   expect(ACTIONS.onSetRelease).toHaveBeenCalledWith('p2', { state: 'in_review' });
 });
 
+it('выбор «в релизе» подставляет сегодняшнюю дату', async () => {
+  // Иначе сводка покажет релиз без числа, а дата версии молча уедет
+  // на хранимую колонку.
+  render(<VersionDrawer version={VERSION} platforms={[STORE]} isCurrent isOpen onClose={vi.fn()} actions={ACTIONS} />);
+
+  await userEvent.selectOptions(screen.getByLabelText('Состояние App Store'), 'released');
+
+  expect(ACTIONS.onSetRelease).toHaveBeenCalledWith('p2', {
+    state: 'released',
+    releasedDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+  });
+});
+
 it('«как у версии» снимает выпуск', async () => {
   render(<VersionDrawer version={VERSION_WITH_RELEASE} platforms={[STORE]} isCurrent isOpen onClose={vi.fn()} actions={ACTIONS} />);
 
@@ -2558,27 +3614,84 @@ it('без действий показывает выпуски без орга�
   expect(screen.queryByLabelText('Состояние App Store')).not.toBeInTheDocument();
 });
 
-it('не показывает поле даты релиза версии, когда есть платформы', () => {
-  // Иначе вторая правда заводилась бы уже после того, как появилась первая.
-  render(<VersionForm initial={INITIAL} onSubmit={vi.fn()} hasPlatforms />);
+it('на уровне метаданных блока платформ нет', () => {
+  // `releases` приходят только с уровнем чтения: иначе блок оказался бы
+  // пустым и соврал бы, что выпусков нет.
+  render(<VersionDrawer version={METADATA_VERSION} platforms={[STORE]} isCurrent isOpen onClose={vi.fn()} />);
+
+  expect(screen.queryByText('Платформы')).not.toBeInTheDocument();
+});
+```
+
+В `VersionForm.test.tsx` — фикстура обязана быть в состоянии «выпущена», иначе поле скрыто и так, и тест зелёный до реализации:
+
+```ts
+const RELEASED = {
+  label: 'v1.2',
+  state: RoadmapVersionState.Released,
+  plannedDate: null,
+  releasedDate: '2026-03-14',
+};
+
+it('скрывает дату релиза, когда у проекта есть платформы', () => {
+  // Иначе вторая правда заводилась бы уже после того, как появилась
+  // первая: дата живёт у выпусков.
+  render(<VersionForm initial={RELEASED} onSubmit={vi.fn()} hasPlatforms />);
 
   expect(screen.queryByLabelText('Дата релиза')).not.toBeInTheDocument();
+});
+
+it('без платформ дата релиза по-прежнему есть', () => {
+  render(<VersionForm initial={RELEASED} onSubmit={vi.fn()} />);
+
+  expect(screen.getByLabelText('Дата релиза')).toBeInTheDocument();
+});
+
+it('при платформах не отправляет дату вовсе', async () => {
+  // Ключа в запросе нет — хранимое значение не затирается. Поправить его
+  // можно, записав фактический выход на платформе.
+  const onSubmit = vi.fn();
+
+  render(<VersionForm initial={RELEASED} onSubmit={onSubmit} hasPlatforms />);
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+  expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty('releasedDate');
 });
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/web && npx vitest run src/components/VersionDrawer src/components/VersionForm`
-Expected: FAIL — пропа `platforms` нет.
+Expected: FAIL — пропа `platforms` нет, `hasPlatforms` нет.
 
 - [ ] **Step 3: Реализация**
 
-- `IProps` получает `platforms?: Platform[]`; `IVersionActions` — `onSetRelease(platformId, input)` и `onClearRelease(platformId)`;
-- `ReleaseList` встаёт между паспортом версии и чекпоинтами; пусто — `null`;
-- `ReleaseRow`: имя платформы, выбор состояния (`releaseStatesFor(platform.kind)` плюс пустое значение «как у версии»), поле даты при «в релизе» и необязательное поле обозначения сборки с `placeholder` из обозначения версии. Правка — сразу, без кнопки сохранения, как галочки чекпоинтов;
-- без `actions` вместо выбора — подпись состояния и дата;
-- `VersionForm` получает `hasPlatforms?: boolean` и при `true` не показывает поле даты релиза и не отправляет его;
-- `RoadmapVersionPanel` собирает новые действия из `useMutationSetRelease` / `useMutationClearRelease` и передаёт платформы из `summary`;
+- `IProps` панели получает `platforms?: Platform[]`; `IVersionActions` —
+  `onSetRelease(platformId, input)` и `onClearRelease(platformId)`;
+- `ReleaseList` встаёт между паспортом версии и чекпоинтами. Ему нужны
+  два входа: платформы проекта пропом и текущие значения из
+  `version.releases`. Блок закрывается тем же `isDetailed(version)`, что
+  и чекпоинты: на уровне метаданных `releases` не приходят. Платформ нет —
+  `null`;
+- `ReleaseRow`: имя платформы, селект с `aria-label` вида
+  «Состояние {имя}» (три одинаковых подписи на панели с тремя платформами
+  различить было бы нечем), опции — пустая «как у версии» первой, затем
+  `releaseStatesFor(platform.kind)` с подписями из
+  `ReleaseSummary/constants`. Выбор «в релизе» подставляет сегодняшний
+  день, как это уже делает `VersionForm`. Поле даты показывается при «в
+  релизе», поле обозначения сборки — всегда, с `placeholder` из
+  обозначения версии. Правка действует сразу, без кнопки сохранения;
+- без `actions` вместо селекта — подпись состояния и дата;
+- `VersionForm` получает `hasPlatforms?: boolean`: при `true` не
+  показывает поле даты релиза и **не включает ключ** `releasedDate`
+  в отправляемый объект;
+- `VersionDrawer` выводит `hasPlatforms` из длины `platforms` и передаёт
+  в `VersionForm`;
+- `CreateVersionPanel` получает `platforms` и передаёт тот же признак:
+  иначе поле осталось бы видимым там, где версия как раз и заводится;
+- `RoadmapScreen` передаёт `roadmap.data.summary.map((row) => row.platform)`
+  в обе панели; `RoadmapVersionPanel` получает новый проп `platforms` и
+  собирает действия из `useMutationSetRelease` / `useMutationClearRelease`;
 - `PublicRoadmapView` передаёт платформы из `summary` без действий.
 
 - [ ] **Step 4: Запустить**
@@ -2593,16 +3706,15 @@ git add apps/web/src
 git commit -m "Вести выпуски платформ в панели версии"
 ```
 
-### Task 6.5: Теги платформ у чекпоинтов
+### Task 6.6: Теги и правка чекпоинта
 
 **Files:**
-- Modify: `apps/web/src/components/VersionDrawer/CheckpointItem.tsx`
-- Modify: `apps/web/src/components/VersionDrawer/CheckpointList.tsx`
-- Modify: `apps/web/src/components/VersionDrawer/CheckpointList.test.tsx`
-- Modify: `apps/web/src/components/CheckpointForm/CheckpointForm.tsx`
-- Modify: `apps/web/src/components/CheckpointForm/types.ts`
-- Modify: `apps/web/src/components/CheckpointForm/CheckpointForm.test.tsx`
-- Modify: `apps/web/src/components/VersionDrawer/VersionDrawer.tsx`
+- Create: `apps/web/src/components/CheckpointForm/PlatformsToggles.tsx`
+- Modify: `apps/web/src/components/CheckpointForm/{CheckpointForm.tsx,types.ts,CheckpointForm.test.tsx}`
+- Modify: `apps/web/src/components/VersionDrawer/{CheckpointList.tsx,CheckpointItem.tsx,CheckpointList.test.tsx,VersionDrawer.tsx,types.ts}`
+- Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapVersionPanel.tsx`
+
+Правка чекпоинта появляется здесь не только ради тегов: сейчас у существующего чекпоинта нельзя поправить **ни формулировку, ни ссылку на задачу** — только закрыть или удалить, и опечатка означает пересоздание записи. Теги без правки повторили бы ту же беду.
 
 - [ ] **Step 1: Падающие тесты**
 
@@ -2621,7 +3733,60 @@ it('показывает теги платформ у чекпоинта', () =>
   expect(screen.getByText('API')).toBeInTheDocument();
 });
 
-it('отправляет выбранные платформы с чекпоинтом', async () => {
+it('неизвестный тег пропускает молча', () => {
+  render(
+    <CheckpointList
+      checkpoints={[{ ...CHECKPOINT, platformIds: ['нет такой'] }]}
+      platforms={[API]}
+      canWrite={false}
+      onToggle={vi.fn()}
+      onDelete={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByLabelText(CHECKPOINT.title)).toBeInTheDocument();
+});
+
+it('правит формулировку, ссылку и теги существующего чекпоинта', async () => {
+  const onEdit = vi.fn();
+
+  render(
+    <CheckpointList
+      checkpoints={[{ ...CHECKPOINT, platformIds: [] }]}
+      platforms={[API, STORE]}
+      canWrite
+      onToggle={vi.fn()}
+      onDelete={vi.fn()}
+      onEdit={onEdit}
+    />,
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: `Править ${CHECKPOINT.title}` }));
+  await userEvent.clear(screen.getByLabelText('Формулировка'));
+  await userEvent.type(screen.getByLabelText('Формулировка'), 'Вход по телефону');
+  await userEvent.click(screen.getByLabelText('App Store'));
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+  expect(onEdit).toHaveBeenCalledWith(CHECKPOINT.id, {
+    title: 'Вход по телефону',
+    url: null,
+    platformIds: ['p2'],
+  });
+});
+
+it('без права записи править не предлагает', () => {
+  render(
+    <CheckpointList checkpoints={[CHECKPOINT]} canWrite={false} onToggle={vi.fn()} onDelete={vi.fn()} />,
+  );
+
+  expect(screen.queryByRole('button', { name: /Править/ })).not.toBeInTheDocument();
+});
+```
+
+В `CheckpointForm.test.tsx`:
+
+```ts
+it('отправляет выбранные платформы с новым чекпоинтом', async () => {
   const onSubmit = vi.fn();
 
   render(<CheckpointForm onSubmit={onSubmit} platforms={[API, STORE]} />);
@@ -2630,9 +3795,7 @@ it('отправляет выбранные платформы с чекпоин
   await userEvent.click(screen.getByLabelText('App Store'));
   await userEvent.click(screen.getByRole('button', { name: 'Добавить' }));
 
-  expect(onSubmit).toHaveBeenCalledWith(
-    expect.objectContaining({ platformIds: ['p2'] }),
-  );
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ platformIds: ['p2'] }));
 });
 
 it('без платформ проекта переключателей нет', () => {
@@ -2640,48 +3803,83 @@ it('без платформ проекта переключателей нет',
 
   expect(screen.queryByText('Платформы')).not.toBeInTheDocument();
 });
+
+it('предзаполняется для правки и зовёт кнопку «Сохранить»', () => {
+  render(
+    <CheckpointForm
+      initial={{ title: 'Оплата', url: 'https://tracker/1', platformIds: ['p1'] }}
+      submitLabel="Сохранить"
+      platforms={[API]}
+      onSubmit={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByLabelText('Формулировка')).toHaveValue('Оплата');
+  expect(screen.getByLabelText('Ссылка на задачу')).toHaveValue('https://tracker/1');
+  expect(screen.getByLabelText('API')).toBeChecked();
+});
 ```
 
 - [ ] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd apps/web && npx vitest run src/components/VersionDrawer src/components/CheckpointForm`
-Expected: FAIL — пропа нет.
+Expected: FAIL — пропов нет, кнопки «Править» нет.
 
 - [ ] **Step 3: Реализация**
 
-- `CheckpointList` и `CheckpointItem` получают `platforms?: Platform[]` и
-  показывают теги маленькими чипами после формулировки; имена ищутся по
-  `platformIds`, неизвестный идентификатор пропускается молча;
-- `CheckpointForm` получает `platforms?: Platform[]`, держит выбранные в
-  состоянии, отправляет `platformIds` только когда список платформ передан,
-  и сбрасывает выбор вместе с полями после отправки;
-- `VersionDrawer` передаёт платформы и в список, и в форму.
+- `CheckpointForm`: вместо `initialTitle` — `initial?: { title, url, platformIds }`
+  и `submitLabel = 'Добавить'`; `platforms?: Platform[]`; переключатели
+  выносятся в `PlatformsToggles.tsx` (файл ровно 100 строк, и без выноса
+  лимит будет превышен). `platformIds` отправляется **только когда проп
+  платформ передан**. После отправки в режиме создания поля и выбор
+  сбрасываются, в режиме правки — нет: форма закрывается родителем;
+- `CheckpointItem`: теги через `PlatformChips` после формулировки
+  (неизвестный идентификатор пропускается молча) и кнопка «Править»
+  с `aria-label` вида «Править {формулировка}» — при праве записи;
+- `CheckpointList`: держит идентификатор правимого чекпоинта и показывает
+  на его месте `CheckpointForm` с начальными значениями; `onEdit`
+  вызывается с идентификатором и данными, после чего правка закрывается;
+- `VersionDrawer`: передаёт платформы и в список, и в форму добавления;
+  `IVersionActions` получает `onEditCheckpoint(checkpointId, input)`;
+- `RoadmapVersionPanel`: `onEditCheckpoint` собирается из уже
+  существующего `useMutationUpdateCheckpoint` — он принимает те же поля,
+  включая `platformIds`.
+
+`VersionDrawer.tsx` после Task 6.5 и 6.6 подходит к сотне строк: блок кнопок «Редактировать» / «Удалить версию» вынести в `VersionActions.tsx`, если лимит превышен.
 
 - [ ] **Step 4: Запустить**
 
-Run: `cd apps/web && npx vitest run src && pnpm typecheck`
-Expected: PASS и зелёный `typecheck` — к этому шагу контракт, API и веб сошлись.
+Run: `cd apps/web && npx vitest run src`
+Expected: PASS.
 
-- [ ] **Step 5: Коммит**
+- [ ] **Step 5: Запустить всё и типы**
+
+Run: `cd "$(git rev-parse --show-toplevel)" && pnpm typecheck`
+Expected: PASS — к этому шагу контракт, API и веб сошлись. Прогон из корня обязателен: локальный `typecheck` в `apps/web` сверил бы веб со старым собранным контрактом.
+
+- [ ] **Step 6: Коммит**
 
 ```bash
 git add apps/web/src
-git commit -m "Помечать чекпоинты платформами"
+git commit -m "Править чекпоинт и помечать его платформами"
 ```
 
 ---
 
 ## Финальная проверка
 
-- [ ] `pnpm test` — зелено во всех рабочих пространствах (интеграционные поднимают PostgreSQL через Testcontainers).
-- [ ] `pnpm typecheck` — зелено.
+- [ ] `pnpm test` из корня — зелено во всех рабочих пространствах (интеграционные поднимают PostgreSQL через Testcontainers).
+- [ ] `pnpm typecheck` из корня — зелено.
 - [ ] `pnpm build` — зелено.
+- [ ] Ссылок на удалённые маршруты не осталось: `grep -rn "projects/new" apps/web/src` — пусто; `grep -rn "projects/\[id\]/edit" apps/web/src` — пусто. Ссылки `/servers/<id>/edit` и `/domains/<id>/edit` остаются: их формы переезжают отдельной работой.
 - [ ] Руками на поднятом стеке (`docker compose up -d`, миграции применены):
   - [ ] проект создаётся в панели с платформами «API», «Веб», «App Store», выбранными из подсказок;
-  - [ ] «Править» на карточке проекта открывает ту же форму в панели; снятие платформы действует сразу;
-  - [ ] в окружении «Прод» отмечаются «API» и «Веб»; «App Store» в списке галочек не предлагается;
+  - [ ] «Править» на странице проекта открывает ту же форму в панели; снятие платформы действует сразу, чипы обновляются без перезагрузки;
+  - [ ] в окружении «Прод» отмечаются «API» и «Веб»; «App Store» в списке галочек не предлагается; правка имени окружения галочек не снимает;
   - [ ] у версии v1.3 выставляются три разных состояния: API — «в релизе», Веб — «на тесте», App Store — «на модерации»;
   - [ ] сводка наверху роадмапа читается за две секунды и отвечает, что в релизе и что на проверке;
+  - [ ] у чекпоинта правятся формулировка, ссылка и теги; теги видны в строке;
+  - [ ] версия, у которой дата релиза была заведена до появления платформ: поле в форме скрыто, дата на диаграмме осталась, а после записи выпущенного выпуска сменилась на его дату;
+  - [ ] у проекта без платформ поле «Дата релиза» на месте, сводки нет, экран роадмапа выглядит как прежде;
   - [ ] публичная ссылка роадмапа в приватном окне показывает ту же сводку и не показывает ни адресов, ни здоровья;
-  - [ ] журнал действий содержит `platform.created` и `platform_release.set`.
-- [ ] Удалённые страницы `/projects/new` и `/projects/[id]/edit` отвечают `404`, и ссылок на них в коде не осталось: `grep -rn "projects/new" apps/web/src` и `grep -rn "projects/\${.*}/edit\|projects/\[id\]/edit" apps/web/src` — пусто. Ссылки `/servers/<id>/edit` и `/domains/<id>/edit` остаются: их формы переезжают отдельной работой.
+  - [ ] журнал действий содержит `platform.created` и `platform_release.set` с внятными подписями.
