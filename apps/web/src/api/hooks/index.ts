@@ -6,6 +6,7 @@ export * from './useMutationCreateProject';
 export * from './useMutationDomain';
 export * from './useMutationEnvironment';
 export * from './useMutationIntakeAddress';
+export * from './useMutationRelease';
 export * from './useMutationRoadmap';
 export * from './useMutationServer';
 export * from './useMutationSetGrant';
