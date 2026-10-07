@@ -1,4 +1,10 @@
-import { AccessLevel, RoadmapVersionState, type RoadmapVersionDetail } from '@cairn/shared';
+import {
+  AccessLevel,
+  PlatformReleaseState,
+  RoadmapVersionState,
+  type PlatformRelease,
+  type RoadmapVersionDetail,
+} from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
 import { versionProjection } from './roadmap.projection';
@@ -41,7 +47,7 @@ const checkpoints: RoadmapCheckpointRow[] = [
 
 describe('проекция версии', () => {
   it('на уровне метаданных отдаёт паспорт и прогресс без формулировок', () => {
-    const projected = versionProjection(version, checkpoints, AccessLevel.Metadata);
+    const projected = versionProjection(version, checkpoints, [], AccessLevel.Metadata);
 
     expect(projected).toEqual({
       id: version.id,
@@ -59,6 +65,7 @@ describe('проекция версии', () => {
     const projected = versionProjection(
       version,
       checkpoints,
+      [],
       AccessLevel.Read,
     ) as RoadmapVersionDetail;
 
@@ -69,7 +76,7 @@ describe('проекция версии', () => {
   });
 
   it('версия без чекпоинтов имеет прогресс 0/0', () => {
-    expect(versionProjection(version, [], AccessLevel.Metadata).progress).toEqual({
+    expect(versionProjection(version, [], [], AccessLevel.Metadata).progress).toEqual({
       done: 0,
       total: 0,
     });
@@ -81,6 +88,7 @@ describe('ссылки на задачи в проекции', () => {
     const projected = versionProjection(
       version,
       checkpoints,
+      [],
       AccessLevel.Read,
     ) as RoadmapVersionDetail;
 
@@ -91,8 +99,9 @@ describe('ссылки на задачи в проекции', () => {
     const projected = versionProjection(
       version,
       checkpoints,
+      [],
       AccessLevel.Read,
-      false,
+      { withLinks: false },
     ) as RoadmapVersionDetail;
 
     expect(projected.checkpoints[0]).not.toHaveProperty('url');
@@ -102,8 +111,9 @@ describe('ссылки на задачи в проекции', () => {
     const projected = versionProjection(
       version,
       checkpoints,
+      [],
       AccessLevel.Read,
-      false,
+      { withLinks: false },
     ) as RoadmapVersionDetail;
 
     expect(projected.checkpoints.map((checkpoint) => checkpoint.title)).toEqual([
@@ -112,3 +122,103 @@ describe('ссылки на задачи в проекции', () => {
     ]);
   });
 });
+
+describe('выпуски и дата в проекции версии', () => {
+  const released = (releasedDate: string | null, platformId = 'p1'): PlatformRelease => ({
+    platformId,
+    state: PlatformReleaseState.Released,
+    releasedDate,
+    buildLabel: null,
+  });
+
+  it('дата версии берётся из выпусков, когда они есть', () => {
+    // Одна правда в каждый момент: хранимая дата остаётся ответом, пока
+    // не появился ответ точнее.
+    const projected = versionProjection(
+      { ...version, releasedDate: '2026-01-01' },
+      [],
+      [released('2026-03-12'), released('2026-03-16', 'p2')],
+      AccessLevel.Read,
+    );
+
+    expect(projected.releasedDate).toBe('2026-03-16');
+  });
+
+  it('не теряет хранимую дату, когда выпуски выпущены без дат', () => {
+    // «Вышла, дата неизвестна» — допустимое состояние выпуска, и оно
+    // не должно стирать то, что уже известно о версии.
+    const projected = versionProjection(
+      { ...version, releasedDate: '2026-01-01' },
+      [],
+      [released(null)],
+      AccessLevel.Read,
+    );
+
+    expect(projected.releasedDate).toBe('2026-01-01');
+  });
+
+  it('без выпущенных выпусков дата остаётся хранимой', () => {
+    const projected = versionProjection(
+      { ...version, releasedDate: '2026-01-01' },
+      [],
+      [
+        {
+          platformId: 'p1',
+          state: PlatformReleaseState.OnTest,
+          releasedDate: null,
+          buildLabel: null,
+        },
+      ],
+      AccessLevel.Read,
+    );
+
+    expect(projected.releasedDate).toBe('2026-01-01');
+  });
+
+  it('дата из выпусков видна и на уровне метаданных', () => {
+    // Публичная схема расширяет метаданные: положи вычисление в блок
+    // чтения — и наружу уйдёт устаревшая хранимая дата.
+    const projected = versionProjection(
+      { ...version, releasedDate: '2026-01-01' },
+      [],
+      [released('2026-03-16')],
+      AccessLevel.Metadata,
+    );
+
+    expect(projected.releasedDate).toBe('2026-03-16');
+  });
+
+  it('выпуски и теги открываются уровнем чтения', () => {
+    const releases: PlatformRelease[] = [
+      {
+        platformId: 'p1',
+        state: PlatformReleaseState.OnTest,
+        releasedDate: null,
+        buildLabel: null,
+      },
+    ];
+    const tags = new Map([[checkpoints[0]!.id, ['p1']]]);
+
+    const metadata = versionProjection(version, checkpoints, releases, AccessLevel.Metadata);
+    const read = versionProjection(version, checkpoints, releases, AccessLevel.Read, {
+      platformsByCheckpoint: tags,
+    }) as RoadmapVersionDetail;
+
+    expect('releases' in metadata).toBe(false);
+    expect(read.releases).toHaveLength(1);
+    expect(read.checkpoints[0]?.platformIds).toEqual(['p1']);
+  });
+
+  it('чекпоинт без тегов получает пустой набор, а не отсутствие поля', () => {
+    // Публичная схема строгая и поле ждёт; отсутствие провалило бы разбор.
+    const read = versionProjection(
+      version,
+      checkpoints,
+      [],
+      AccessLevel.Read,
+    ) as RoadmapVersionDetail;
+
+    expect(read.checkpoints[0]?.platformIds).toEqual([]);
+  });
+});
+

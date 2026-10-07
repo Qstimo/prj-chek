@@ -59,7 +59,7 @@ export class RoadmapRepository {
     return {
       stage: stageOf(versions),
       versions: versions.map((version) =>
-        versionProjection(version, byVersion.get(version.id) ?? [], level),
+        versionProjection(version, byVersion.get(version.id) ?? [], [], level),
       ),
     };
   }
@@ -291,12 +291,9 @@ export class RoadmapRepository {
         (version) =>
           // Без ссылок на задачи: страница открыта без авторизации, и адрес
           // внутреннего трекера с номером задачи наружу уходить не должен.
-          versionProjection(
-            version,
-            byVersion.get(version.id) ?? [],
-            AccessLevel.Read,
-            false,
-          ) as PublicVersion,
+          versionProjection(version, byVersion.get(version.id) ?? [], [], AccessLevel.Read, {
+            withLinks: false,
+          }) as PublicVersion,
       ),
     };
   }
