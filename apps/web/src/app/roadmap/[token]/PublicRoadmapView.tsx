@@ -32,6 +32,7 @@ export function PublicRoadmapView({ roadmap }: IProps) {
 
       {selected && (
         <VersionDrawer
+          platforms={roadmap.summary.map((row) => row.platform)}
           version={selected}
           isCurrent={selectedIndex === currentIndex}
           isOpen

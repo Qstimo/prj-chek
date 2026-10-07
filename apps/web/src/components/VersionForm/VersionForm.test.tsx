@@ -5,6 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { VersionForm } from './VersionForm';
 
+const RELEASED = {
+  label: 'v1.2',
+  state: RoadmapVersionState.Released,
+  plannedDate: null,
+  releasedDate: '2026-03-14',
+};
+
 describe('VersionForm', () => {
   it('не отправляет форму без обозначения', async () => {
     const onSubmit = vi.fn();
@@ -116,5 +123,30 @@ describe('VersionForm', () => {
     );
 
     expect(screen.getByLabelText('Дата релиза')).toHaveValue('2026-09-01');
+  });
+
+  it('скрывает дату релиза, когда у проекта есть платформы', () => {
+    // Иначе вторая правда заводилась бы уже после того, как появилась
+    // первая: дата живёт у выпусков.
+    render(<VersionForm initial={RELEASED} onSubmit={vi.fn()} hasPlatforms />);
+
+    expect(screen.queryByLabelText('Дата релиза')).not.toBeInTheDocument();
+  });
+
+  it('без платформ дата релиза по-прежнему есть', () => {
+    render(<VersionForm initial={RELEASED} onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText('Дата релиза')).toBeInTheDocument();
+  });
+
+  it('при платформах не отправляет дату вовсе', async () => {
+    // Ключа в запросе нет — хранимое значение не затирается. Поправить
+    // его можно, записав фактический выход на платформе.
+    const onSubmit = vi.fn();
+
+    render(<VersionForm initial={RELEASED} onSubmit={onSubmit} hasPlatforms />);
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty('releasedDate');
   });
 });

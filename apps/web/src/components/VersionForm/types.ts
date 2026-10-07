@@ -15,4 +15,12 @@ export interface IProps {
   onSubmit: (input: RoadmapVersionCreate) => void;
   error?: string;
   isSubmitting?: boolean;
+  /**
+   * Есть ли у проекта платформы.
+   *
+   * При них фактическая дата релиза живёт у выпусков платформ: поле
+   * скрывается и ключ не отправляется, иначе вторая правда заводилась бы
+   * уже после того, как появилась первая.
+   */
+  hasPlatforms?: boolean;
 }

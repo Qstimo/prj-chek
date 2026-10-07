@@ -82,6 +82,9 @@ beforeEach(() => {
   vi.mocked(hooks.useMutationDeleteCheckpoint).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationPublishRoadmap).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationUnpublishRoadmap).mockReturnValue(mutation());
+  // Панель версии читает их `isPending` на рендере: автомок уронил бы экран.
+  vi.mocked(hooks.useMutationSetRelease).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationClearRelease).mockReturnValue(mutation());
 });
 
 describe('RoadmapScreen', () => {

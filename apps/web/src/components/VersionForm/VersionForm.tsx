@@ -3,6 +3,8 @@
 import { RoadmapVersionState, type RoadmapVersionCreate } from '@cairn/shared';
 import { useState, type FormEvent } from 'react';
 
+import { today } from '@/utils';
+
 import { TextField } from '../TextField';
 // Глубокий импорт вместо бареля: через index.ts возник бы цикл
 // VersionForm → VersionDrawer/index → VersionDrawer → VersionForm.
@@ -12,7 +14,13 @@ import { FormError } from '../FormError';
 import type { IProps } from './types';
 
 /** Форма версии роадмапа: обозначение, состояние, даты (ТЗ 3.5). */
-export function VersionForm({ initial, onSubmit, error, isSubmitting = false }: IProps) {
+export function VersionForm({
+  initial,
+  onSubmit,
+  error,
+  isSubmitting = false,
+  hasPlatforms = false,
+}: IProps) {
   const [label, setLabel] = useState(initial?.label ?? '');
   const [state, setState] = useState<RoadmapVersionState>(
     initial?.state ?? RoadmapVersionState.Planned,
@@ -20,7 +28,9 @@ export function VersionForm({ initial, onSubmit, error, isSubmitting = false }: 
   const [plannedDate, setPlannedDate] = useState(initial?.plannedDate ?? '');
   const [releasedDate, setReleasedDate] = useState(initial?.releasedDate ?? '');
 
-  const isReleased = state === RoadmapVersionState.Released;
+  // Дата релиза живёт у выпусков, когда платформы есть: поле скрыто
+  // и ключ не отправляется, чтобы хранимое значение не затиралось.
+  const isReleased = state === RoadmapVersionState.Released && !hasPlatforms;
   const canSubmit = label.trim().length > 0 && !isSubmitting;
 
   function handleStateChange(next: RoadmapVersionState): void {
@@ -44,7 +54,10 @@ export function VersionForm({ initial, onSubmit, error, isSubmitting = false }: 
       state,
       plannedDate: plannedDate.length > 0 ? plannedDate : null,
       // Не «выпущена» — null, чтобы дата не залипала от прежнего состояния.
-      releasedDate: isReleased && releasedDate.length > 0 ? releasedDate : null,
+      // При платформах ключа нет вовсе: `undefined` означает «не трогать».
+      ...(hasPlatforms
+        ? {}
+        : { releasedDate: isReleased && releasedDate.length > 0 ? releasedDate : null }),
     } satisfies RoadmapVersionCreate);
   }
 
@@ -89,7 +102,3 @@ export function VersionForm({ initial, onSubmit, error, isSubmitting = false }: 
   );
 }
 
-/** Сегодняшний день `ГГГГ-ММ-ДД` по местному времени (sv-SE даёт ISO-порядок). */
-function today(): string {
-  return new Intl.DateTimeFormat('sv-SE').format(new Date());
-}

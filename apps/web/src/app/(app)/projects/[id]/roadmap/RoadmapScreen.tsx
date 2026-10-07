@@ -38,6 +38,7 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
     );
   }
 
+  const platforms = roadmap.data.summary.map((row) => row.platform);
   const level = sections.data[Section.Roadmap];
   const canWrite = level === AccessLevel.Write;
   const canRead = canWrite || level === AccessLevel.Read;
@@ -86,6 +87,7 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
         <RoadmapVersionPanel
           projectId={projectId}
           version={selected}
+          platforms={platforms}
           isCurrent={selectedIndex === currentIndex}
           canWrite={canWrite}
           onClose={() => setSelectedVersionId(null)}
@@ -94,6 +96,7 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
 
       <CreateVersionPanel
         projectId={projectId}
+        platforms={platforms}
         isOpen={isCreating}
         onClose={() => setIsCreating(false)}
       />
