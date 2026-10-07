@@ -1,8 +1,10 @@
 import {
   AccessLevel,
+  releaseStatesFor,
   RoadmapVersionState,
   Section,
   type PlatformRelease,
+  type PlatformReleaseSet,
   type PublicRoadmap,
   type PublicVersion,
   type RoadmapCheckpointCreate,
@@ -30,6 +32,8 @@ import {
   roadmapPublicLinks,
   roadmapVersions,
   versionPlatformReleases,
+  type PlatformReleaseRow,
+  type ProjectPlatformRow,
   type RoadmapCheckpointRow,
   type RoadmapVersionRow,
 } from '../db/schema';
@@ -228,6 +232,91 @@ export class RoadmapRepository {
     await tx.delete(roadmapCheckpoints).where(eq(roadmapCheckpoints.id, checkpointId));
 
     return checkpoint;
+  }
+
+  /**
+   * Ставит выпуск платформы в версии.
+   *
+   * Строка одна на пару «версия × платформа»: повторный вызов меняет её.
+   * Допустимость состояния определяется видом платформы —
+   * `releaseStatesFor` из контракта, тот же список, по которому интерфейс
+   * рисует выбор.
+   *
+   * Возвращает строку вместе с именем платформы и обозначением версии:
+   * они нужны журналу, а достать их отдельным запросом служба не может —
+   * репозиторий платформ требует доступа к «Инфо».
+   */
+  async setRelease(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    versionId: string,
+    platformId: string,
+    input: PlatformReleaseSet,
+  ): Promise<PlatformReleaseRow & { platformName: string; versionLabel: string }> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+
+    const version = await this.requireVersion(tx, projectId, versionId);
+    const platform = await this.requirePlatform(tx, projectId, platformId);
+
+    if (!releaseStatesFor(platform.kind).includes(input.state)) {
+      throw new ConflictException(
+        `Состояние «${input.state}» платформе «${platform.name}» не подходит: модерация и отклонение бывают только у магазина.`,
+      );
+    }
+
+    const values = {
+      versionId,
+      platformId,
+      state: input.state,
+      // `?? null`, а не `input.releasedDate`: Drizzle пропускает
+      // `undefined`, и прежняя дата осталась бы в клетке после смены
+      // состояния — PUT перестал бы быть полной заменой.
+      releasedDate: input.releasedDate ?? null,
+      buildLabel: input.buildLabel ?? null,
+    };
+
+    const [set] = await tx
+      .insert(versionPlatformReleases)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [versionPlatformReleases.versionId, versionPlatformReleases.platformId],
+        set: { ...values, updatedAt: new Date() },
+      })
+      .returning();
+
+    return { ...set!, platformName: platform.name, versionLabel: version.label };
+  }
+
+  /**
+   * Снимает выпуск: платформа снова идёт «как у версии».
+   *
+   * Имена берутся из платформы и версии, а не из удаляемой строки,
+   * поэтому возвращаются и при повторном вызове. Отсутствие строки
+   * ошибкой не считается: «как у версии» и до, и после вызова.
+   */
+  async clearRelease(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    versionId: string,
+    platformId: string,
+  ): Promise<{ platformName: string; versionLabel: string }> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+
+    const version = await this.requireVersion(tx, projectId, versionId);
+    const platform = await this.requirePlatform(tx, projectId, platformId);
+
+    await tx
+      .delete(versionPlatformReleases)
+      .where(
+        and(
+          eq(versionPlatformReleases.versionId, versionId),
+          eq(versionPlatformReleases.platformId, platformId),
+        ),
+      );
+
+    return { platformName: platform.name, versionLabel: version.label };
   }
 
   /** Токен действующей публичной ссылки либо `null`. */
@@ -436,6 +525,30 @@ export class RoadmapRepository {
     }
 
     return version;
+  }
+
+  /**
+   * Платформа обязана принадлежать проекту из адреса.
+   *
+   * Чужая — `404`, а не `400`: иначе ответ подтвердил бы, что платформа
+   * существует в другом проекте.
+   */
+  private async requirePlatform(
+    executor: Executor,
+    projectId: string,
+    platformId: string,
+  ): Promise<ProjectPlatformRow> {
+    const [platform] = await executor
+      .select()
+      .from(projectPlatforms)
+      .where(and(eq(projectPlatforms.id, platformId), eq(projectPlatforms.projectId, projectId)))
+      .limit(1);
+
+    if (!platform) {
+      throw new SectionNotVisibleError();
+    }
+
+    return platform;
   }
 
   /** Чекпоинт обязан принадлежать версии и проекту из адреса. */

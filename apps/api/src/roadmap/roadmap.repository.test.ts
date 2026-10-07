@@ -559,4 +559,121 @@ describe('репозиторий роадмапа', () => {
       expect(detail.checkpoints[0]?.platformIds).toEqual([apiId, webId]);
     });
   });
+
+  describe('выпуски платформ', () => {
+    it('ставит выпуск и переставляет его той же ручкой', async () => {
+      // Выпуск — не отдельная вещь со своим адресом, а значение в клетке
+      // «версия × платформа»: повторный вызов меняет её, а не плодит вторую.
+      const versionId = await createVersion('v1.0');
+      const apiId = await createPlatform('API');
+
+      await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+          state: PlatformReleaseState.OnTest,
+        }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+          state: PlatformReleaseState.Released,
+          releasedDate: '2026-03-12',
+        }),
+      );
+
+      const releases = await testDb.rowsOf(versionPlatformReleases);
+
+      expect(releases).toHaveLength(1);
+      expect(releases[0]?.state).toBe(PlatformReleaseState.Released);
+      expect(releases[0]?.releasedDate).toBe('2026-03-12');
+    });
+
+    it('не присланные поля обнуляет, а не оставляет прежними', async () => {
+      // Иначе переход «выпущена 12.03 → на тесте» сохранил бы дату релиза,
+      // и PUT перестал бы быть заменой значения в клетке.
+      const versionId = await createVersion('v1.0');
+      const apiId = await createPlatform('API');
+
+      await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+          state: PlatformReleaseState.Released,
+          releasedDate: '2026-03-12',
+          buildLabel: '1.0 (7)',
+        }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+          state: PlatformReleaseState.OnTest,
+        }),
+      );
+
+      const [release] = await testDb.rowsOf(versionPlatformReleases);
+
+      expect(release?.releasedDate).toBeNull();
+      expect(release?.buildLabel).toBeNull();
+    });
+
+    it('не ставит модерацию серверной платформе', async () => {
+      const versionId = await createVersion('v1.0');
+      const apiId = await createPlatform('API');
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+            state: PlatformReleaseState.InReview,
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('не видит платформу чужого проекта', async () => {
+      const versionId = await createVersion('v1.0');
+      const foreign = await createPlatform('API', PlatformKind.Server, 1, otherProjectId);
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.setRelease(admin(), tx, projectId, versionId, foreign, {
+            state: PlatformReleaseState.OnTest,
+          }),
+        ),
+      ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    });
+
+    it('возвращает имя платформы и обозначение версии для журнала', async () => {
+      // Служба их не достаёт сама: вызов репозитория платформ потребовал
+      // бы доступа к «Инфо», которого у подрядчика с записью в роадмап нет.
+      const versionId = await createVersion('v1.0');
+      const apiId = await createPlatform('API');
+
+      const set = await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+          state: PlatformReleaseState.OnTest,
+        }),
+      );
+
+      expect(set).toMatchObject({ platformName: 'API', versionLabel: 'v1.0' });
+    });
+
+    it('снятие возвращает платформу «как у версии» и терпит отсутствие строки', async () => {
+      const versionId = await createVersion('v1.0');
+      const apiId = await createPlatform('API');
+
+      await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+          state: PlatformReleaseState.OnTest,
+        }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.clearRelease(admin(), tx, projectId, versionId, apiId),
+      );
+
+      expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
+
+      // Ручка идемпотентна: «как у версии» и до, и после вызова.
+      const repeated = await testDb.db.transaction((tx) =>
+        repository.clearRelease(admin(), tx, projectId, versionId, apiId),
+      );
+
+      expect(repeated).toMatchObject({ platformName: 'API', versionLabel: 'v1.0' });
+      expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
+    });
+  });
 });
