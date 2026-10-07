@@ -3,7 +3,7 @@
 import type { ProjectUpdate } from '@cairn/shared';
 import { useState, type FormEvent } from 'react';
 
-import { FormError } from '../FormError';
+import { FormActions } from '../FormActions';
 import { ProjectFields } from './ProjectFields';
 import type { IProps, ProjectFormValues } from './types';
 
@@ -46,15 +46,7 @@ export function ProjectForm({
 
       {platformsSlot}
 
-      <FormError message={error} />
-
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
-      >
-        {isSubmitting ? 'Сохранение…' : 'Сохранить'}
-      </button>
+      <FormActions submitLabel="Сохранить" canSubmit={canSubmit} isSubmitting={isSubmitting} error={error} />
     </form>
   );
 }

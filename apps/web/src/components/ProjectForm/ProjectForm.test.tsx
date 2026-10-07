@@ -83,4 +83,14 @@ describe('ProjectForm', () => {
 
     expect(screen.queryByText(/платформ/i)).not.toBeInTheDocument();
   });
+
+  it('кнопка сохранения лежит в прилипшей полосе', () => {
+    // Паспорт длиннее экрана: кнопка в конце документа заставляла бы
+    // прокручивать до упора.
+    render(<ProjectForm initial={project} onSubmit={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Сохранить' }).parentElement).toHaveClass(
+      'sticky',
+    );
+  });
 });

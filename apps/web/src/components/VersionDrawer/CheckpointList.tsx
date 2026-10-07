@@ -57,6 +57,7 @@ export function CheckpointList({
               platforms={platforms}
               onReadTitle={onReadTitle}
               idPrefix={`checkpoint-${checkpoint.id}`}
+              onCancel={() => setEditingId(null)}
               onSubmit={(input) => {
                 onEdit(checkpoint.id, input);
                 setEditingId(null);

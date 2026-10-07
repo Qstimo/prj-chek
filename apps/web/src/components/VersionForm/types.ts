@@ -14,6 +14,13 @@ export interface IProps {
   initial?: VersionFormInitial;
   onSubmit: (input: RoadmapVersionCreate) => void;
   error?: string;
+  /**
+   * Возврат из правки без сохранения.
+   *
+   * Отсутствие означает, что возвращаться некуда: форма создания
+   * закрывается самой панелью.
+   */
+  onCancel?: () => void;
   isSubmitting?: boolean;
   /**
    * Есть ли у проекта платформы.

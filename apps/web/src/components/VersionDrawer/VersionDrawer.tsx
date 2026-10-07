@@ -48,19 +48,10 @@ export function VersionDrawer({
           isSubmitting={actions.isSubmittingVersion}
           error={actions.versionError}
           onSubmit={(input) => actions.onSubmitVersion(input, () => setIsEditing(false))}
+          onCancel={() => setIsEditing(false)}
         />
       ) : (
         <VersionPassport version={version} isCurrent={isCurrent} />
-      )}
-
-      {isEditing && actions && (
-        <button
-          type="button"
-          onClick={() => setIsEditing(false)}
-          className="rounded-md border px-3 py-1 text-sm"
-        >
-          Отмена
-        </button>
       )}
 
       {detail && (

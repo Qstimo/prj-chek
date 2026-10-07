@@ -155,4 +155,25 @@ describe('CheckpointList', () => {
 
     expect(screen.queryByRole('button', { name: /Править/ })).not.toBeInTheDocument();
   });
+
+  it('из правки можно выйти, не сохраняя', async () => {
+    // Иначе открытая по ошибке правка — ловушка: закрыть её нечем.
+    const onEdit = vi.fn();
+
+    render(
+      <CheckpointList
+        checkpoints={[plain]}
+        canWrite
+        onToggle={vi.fn()}
+        onDelete={vi.fn()}
+        onEdit={onEdit}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: `Править ${plain.title}` }));
+    await userEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+
+    expect(screen.queryByLabelText('Формулировка')).not.toBeInTheDocument();
+    expect(onEdit).not.toHaveBeenCalled();
+  });
 });

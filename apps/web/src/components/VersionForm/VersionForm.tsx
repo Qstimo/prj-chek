@@ -5,18 +5,17 @@ import { useState, type FormEvent } from 'react';
 
 import { today } from '@/utils';
 
+import { FormActions } from '../FormActions';
 import { TextField } from '../TextField';
-// Глубокий импорт вместо бареля: через index.ts возник бы цикл
-// VersionForm → VersionDrawer/index → VersionDrawer → VersionForm.
-import { STATE_LABELS } from '../VersionDrawer/constants';
 import { DateField } from './DateField';
-import { FormError } from '../FormError';
+import { StateField } from './StateField';
 import type { IProps } from './types';
 
 /** Форма версии роадмапа: обозначение, состояние, даты (ТЗ 3.5). */
 export function VersionForm({
   initial,
   onSubmit,
+  onCancel,
   error,
   isSubmitting = false,
   hasPlatforms = false,
@@ -65,23 +64,8 @@ export function VersionForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       <TextField id="label" label="Обозначение" value={label} onChange={setLabel} />
 
-      <div className="space-y-1">
-        <label htmlFor="state" className="block text-sm font-medium">
-          Состояние
-        </label>
-        <select
-          id="state"
-          value={state}
-          onChange={(event) => handleStateChange(event.target.value as RoadmapVersionState)}
-          className="w-full rounded-md border border-border px-3 py-2"
-        >
-          {Object.values(RoadmapVersionState).map((value) => (
-            <option key={value} value={value}>
-              {STATE_LABELS[value]}
-            </option>
-          ))}
-        </select>
-      </div>
+      <StateField value={state} onChange={handleStateChange} />
+
 
       <DateField id="plannedDate" label="Плановая дата" value={plannedDate} onChange={setPlannedDate} />
 
@@ -89,15 +73,13 @@ export function VersionForm({
         <DateField id="releasedDate" label="Дата релиза" value={releasedDate} onChange={setReleasedDate} />
       )}
 
-      <FormError message={error} />
-
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
-      >
-        {isSubmitting ? 'Сохранение…' : 'Сохранить'}
-      </button>
+      <FormActions
+        submitLabel="Сохранить"
+        canSubmit={canSubmit}
+        isSubmitting={isSubmitting}
+        onCancel={onCancel}
+        error={error}
+      />
     </form>
   );
 }

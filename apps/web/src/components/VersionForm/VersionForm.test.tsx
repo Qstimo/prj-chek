@@ -149,4 +149,34 @@ describe('VersionForm', () => {
 
     expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty('releasedDate');
   });
+
+  it('кнопка сохранения лежит в прилипшей полосе', () => {
+    render(<VersionForm onSubmit={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Сохранить' }).parentElement).toHaveClass(
+      'sticky',
+    );
+  });
+
+  it('отмену показывает рядом с сохранением, когда есть куда возвращаться', async () => {
+    // Раньше «Отмена» висела отдельной кнопкой под формой: два действия
+    // одного выбора стояли в разных местах.
+    const onCancel = vi.fn();
+
+    render(<VersionForm onSubmit={vi.fn()} onCancel={onCancel} />);
+
+    const cancel = screen.getByRole('button', { name: 'Отмена' });
+
+    expect(cancel.parentElement).toHaveClass('sticky');
+
+    await userEvent.click(cancel);
+
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it('без обработчика отмены кнопки нет', () => {
+    render(<VersionForm onSubmit={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: 'Отмена' })).not.toBeInTheDocument();
+  });
 });

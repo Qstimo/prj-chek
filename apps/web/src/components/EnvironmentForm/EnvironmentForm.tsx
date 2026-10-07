@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 
-import { FormError } from '../FormError';
+import { FormActions } from '../FormActions';
 import { TextField } from '../TextField';
 import { FIELD_LABELS } from './constants';
 import { EnvironmentFields } from './EnvironmentFields';
@@ -73,15 +73,7 @@ export function EnvironmentForm({
         />
       )}
 
-      <FormError message={error} />
-
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
-      >
-        {isSubmitting ? 'Сохранение…' : 'Сохранить'}
-      </button>
+      <FormActions submitLabel="Сохранить" canSubmit={canSubmit} isSubmitting={isSubmitting} error={error} />
     </form>
   );
 }

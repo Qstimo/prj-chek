@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 
-import { FormError } from '../FormError';
+import { FormActions } from '../FormActions';
 import { CheckpointFields } from './CheckpointFields';
 import { PlatformsToggles } from './PlatformsToggles';
 import type { IProps } from './types';
@@ -21,6 +21,7 @@ export function CheckpointForm({
   initial,
   submitLabel = 'Добавить',
   onSubmit,
+  onCancel,
   onReadTitle,
   platforms,
   isSubmitting = false,
@@ -84,15 +85,16 @@ export function CheckpointForm({
         />
       )}
 
-      <FormError message={error} />
-
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
-      >
-        {submitLabel}
-      </button>
+      {/* Без прилипания: форма вложена в панель версии, и вторая полоса
+          внизу спорила бы с полосой формы версии. */}
+      <FormActions
+        submitLabel={submitLabel}
+        canSubmit={canSubmit}
+        isSubmitting={isSubmitting}
+        onCancel={onCancel}
+        error={error}
+        isSticky={false}
+      />
     </form>
   );
 }

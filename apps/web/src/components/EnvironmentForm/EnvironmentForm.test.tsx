@@ -250,4 +250,12 @@ describe('EnvironmentForm', () => {
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ platformIds: ['p1'] }));
   });
+
+  it('кнопка сохранения лежит в прилипшей полосе', () => {
+    render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Сохранить' }).parentElement).toHaveClass(
+      'sticky',
+    );
+  });
 });
