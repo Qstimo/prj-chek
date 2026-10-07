@@ -2,12 +2,15 @@ import {
   AccessLevel,
   Section,
   linkTitleRequestSchema,
+  platformReleaseSetSchema,
   roadmapCheckpointCreateSchema,
   roadmapCheckpointUpdateSchema,
   roadmapVersionCreateSchema,
   roadmapVersionUpdateSchema,
   type LinkTitleRequest,
   type LinkTitleResponse,
+  type PlatformRelease,
+  type PlatformReleaseSet,
   type PublicLink,
   type PublicRoadmap,
   type RoadmapCheckpoint,
@@ -28,6 +31,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 
@@ -168,6 +172,37 @@ export class RoadmapController {
     @Param('checkpointId', ParseUUIDPipe) checkpointId: string,
   ): Promise<void> {
     await this.roadmap.removeCheckpoint(subject, projectId, versionId, checkpointId);
+  }
+
+  /**
+   * Ставит выпуск платформы в версии.
+   *
+   * `PUT`, а не пара `POST`/`PATCH`: выпуск — не отдельная вещь со своим
+   * адресом, а значение в клетке «версия × платформа». Повторный вызов
+   * с тем же телом ничего не меняет, а не присланные поля обнуляются:
+   * это полная замена клетки.
+   */
+  @Put('versions/:versionId/releases/:platformId')
+  async setRelease(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Param('platformId', ParseUUIDPipe) platformId: string,
+    @Body(new ZodValidationPipe(platformReleaseSetSchema)) body: PlatformReleaseSet,
+  ): Promise<PlatformRelease> {
+    return this.roadmap.setRelease(subject, projectId, versionId, platformId, body);
+  }
+
+  /** Снимает выпуск: платформа снова идёт «как у версии». */
+  @Delete('versions/:versionId/releases/:platformId')
+  @HttpCode(204)
+  async clearRelease(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Param('platformId', ParseUUIDPipe) platformId: string,
+  ): Promise<void> {
+    await this.roadmap.clearRelease(subject, projectId, versionId, platformId);
   }
 
   /** Показывает ссылку читающим: им её и рассылать. */

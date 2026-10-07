@@ -102,7 +102,7 @@ export function registerTools(server: McpServer, deps: McpDeps, context: McpCont
     },
   );
 
-  addTool('get_roadmap', 'Роадмап: версии, чекпоинты и текущая стадия', {}, async () => {
+  addTool('get_roadmap', 'Роадмап: версии, чекпоинты, выпуски по платформам и текущая стадия', {}, async () => {
     await recordCall('get_roadmap', {});
 
     return asText(await deps.roadmap.findForProject(subject, projectId));

@@ -1,4 +1,4 @@
-import { SubjectKind } from '@cairn/shared';
+import { PlatformKind, PlatformReleaseState, SubjectKind } from '@cairn/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -6,7 +6,7 @@ import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
-import { auditLog, projects, subjects, users } from '../db/schema';
+import { auditLog, projectPlatforms, projects, subjects, users } from '../db/schema';
 import { RoadmapRepository } from './roadmap.repository';
 import { RoadmapService } from './roadmap.service';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
@@ -111,5 +111,33 @@ describe('сервис роадмапа', () => {
     ).rejects.toThrow();
 
     expect(await entriesOf(AuditAction.RoadmapVersionDeleted)).toHaveLength(0);
+  });
+
+  it('пишет постановку и снятие выпуска в журнал', async () => {
+    const version = await service.createVersion(admin(), projectId, { label: 'v1.0' });
+    // Вид обязательно «магазин»: у серверной платформы модерации
+    // не бывает, и тест упал бы на отказе вместо проверки журнала.
+    const [platform] = await testDb.db
+      .insert(projectPlatforms)
+      .values({ projectId, name: 'App Store', kind: PlatformKind.Store, position: 1 })
+      .returning();
+
+    await service.setRelease(admin(), projectId, version.id, platform!.id, {
+      state: PlatformReleaseState.InReview,
+    });
+
+    const [set] = await entriesOf(AuditAction.PlatformReleaseSet);
+
+    expect(set?.metadata).toMatchObject({
+      state: PlatformReleaseState.InReview,
+      platform: 'App Store',
+      label: 'v1.0',
+    });
+
+    await service.clearRelease(admin(), projectId, version.id, platform!.id);
+
+    const [cleared] = await entriesOf(AuditAction.PlatformReleaseCleared);
+
+    expect(cleared?.metadata).toMatchObject({ platform: 'App Store', label: 'v1.0' });
   });
 });

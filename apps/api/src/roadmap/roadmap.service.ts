@@ -1,5 +1,7 @@
 import {
   AuditSubjectKind,
+  type PlatformRelease,
+  type PlatformReleaseSet,
   type PublicRoadmap,
   type RoadmapCheckpointCreate,
   type RoadmapCheckpointUpdate,
@@ -189,6 +191,67 @@ export class RoadmapService {
         entityId: checkpointId,
         projectId,
         metadata: { title: removed.title },
+      });
+    });
+  }
+
+  /** Ставит выпуск платформы в версии. */
+  async setRelease(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+    platformId: string,
+    input: PlatformReleaseSet,
+  ): Promise<PlatformRelease> {
+    return this.db.transaction(async (tx) => {
+      const set = await this.repository.setRelease(
+        subject,
+        tx,
+        projectId,
+        versionId,
+        platformId,
+        input,
+      );
+
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.PlatformReleaseSet,
+        entityType: 'platform_release',
+        entityId: set.id,
+        projectId,
+        metadata: { label: set.versionLabel, platform: set.platformName, state: set.state },
+      });
+
+      return {
+        platformId: set.platformId,
+        state: set.state,
+        releasedDate: set.releasedDate,
+        buildLabel: set.buildLabel,
+      };
+    });
+  }
+
+  /** Снимает выпуск: платформа снова идёт «как у версии». */
+  async clearRelease(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+    platformId: string,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const cleared = await this.repository.clearRelease(
+        subject,
+        tx,
+        projectId,
+        versionId,
+        platformId,
+      );
+
+      await this.audit.record(tx, actorOf(subject), {
+        // `entityId` не заполняется: строки выпуска после снятия уже нет.
+        action: AuditAction.PlatformReleaseCleared,
+        entityType: 'platform_release',
+        projectId,
+        metadata: { label: cleared.versionLabel, platform: cleared.platformName },
       });
     });
   }
