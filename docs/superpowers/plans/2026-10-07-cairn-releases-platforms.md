@@ -10,6 +10,14 @@
 
 **Основание:** `docs/superpowers/specs/2026-10-07-cairn-releases-platforms-design.md`
 
+**Предварительная работа, обязательная:**
+`docs/superpowers/plans/2026-10-07-cairn-snapshot-realign.md`. Снапшоты
+`drizzle/meta` отстали от схемы на две миграции, и до выравнивания
+`drizzle-kit generate` выдаёт десять чужих операторов вместе с новой
+миграцией, а на схеме с новыми таблицами ещё и зависает на интерактивном
+вопросе о переименовании. Chunk 2 без этого неисполним. Нумерация миграций
+в этом плане — `0026` и `0027`: выравнивание занимает `0025`.
+
 ---
 
 ## Как работать с этим планом
@@ -34,7 +42,9 @@ TDD: сначала падающий тест, затем реализация. 
 
 **Пути с `(app)` и `[id]` в кавычках работают.** Vitest сравнивает фильтр подстрокой, а не регуляркой; кавычки нужны только чтобы их не развернул bash.
 
-**Порядок чанков обязателен**: Chunk 1 ломает типы в API и вебе, и `pnpm typecheck` станет зелёным только к концу Chunk 6. Это ожидаемо; тесты внутри каждого чанка зелёные на каждом коммите.
+**Порядок чанков обязателен**: Chunk 1 ломает типы в API и вебе, и `pnpm typecheck` станет зелёным только к концу Chunk 6. Это ожидаемо.
+
+Тесты при этом зелёные на каждом коммите — но только если правки существующих фикстур и вызовов делаются **в том же шаге**, что ломающее изменение. Там, где это невозможно (смена подписи `versionProjection` затрагивает репозиторий, который правится следующей задачей), задача называет оба файла сразу.
 
 ### Обвязка тестов
 
@@ -68,19 +78,69 @@ async function entriesOf(action: AuditAction) {
 
 **Тест сборки приложения** (`app.module.test.ts`): `Test.createTestingModule({ imports: [AppModule] }).compile()`, затем `moduleRef.get(Службу)`. Хелпера `modulesOf` нет ни в проекте, ни в Nest.
 
-**Тест компонента веба** (`ProjectForm.test.tsx`, `EnvironmentForm.test.tsx`): чистый `render` без провайдеров, данные пропами. Фикстуры называются как в файле: `project` в `ProjectForm.test.tsx`, `initial` в `EnvironmentForm.test.tsx`, `roadmap` в `PublicRoadmapView.test.tsx`.
+**Тест компонента веба** (`ProjectForm.test.tsx`, `EnvironmentForm.test.tsx`): чистый `render` без провайдеров, данные пропами.
+
+**Фикстуры называются как в файле.** Это главный источник несобирающихся сниппетов, поэтому список целиком:
+
+| Файл | Фикстуры |
+|---|---|
+| `ProjectForm.test.tsx`, `ProjectList.test.tsx` | `project` |
+| `ProjectSections.test.tsx` | `metadataOnly`, `detailed` |
+| `EnvironmentForm.test.tsx` | `initial`, `SERVERS` |
+| `EnvironmentCard.test.tsx` | `metadata`, `server`, `detail` |
+| `CheckpointList.test.tsx` | `plain`, `withUrl` |
+| `VersionDrawer.test.tsx` | `detail`, фабрика `makeActions(overrides)` |
+| `RoadmapScreen.test.tsx` | `roadmap`, хелперы `query(data)`, `mutation()` |
+| `PublicRoadmapView.test.tsx` | `roadmap` |
+
+Фабрика `makeActions` в `VersionDrawer.test.tsx` важна: `clearMocks` в конфиге веба не включён, и общая константа с `vi.fn()` протекла бы между тестами.
+
+**Новые обязательные поля ломают старые фикстуры.** Chunk 1 делает `platformIds` обязательным у чекпоинта, а `releases` — у версии уровня чтения. Каждая задача, трогающая файл с такой фикстурой, обязана **первым делом** её дополнить; с `releases` особенно, потому что версия без него молча провалится в ветку метаданных union'а и `typecheck` промолчит.
 
 **Тест экрана веба** (`RoadmapScreen.test.tsx`): `vi.mock('@/api/hooks')` целиком плюс локальные хелперы `query(data)` и `mutation()`; wrapper'а нет. **Мокать нужно все хуки, которые зовёт экран** — автомок вернёт `undefined`, и экран упадёт на `isPending`.
 
-**Тест хука веба** (`useMutationRoadmap.test.tsx`): локальный `wrapper` с `QueryClientProvider` и `vi.stubGlobal('fetch', …)` в каждом тесте. Без заглушки `fetch` мутация не дойдёт до `onSuccess`, и проверять инвалидацию будет нечего; саму инвалидацию видно через `vi.spyOn(client, 'invalidateQueries')`.
+**Тест хука веба.** Базовый образец — `useMutationRoadmap.test.tsx`: локальный `wrapper` с `QueryClientProvider` и `vi.stubGlobal('fetch', …)` в каждом тесте. Заглушка пишется в стиле кодовой базы — объектом, а не настоящим `Response`:
 
-**`useRouter` в тестах.** Ни один из десяти файлов с `useRouter` сейчас не покрыт тестом, а `useRouter()` из `next/navigation` в jsdom без контекста роутера бросает прямо на рендере. Тесты панелей проекта — первые такие, и каждому нужен:
+```ts
+vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 201, json: async () => ({ id: 'p1' }) }));
+```
+
+Без неё мутация не дойдёт до `onSuccess`, и проверять инвалидацию будет нечего.
+
+**Наблюдать инвалидацию** умеет ровно один файл — `useMutationServer.test.tsx`, и только его приём работает: клиент создаётся **внутри** `wrapper`, поэтому шпион на внешнем клиенте принципиально ничего не видит. Повторять надо так:
+
+```ts
+let client: QueryClient;
+
+function wrapper({ children }: { children: ReactNode }) {
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+// в тесте, уже после renderHook и до mutate:
+const invalidate = vi.spyOn(client, 'invalidateQueries');
+// …
+expect(invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey))).toContain(…);
+```
+
+`mockImplementation` на `invalidateQueries` не навешивать: в TanStack Query v5 метод дженерик, и подмена рискует не пройти типизацию. Хелпера `wrapperWith` в проекте нет.
+
+**`useRouter` в тестах.** Глобальный мок `next/navigation` **уже есть** в `apps/web/vitest.setup.ts` — он отдаёт `useRouter`, `usePathname`, `useSearchParams`, `notFound`, `redirect`. Падать тест не будет. Локальный мок нужен по другой причине: глобальный возвращает новые `vi.fn()` на каждый вызов, и наблюдать `push`/`refresh` через него нельзя.
+
+Локальная фабрика **заменяет** глобальную целиком, поэтому обязана повторить весь набор — иначе компонент, которому понадобится `usePathname`, упадёт:
 
 ```ts
 const push = vi.fn();
 const refresh = vi.fn();
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push, refresh, replace: vi.fn(), back: vi.fn() }),
+  usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
+  notFound: vi.fn(),
+  redirect: vi.fn(),
+}));
 ```
 
 ### Структура файлов
@@ -98,8 +158,8 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
 | `apps/api/src/db/schema/invariants.test.ts` | новые таблицы в `ALL_TABLES` |
 | `apps/api/test/db-fixture.ts` | хелпер `rowsOf`, новые таблицы в `TRUNCATE` |
 | `apps/api/test/environments-privileges.test.ts` | проверка миграции прав на новые таблицы |
-| `apps/api/drizzle/0025_release_platforms.sql` | таблицы |
-| `apps/api/drizzle/0026_release_platform_privileges.sql` | права роли `cairn_app` |
+| `apps/api/drizzle/0026_release_platforms.sql` | таблицы |
+| `apps/api/drizzle/0027_release_platform_privileges.sql` | права роли `cairn_app` |
 | `apps/api/src/platforms/platforms.repository.ts` | платформы проекта: права, принадлежность, уникальность, уборка |
 | `apps/api/src/platforms/platforms.service.ts` | транзакция и журнал |
 | `apps/api/src/platforms/platforms.controller.ts` | четыре ручки секции «Инфо» |
@@ -119,15 +179,21 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
 | `apps/web/src/components/PlatformChips/` | чипы платформ только на чтение |
 | `apps/web/src/components/PlatformsField/` | чипы с крестиком, подсказки, своя платформа |
 | `apps/web/src/components/ProjectForm/ProjectForm.tsx` | слот платформ |
+| `apps/web/src/components/ProjectForm/ProjectFields.tsx` | поля паспорта, вынесены под лимит строк |
+| `apps/web/src/utils/today.ts` | сегодняшний день `ГГГГ-ММ-ДД`, общий для формы версии и выпуска |
 | `apps/web/src/app/(app)/CreateProjectPanel.tsx` | создание проекта в панели |
 | `apps/web/src/app/(app)/projects/[id]/EditProjectPanel.tsx` | правка проекта в панели |
 | `apps/web/src/components/ProjectList/ProjectList.tsx` | слот создания вместо ссылки |
 | `apps/web/src/components/ProjectSections/ProjectSections.tsx` | платформы в паспорте |
 | `apps/web/src/components/EnvironmentForm/PlatformsCheckboxes.tsx` | «что здесь развёрнуто» |
+| `apps/web/src/components/EnvironmentForm/EnvironmentFields.tsx` | поля окружения, вынесены под лимит строк |
 | `apps/web/src/app/(app)/projects/[id]/infrastructure/{Create,Edit}EnvironmentPanel.tsx` | форма окружения в панели |
 | `apps/web/src/components/ReleaseSummary/` | сводка релизов |
 | `apps/web/src/components/VersionDrawer/{ReleaseList,ReleaseRow}.tsx` | выпуски версии в панели |
+| `apps/web/src/components/VersionDrawer/VersionActions.tsx` | кнопки правки и удаления версии, вынесены под лимит |
 | `apps/web/src/components/CheckpointForm/CheckpointForm.tsx` | создание **и правка** чекпоинта |
+| `apps/web/src/components/CheckpointForm/CheckpointFields.tsx` | формулировка и ссылка с уникальными `id` |
+| `apps/web/src/components/CheckpointForm/PlatformsToggles.tsx` | переключатели платформ |
 | `apps/web/src/components/VersionDrawer/{CheckpointList,CheckpointItem}.tsx` | теги и кнопка правки |
 
 Удаляются: `apps/web/src/app/(app)/projects/new/`, `apps/web/src/app/(app)/projects/[id]/edit/`.
@@ -284,8 +350,14 @@ describe('platformUpdateSchema', () => {
 describe('platformIdsSchema', () => {
   it('без повторов и не длиннее двадцати', () => {
     expect(() => platformIdsSchema.parse([PLATFORM_ID, PLATFORM_ID])).toThrow();
+    // Идентификаторы разные: одинаковые упёрлись бы в проверку
+    // повторов, и лимит остался бы непроверенным.
     expect(() =>
-      platformIdsSchema.parse(Array.from({ length: 21 }, () => PLATFORM_ID)),
+      platformIdsSchema.parse(
+        Array.from({ length: 21 }, (_, index) =>
+          `00000000-0000-0000-0000-0000000000${String(index).padStart(2, '0')}`,
+        ),
+      ),
     ).toThrow();
     expect(platformIdsSchema.parse([])).toEqual([]);
   });
@@ -357,8 +429,12 @@ import { z } from 'zod';
  * Дата-день без времени: план, факт релиза, выход на платформе.
  *
  * Общая схема, а не копия в каждом файле: иначе формат неизбежно
- * разошёлся бы между версией и её выпусками. `isoDateSchema`
- * в `server.ts` сюда не сводится — это отдельная работа.
+ * разошёлся бы между версией и её выпусками.
+ *
+ * `isoDateSchema` в `server.ts` — тот же регексп, и свести их можно:
+ * `dayDateSchema = isoDateSchema.nullable()`. В этой работе не сводим —
+ * у них разные тексты ошибки, и правка текста в формах серверов
+ * выходит за её объём. Долг осознанный, а не незамеченный.
  */
 export const dayDateSchema = z
   .string()
@@ -573,7 +649,7 @@ git commit -m "Описать платформу, выпуск и сводку �
 Сначала **дополнить существующие фикстуры** — иначе прогон следующего шага упадёт не там, где нужно:
 
 - в импорт файла добавить `publicCheckpointSchema`, `roadmapCheckpointUpdateSchema`, `roadmapResponseSchema`;
-- в фикстуру `checkpoint` (строки 93–98) добавить `platformIds: []`;
+- в фикстуру `checkpoint` (строки 88–93) добавить `platformIds: []`;
 - в оба вызова `publicRoadmapSchema.parse` добавить `summary: []`, а в их версии — `releases: []`.
 
 Затем новые тесты:
@@ -621,7 +697,9 @@ it('ответ роадмапа несёт сводку релизов', () => {
 - [ ] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd packages/shared && npx vitest run src/schemas/roadmap.test.ts`
-Expected: FAIL. Первый тест падает на строгой публичной схеме, которая пока не знает `platformIds`; второй — на том же (`platformIds` неизвестен строгой схеме правки); третий — на отсутствии `summary`; дополненные фикстуры — на неизвестных ключах `summary` и `releases`.
+Expected: FAIL. Первый тест падает на строгой `publicCheckpointSchema`, которая пока не знает `platformIds`; второй — на том же (`platformIds` неизвестен строгой схеме правки); третий — на отсутствии `summary` в разобранном объекте.
+
+Дополненные фикстуры дают ещё одно падение, и важно понимать какое: `publicRoadmapSchema` и `publicVersionSchema` **не строгие**, поэтому `summary` и `releases` в них просто отбросятся. Красным станет существующий тест «пропускает публичный роадмап без ссылок»: добавленный в фикстуру `platformIds` упирается в строгую `publicCheckpointSchema`, и `not.toThrow()` превращается в throw.
 
 - [ ] **Step 3: Реализация**
 
@@ -633,7 +711,7 @@ import { platformIdsSchema, platformReleaseSchema, releaseSummaryRowSchema } fro
 
 Затем:
 
-- в `roadmapCheckpointSchema` — `platformIds: z.array(z.string().uuid())` с TSDoc:
+- в `roadmapCheckpointSchema` — `platformIds: z.array(z.string().uuid())` (намеренно **без** `platformIdsSchema`: это выдача, а не приём, и проверять в ней повторы и лимит незачем) с TSDoc:
 
 ```ts
   /**
@@ -689,7 +767,16 @@ it('окружение принимает платформы, которые в 
 });
 ```
 
-Для проекта:
+Для проекта файла ещё нет — создать его с шапкой:
+
+```ts
+import { describe, expect, it } from 'vitest';
+
+import { PlatformKind } from '../enums';
+import { projectCreateSchema, projectUpdateSchema } from './project';
+```
+
+и единственным набором:
 
 ```ts
 it('платформы принимаются при создании и отвергаются в правке', () => {
@@ -712,7 +799,7 @@ it('платформы принимаются при создании и отв�
 - [ ] **Step 2: Запустить, убедиться что падают**
 
 Run: `cd packages/shared && npx vitest run src/schemas/environment.test.ts src/schemas/project.test.ts`
-Expected: FAIL — `platformIds` и `platforms` схемам неизвестны, а правка проекта пока не строгая и лишнее поле не отвергает.
+Expected: FAIL. `environmentUpdateSchema` и `projectUpdateSchema` сейчас **не строгие**, поэтому неизвестные ключи молча отбрасываются — падают положительные утверждения (`parsed.platformIds` и `.platforms` оказываются `undefined`), а негативные `toThrow()` не бросают вовсе. Тест проекта вдобавок падает на отсутствии файла.
 
 - [ ] **Step 3: Реализация**
 
@@ -753,6 +840,12 @@ export const projectUpdateSchema = z
  * нечего, а требовать сначала создать проект и лишь потом вернуться
  * за платформами — лишний шаг. В правке каждая платформа действует
  * своей мутацией и чужого не трогает.
+ *
+ * Строгость наследуется от правки: `.extend()` в zod сохраняет
+ * `unknownKeys`, поэтому создание тоже начнёт отвергать лишние поля.
+ * Так и нужно — но переписывать схему отдельным нестрогим `z.object`
+ * нельзя, требование выше потеряется. Существующие вызывающие
+ * (форма проекта, e2e-тесты) присылают только известные ключи.
  */
 export const projectCreateSchema = projectUpdateSchema.extend({
   name: z.string().min(1).max(200),
@@ -1030,7 +1123,9 @@ export type ProjectPlatformRow = typeof projectPlatforms.$inferSelect;
 export type PlatformReleaseRow = typeof versionPlatformReleases.$inferSelect;
 ```
 
-Индекс по версии у выпусков не заводится: левый префикс уникального ограничения `(version_id, platform_id)` уже обслуживает выборку по версии, и второй индекс был бы мёртвым весом на записи. По той же причине у `project_platforms` индекс по проекту **нужен**: там уникальное ограничение начинается с `project_id`, но выборка идёт с сортировкой, и индекс используется — оставить.
+Индекс по версии у выпусков не заводится: левый префикс уникального ограничения `(version_id, platform_id)` уже обслуживает выборку по версии (PostgreSQL реализует UNIQUE через btree-индекс), и второй индекс был бы мёртвым весом на записи. Дизайн раздела 4.3 говорит то же.
+
+Индекс `project_platforms_project_idx` при этом **остаётся**, хотя строго он дублирует левый префикс уникального `(project_id, name)` — ситуация та же, что у выпусков. Сортировку по `position` не снимает ни тот, ни другой: для неё понадобился бы составной `(project_id, position)`, а на десятках проектов это не нужно. Оставлен по дизайну 4.1; если когда-нибудь будет чиститься — вместе с ним.
 
 В `apps/api/src/db/schema/index.ts` добавить `export * from './platforms';` после `'./invitations'`.
 
@@ -1069,19 +1164,22 @@ git commit -m "Завести таблицы платформ, связей и �
 
 и в возвращаемом объекте — `rowsOf: (table) => db.select().from(table)`.
 
-В `TRUNCATE` добавить четыре таблицы перед `roadmap_public_links`: `checkpoint_platforms`, `version_platform_releases`, `environment_platforms`, `project_platforms`. Каскад от `projects` унёс бы их и так, но список в этом файле называет зависимые таблицы явно (`environment_domains`, `domain_statuses`), и расхождение сбивало бы с толку.
+В импорт файла добавить тип таблицы — сейчас его там нет:
 
-- [ ] **Step 2: Проверить, что фикстура собирается**
+```ts
+import type { PgTable } from 'drizzle-orm/pg-core';
+```
 
-Run: `cd apps/api && npx vitest run src/db/schema`
-Expected: PASS (этот набор контейнер не поднимает — проверяется только компиляция изменённого файла при его импорте в других наборах).
+`TRUNCATE` **в этой задаче не трогается**: таблиц в базе ещё нет, миграции появятся только в Task 2.3, и добавленная сюда строка сделала бы красными все интеграционные наборы API до конца чанка. Список правится в Task 2.3, после применения миграций.
 
-- [ ] **Step 3: Проверить на живом наборе**
+- [ ] **Step 2: Проверить типы**
 
-Run: `cd apps/api && npx vitest run src/roadmap/roadmap.repository.test.ts`
-Expected: PASS. Набор поднимает PostgreSQL через Testcontainers и применяет миграции, поэтому заодно проверяет, что `TRUNCATE` с новыми таблицами выполняется.
+Run: `cd apps/api && npx tsc -p tsconfig.tools.json --noEmit`
+Expected: ошибки только из незавершённого Chunk 1 (контракт уже изменён, API ещё нет). В выводе не должно быть ни одной ошибки, указывающей на `test/db-fixture.ts`.
 
-- [ ] **Step 4: Коммит**
+Прогон через Vitest здесь бесполезен: ни один тест в `src/db/schema` фикстуру не импортирует, а типы в Vitest стираются `unplugin-swc`, и ошибка в сигнатуре не всплыла бы вовсе.
+
+- [ ] **Step 3: Коммит**
 
 ```bash
 git add apps/api/test/db-fixture.ts
@@ -1091,14 +1189,16 @@ git commit -m "Дать тестам читать таблицы и чистит
 ### Task 2.3: Миграции
 
 **Files:**
-- Create: `apps/api/drizzle/0025_release_platforms.sql`
-- Create: `apps/api/drizzle/0026_release_platform_privileges.sql`
-- Modify: `apps/api/drizzle/meta/_journal.json`, `apps/api/drizzle/meta/0025_snapshot.json`, `apps/api/drizzle/meta/0026_snapshot.json` (генератором)
+- Create: `apps/api/drizzle/0026_release_platforms.sql`
+- Create: `apps/api/drizzle/0027_release_platform_privileges.sql`
+- Create: `apps/api/drizzle/meta/0026_snapshot.json`, `apps/api/drizzle/meta/0027_snapshot.json` (генератором)
+- Modify: `apps/api/drizzle/meta/_journal.json` (генератором)
 - Modify: `apps/api/test/environments-privileges.test.ts`
+- Modify: `apps/api/test/db-fixture.ts` (список `TRUNCATE`)
 
 - [ ] **Step 1: Падающий тест прав**
 
-В `environments-privileges.test.ts` добавить случай:
+В `environments-privileges.test.ts` добавить случай — **перед** `it('роль приложения не меняет схему')`, чтобы тот остался последним:
 
 ```ts
 it('роль приложения читает и пишет платформы, связи и выпуски', async () => {
@@ -1127,15 +1227,17 @@ Expected: FAIL — таблиц в базе ещё нет («relation does not e
 - [ ] **Step 3: Сгенерировать миграцию таблиц**
 
 Run: `cd apps/api && npx drizzle-kit generate --name=release_platforms`
-Expected: `0025_release_platforms.sql` с двумя `CREATE TYPE` и четырьмя `CREATE TABLE`, плюс запись в `meta/_journal.json` и `meta/0025_snapshot.json`.
+Expected: `0026_release_platforms.sql` с двумя `CREATE TYPE`, четырьмя `CREATE TABLE`, восемью `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` и тремя `CREATE INDEX`, плюс запись в `meta/_journal.json` и `meta/0026_snapshot.json`.
 
-Прочитать файл глазами. `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` на **новых** таблицах — норма: drizzle-kit так оформляет внешние ключи. Насторожиться следует на любом `DROP` и на любом `ALTER` таблицы, которой нет в списке четырёх новых: это значило бы, что схема разошлась с базой до этой работы, и разбирается такое отдельно, а не правкой миграции.
+`ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` на **новых** таблицах — норма: drizzle-kit так оформляет внешние ключи.
+
+Прочитать файл глазами. Любой `DROP` и любой `ALTER` таблицы вне четырёх новых означает, что предварительная работа по выравниванию снапшотов не выполнена (см. шапку плана): остановиться и выполнить её, а не править миграцию. Там же причина, по которой шаг запускается **в терминале**: до выравнивания генератор задаёт интерактивный вопрос о переименовании и без TTY зависает.
 
 - [ ] **Step 4: Добавить миграцию прав**
 
 Run: `cd apps/api && npx drizzle-kit generate --custom --name=release_platform_privileges`
 
-Генератор создаст файл с телом-заглушкой `-- Custom SQL migration file, put your code below! --`, запись в журнале и `meta/0026_snapshot.json`. Снапшота у прежних миграций прав нет (они писались руками), но лишний снапшот безвреден: его содержимое совпадает с `0025`, и следующий `generate` отсчитается от него верно. Заглушку заменить на:
+Генератор создаст файл с телом-заглушкой `-- Custom SQL migration file, put your code below! --`, запись в журнале и `meta/0027_snapshot.json`. Снапшота у прежних миграций прав нет (они писались руками), но лишний снапшот безвреден: его содержимое совпадает с `0026`, и следующий `generate` отсчитается от него верно. Заглушку заменить на:
 
 ```sql
 --> Роль приложения получает права на новые таблицы отдельной миграцией:
@@ -1154,6 +1256,13 @@ TO cairn_app;
 
 Run: `cd apps/api && npx vitest run test/environments-privileges.test.ts`
 Expected: PASS. Тест поднимает чистую базу и применяет миграции из репозитория, поэтому проверяет именно их, а не состояние чьей-то локальной базы.
+
+- [ ] **Step 5a: Дополнить список очистки и проверить его на живом наборе**
+
+Теперь, когда таблицы существуют, в `TRUNCATE` в `apps/api/test/db-fixture.ts` добавить четыре таблицы перед `roadmap_public_links`: `checkpoint_platforms`, `version_platform_releases`, `environment_platforms`, `project_platforms`. Каскад от `projects` унёс бы их и так, но список в этом файле называет зависимые таблицы явно (`environment_domains`, `domain_statuses`), и расхождение сбивало бы с толку.
+
+Run: `cd apps/api && npx vitest run src/roadmap/roadmap.repository.test.ts`
+Expected: PASS — набор поднимает базу, применяет все миграции и чистит её между тестами, то есть проверяет новый список по-настоящему.
 
 - [ ] **Step 6: Убедиться, что схема и снапшот сошлись**
 
@@ -1181,7 +1290,14 @@ git commit -m "Применить таблицы платформ миграци
 - Create: `apps/api/src/platforms/platforms.repository.ts`
 - Create: `apps/api/src/platforms/platforms.repository.test.ts`
 
-Обвязка — как в `roadmap.repository.test.ts`: `testDb`, фабрики `member()` / `admin()`, `grant(level)` (с `Section.Info`), платформы заводятся вставкой в `projectPlatforms` напрямую, потому что репозиторий платформ требует доступа к «Инфо», которого у части субъектов в тестах нет.
+Обвязка — как в `roadmap.repository.test.ts`: `testDb`, фабрики `member()` / `admin()`, `grant(level)`, платформы заводятся вставкой в `projectPlatforms` напрямую, потому что репозиторий платформ требует доступа к «Инфо», которого у части субъектов в тестах нет.
+
+Два места, где копирование образца даст неверный результат:
+
+- **`grant()` в образце жёстко прошит на `Section.Roadmap`** (а в тесте окружений — на `Section.Infrastructure`). Здесь он обязан выдавать `Section.Info`;
+- **окружений в образце нет вовсе.** Двум тестам `setEnvironmentPlatforms` нужна строка в `environments` — завести её в `beforeEach` вставкой и запомнить `environmentId`.
+
+Импорты, которых в образце нет и которые надо дописать: таблицы `projectPlatforms`, `environmentPlatforms`, `versionPlatformReleases`, `checkpointPlatforms`, перечень `PlatformKind`, ошибка `InsufficientLevelError`.
 
 - [ ] **Step 1: Падающие тесты**
 
@@ -1189,14 +1305,18 @@ git commit -m "Применить таблицы платформ миграци
 describe('репозиторий платформ', () => {
   // … testDb, projectId, otherProjectId, subjectId, adminUserId — как в роадмапе
 
+  // Позиция параметром: выборка сортирует по ней, и одинаковая позиция
+  // у всех платформ превратила бы тест порядка в проверку времени
+  // создания.
   async function createPlatform(
     name: string,
     kind = PlatformKind.Server,
+    position = 1,
     target = projectId,
   ): Promise<string> {
     const [created] = await testDb.db
       .insert(projectPlatforms)
-      .values({ projectId: target, name, kind, position: 1 })
+      .values({ projectId: target, name, kind, position })
       .returning();
 
     return created!.id;
@@ -1320,10 +1440,12 @@ Expected: FAIL — модуль `./platforms.repository` не найден.
 | `createMany(subject, tx, projectId, inputs)` | признак суперадмина напрямую | для создания проекта: выдачи на только что созданный проект ещё не существует. Возвращает созданные строки — службе нужны `id` и имена для журнала |
 | `update(subject, tx, projectId, platformId, input)` | «Инфо», запись | `requireInProject`, затем повторное имя → `ConflictException` |
 | `remove(subject, tx, projectId, platformId)` | «Инфо», запись | `requireInProject`, уборка выпусков, тегов, связей, затем платформа |
-| `setEnvironmentPlatforms(tx, environmentId, platformIds)` | — | зовётся из репозитория окружений, который уже проверил «Инфраструктуру» и принадлежность окружения проекту |
+| `setEnvironmentPlatforms(tx, environmentId, platformIds)` | — | зовётся из репозитория окружений, который уже проверил «Инфраструктуру» и принадлежность окружения проекту. Субъекта не принимает — прецедент тот же, что у `DomainsRepository.ensureRoot(tx, name)`; проект берётся из самой строки окружения, поэтому обойти проверку нельзя |
 | `requireInProject(executor, projectId, platformId)` | — | платформа чужого проекта → `SectionNotVisibleError` |
 
-`createMany` принимает субъект и проверяет `subject.isSuperadmin`, как `ProjectsRepository.create`: метод экспортируется вместе с модулем, и без проверки любой будущий вызывающий заводил бы платформы в любом проекте.
+`createMany` принимает субъект и проверяет `!subject.isSuperadmin || subject.isRevoked` — ровно как `ProjectsRepository.create`: метод экспортируется вместе с модулем, и без проверки любой будущий вызывающий заводил бы платформы в любом проекте. Отзыв проверяется наравне с признаком, иначе обоснование «любой будущий вызывающий» не держится.
+
+`position` в `createMany` раздаётся по месту в списке (`index + 1`) одной вставкой: колонка `NOT NULL`, а порядок платформ проекта должен совпасть с порядком, в котором их перечислили в форме.
 
 Ключевой метод целиком:
 
@@ -1375,7 +1497,9 @@ Expected: FAIL — модуль `./platforms.repository` не найден.
 
     if (foreign) {
       throw new ConflictException(
-        `Платформа «${foreign.name}» не живёт в окружении: у магазина нет ни машины, ни адреса.`,
+        // Текст общий: правило отвергает и магазин, и «иное» — у пакета
+        // в реестре машины и адреса тоже нет.
+        `Платформа «${foreign.name}» не живёт в окружении: окружение есть только у того, что развёрнуто на наших машинах.`,
       );
     }
 
@@ -1414,6 +1538,8 @@ git commit -m "Вести платформы проекта в репозито�
 
 Обвязка — как в `roadmap.service.test.ts`: служба собирается позиционно с настоящим `new AuditService()`, журнал читается хелпером `entriesOf(action)`.
 
+В образце есть только `admin()`; для третьего теста понадобится не-суперадминский субъект — завести вторую строку в `subjects`/`users` и фабрику `member()`, как в тестах репозиториев.
+
 ```ts
 it('пишет заведение платформы в журнал', async () => {
   await service.create(admin(), projectId, { kind: PlatformKind.Store, name: 'RuStore' });
@@ -1436,6 +1562,19 @@ it('помнит имя удалённой платформы', async () => {
   const [entry] = await entriesOf(AuditAction.PlatformDeleted);
 
   expect(entry?.metadata).toMatchObject({ name: 'API' });
+});
+
+it('пишет правку имени', async () => {
+  const created = await service.create(admin(), projectId, {
+    kind: PlatformKind.Server,
+    name: 'Веб',
+  });
+
+  await service.update(admin(), projectId, created.id, { name: 'Веб-админка' });
+
+  const [entry] = await entriesOf(AuditAction.PlatformUpdated);
+
+  expect(entry?.metadata).toMatchObject({ name: 'Веб-админка' });
 });
 
 it('при отказе в правах ничего не пишет', async () => {
@@ -1464,7 +1603,7 @@ Expected: FAIL — модуль `./platforms.service` не найден.
   PlatformReleaseCleared = 'platform_release.cleared',
 ```
 
-`platforms.service.ts` — по образцу `RoadmapService`: транзакция, вызов репозитория, запись в журнал. `entityType: 'platform'`, в метаданных `name`; у удаления имя берётся из строки, которую вернул репозиторий.
+`platforms.service.ts` — по образцу `RoadmapService`: чтение пробрасывается в репозиторий как есть (`findForProject`), изменения идут в транзакции с записью в журнал. `entityType: 'platform'`, в метаданных `name`; у удаления имя берётся из строки, которую вернул репозиторий.
 
 - [ ] **Step 4: Запустить**
 
@@ -1527,7 +1666,9 @@ export class PlatformsController {
 
 Проекция строки в `Platform` — явным объектом (`id`, `kind`, `name`, `position`), а не разворотом строки: иначе наружу уйдут `projectId` и отметки времени.
 
-`platforms.module.ts` импортирует `DbModule`, `AccessModule`, `AuditModule` и `AuthModule` (последний обязателен: контроллер висит на `SessionGuard`, и без него падает именно тест сборки) и **экспортирует** `PlatformsRepository` — он понадобится модулям проектов и окружений.
+`platforms.module.ts`: `imports` — `DbModule`, `AccessModule`, `AuditModule`, `AuthModule` (последний обязателен: контроллер висит на `SessionGuard`, и без него падает именно тест сборки); `controllers` — `PlatformsController`; `providers` — `PlatformsRepository` и `PlatformsService`; `exports` — `PlatformsRepository`, он понадобится модулям проектов и окружений.
+
+`ParseUUIDPipe` ставится на **каждый** параметр адреса, включая `:platformId`: без него мусорный идентификатор уедет в PostgreSQL и вернётся `500`. Во всех существующих контроллерах пайп стоит везде.
 
 В `app.module.ts` добавить `PlatformsModule` в `imports`.
 
@@ -1555,7 +1696,9 @@ git commit -m "Открыть ручки платформ"
 
 - [ ] **Step 1: Падающий тест**
 
-В `projects.service.test.ts` (конструктор службы получает четвёртым аргументом `PlatformsRepository` — файл придётся поправить вместе с этим):
+`PlatformsRepository` добавляется в конструктор `ProjectsService` **пятым**, после `AccessService`: конструктор уже четырёхместный (`db`, `ProjectsRepository`, `AuditService`, `AccessService`), и вставка четвёртым вытеснила бы службу прав, отчего упал бы `sectionsFor`. Тот же порядок — в сборке службы внутри теста.
+
+Хелпера `entriesOf` в этом файле **нет** (он есть в тестах роадмапа, окружений и переменных, а здесь журнал читается встроенно). Либо завести его по образцу, либо писать выборкой — ниже второй вариант.
 
 ```ts
 it('создаёт проект вместе с платформами и пишет каждую в журнал', async () => {
@@ -1569,9 +1712,19 @@ it('создаёт проект вместе с платформами и пиш
 
   const platforms = await testDb.rowsOf(projectPlatforms);
 
-  expect(platforms.map((platform) => platform.name)).toEqual(['API', 'App Store']);
+  // Сортировка по позиции обязательна: `rowsOf` — это `select` без
+  // `ORDER BY`, и порядок строк в куче ничем не закреплён.
+  expect(
+    platforms.sort((first, second) => first.position - second.position).map((row) => row.name),
+  ).toEqual(['API', 'App Store']);
   expect(platforms.every((platform) => platform.projectId === created.id)).toBe(true);
-  expect(await entriesOf(AuditAction.PlatformCreated)).toHaveLength(2);
+
+  const entries = await testDb.db
+    .select()
+    .from(auditLog)
+    .where(eq(auditLog.action, AuditAction.PlatformCreated));
+
+  expect(entries).toHaveLength(2);
 });
 
 it('создаёт проект без платформ, когда их не прислали', async () => {
@@ -1602,7 +1755,19 @@ Expected: FAIL. Вероятнее всего — на вставке: `platform
       .returning();
 ```
 
-В `ProjectsService.create` — после создания проекта, в той же транзакции: `platformsRepository.createMany(subject, tx, created.id, input.platforms)` и запись `platform.created` на каждую возвращённую строку. Служба работает с **репозиторием** платформ, а не со службой: вложенная транзакция здесь не нужна и привела бы к транзакции в транзакции.
+В `ProjectsService.create` — после создания проекта, в той же транзакции:
+
+```ts
+      // Охрана обязательна по двум причинам: поле необязательно в схеме
+      // (тип `PlatformCreate[] | undefined`), а `insert().values([])`
+      // в Drizzle бросает.
+      if (input.platforms?.length) {
+        const platforms = await this.platforms.createMany(subject, tx, created.id, input.platforms);
+        // запись `platform.created` на каждую возвращённую строку
+      }
+```
+
+Служба работает с **репозиторием** платформ, а не со службой: вложенная транзакция здесь не нужна и привела бы к транзакции в транзакции — у тестовой фикстуры пул `max: 1`, и такая вложенность заблокировалась бы навсегда.
 
 `ProjectsModule` импортирует `PlatformsModule`.
 
@@ -1623,13 +1788,16 @@ git commit -m "Заводить платформы вместе с проект�
 **Files:**
 - Modify: `apps/api/src/environments/environments.repository.ts`
 - Modify: `apps/api/src/environments/environment.projection.ts`
-- Modify: `apps/api/src/environments/environments.repository.test.ts`
-- Modify: `apps/api/src/environments/environments.service.test.ts`
+- Modify: `apps/api/src/environments/environment.projection.test.ts` (семь позиционных вызовов проекции)
+- Modify: `apps/api/src/environments/environments.repository.test.ts` (конструктор репозитория вызывается **дважды**: в `beforeAll` и в тесте про разрешение корня)
+- Modify: `apps/api/src/environments/environments.service.test.ts` (конструктор репозитория в сборке службы)
 - Modify: `apps/api/src/environments/environments.module.ts`
 
 - [ ] **Step 1: Падающие тесты**
 
-Тест службы правится только из-за конструктора (`EnvironmentsRepository` получает `PlatformsRepository`) — поведение там не меняется.
+Тесты службы и проекции правятся только из-за подписей: `EnvironmentsRepository` получает `PlatformsRepository` четвёртым аргументом, `environmentProjection` — платформы. Поведение там не меняется, правка механическая, но без неё файлы не соберутся.
+
+Фикстуры теста репозитория: платформы заводятся вставкой с позициями 1 («API») и 2 («Веб»), окружение — существующим хелпером `createProd()`, который возвращает идентификатор. Переменной `environmentId` в файле нет.
 
 ```ts
 it('отдаёт в окружении то, что в нём развёрнуто', async () => {
@@ -1878,10 +2046,29 @@ Expected: FAIL — модуль не найден.
  * и его индекс — единственный детерминированный порядковый номер.
  */
 export function releaseSummaryOf(
-  platforms: SummaryPlatform[],
+  platforms: Platform[],
   versions: SummaryVersion[],
   releases: SummaryRelease[],
 ): ReleaseSummaryRow[]
+```
+
+Два локальных типа объявляются в этом же файле — в контракте их нет и быть не должно:
+
+```ts
+/** Версия глазами сводки: обозначение и место в последовательности. */
+interface SummaryVersion {
+  id: string;
+  label: string;
+}
+
+/**
+ * Выпуск глазами сводки.
+ *
+ * Не `PlatformRelease` из контракта: там нет `versionId`, потому что
+ * выпуски отдаются вложенными в свою версию. Правилу же нужна плоская
+ * таблица, и версию он берёт из самой строки.
+ */
+type SummaryRelease = PlatformRelease & { versionId: string };
 ```
 
 Правило:
@@ -1914,10 +2101,25 @@ git commit -m "Вычислять сводку релизов по выпуск�
 **Files:**
 - Modify: `apps/api/src/roadmap/roadmap.projection.ts`
 - Modify: `apps/api/src/roadmap/roadmap.projection.test.ts`
+- Modify: `apps/api/src/roadmap/roadmap.repository.ts` (два вызова проекции)
 
 - [ ] **Step 1: Падающие тесты и правка существующих вызовов**
 
-Подпись меняется, поэтому **сначала** поправить девять существующих вызовов в файле: третьим аргументом добавить `[]` (выпусков нет), а три вызова вида `versionProjection(version, checkpoints, AccessLevel.Read, false)` переписать на объект настроек — `versionProjection(version, checkpoints, [], AccessLevel.Read, { withLinks: false })`.
+Подпись меняется, поэтому **сначала** поправить все существующие вызовы. Их восемь, в двух файлах, и один из них держит публичную выдачу:
+
+- `roadmap.projection.test.ts` — шесть вызовов; пятый и шестой передают `false` четвёртым аргументом;
+- `roadmap.repository.ts` — два вызова: внутреннего чтения и публичного.
+
+Всем добавляется `[]` третьим аргументом; те, что передавали `false`, переписываются на объект настроек:
+
+```ts
+// было
+versionProjection(version, checkpoints, AccessLevel.Read, false)
+// стало
+versionProjection(version, checkpoints, [], AccessLevel.Read, { withLinks: false })
+```
+
+**Публичный вызов в репозитории правится в этом же шаге, не позже.** Если его оставить, `AccessLevel.Read` встанет в параметр выпусков, `false` — в параметр уровня, объект настроек окажется пустым, и `withLinks` молча вернётся к `true`: адреса внутреннего трекера уедут в публичную выдачу. Компилятор здесь не страхует — `typecheck` красный до конца Chunk 6.
 
 Новые тесты (приведение типа обязательно: функция возвращает union, и тесты файла уже пишут `as RoadmapVersionDetail`):
 
@@ -2060,6 +2262,8 @@ function releasedDateOf(version: RoadmapVersionRow, releases: PlatformRelease[])
 
 Теги — `platformIds: platformsByCheckpoint?.get(checkpoint.id) ?? []`, рядом с `url`. Поле добавляется **всегда**, в отличие от `url`: публичная схема его ждёт.
 
+Выборка тегов сортируется по `projectPlatforms.position` — тем же порядком, что сводка: иначе чипы у чекпоинта тасовались бы между запросами.
+
 `releases` добавляется в блок уровня чтения, рядом с `checkpoints`.
 
 - [ ] **Step 4: Запустить**
@@ -2082,13 +2286,31 @@ git commit -m "Показывать в версии её выпуски и те�
 
 - [ ] **Step 1: Падающие тесты**
 
-Платформы в тестах заводятся вставкой в `projectPlatforms` (репозиторий платформ потребовал бы «Инфо»).
+Платформы в тестах заводятся вставкой в `projectPlatforms` — репозиторий платформ потребовал бы «Инфо». Хелпер нужен свой, в этом файле его нет:
+
+```ts
+  async function createPlatform(
+    name: string,
+    kind = PlatformKind.Server,
+    position = 1,
+    target = projectId,
+  ): Promise<string> {
+    const [created] = await testDb.db
+      .insert(projectPlatforms)
+      .values({ projectId: target, name, kind, position })
+      .returning();
+
+    return created!.id;
+  }
+```
+
+Дописать в импорты файла: таблицы `projectPlatforms`, `versionPlatformReleases`, `checkpointPlatforms` и перечни `PlatformKind`, `PlatformReleaseState`. В `roadmap.projection.test.ts` — `PlatformReleaseState`, в `roadmap.service.test.ts` — `projectPlatforms`, `PlatformKind`, `PlatformReleaseState`.
 
 ```ts
 it('отдаёт сводку рядом с версиями', async () => {
   await grant(AccessLevel.Read);
-  await createPlatform('API');
-  await createPlatform('App Store', PlatformKind.Store);
+  await createPlatform('API', PlatformKind.Server, 1);
+  await createPlatform('App Store', PlatformKind.Store, 2);
 
   const roadmap = await repository.findForProject(member(), projectId);
 
@@ -2118,13 +2340,24 @@ it('отдаёт сводку тому, у кого нет доступа к «�
 });
 
 it('отдаёт сводку в публичной выдаче, без ссылок на задачи', async () => {
+  // Чекпоинт со ссылкой обязателен: без него `checkpoints[0]` —
+  // `undefined`, и проверка прошла бы при любой реализации.
   await createPlatform('API');
+  const versionId = await createVersion('v1.0');
+  await testDb.db.transaction((tx) =>
+    repository.createCheckpoint(admin(), tx, projectId, versionId, {
+      title: 'Оплата',
+      url: 'https://tracker.example/1',
+    }),
+  );
   const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
 
   const roadmap = await repository.publicRoadmap(token);
+  const checkpoint = roadmap?.versions[0]?.checkpoints[0];
 
   expect(roadmap?.summary).toHaveLength(1);
-  expect(roadmap?.versions[0]?.checkpoints[0]).not.toHaveProperty('url');
+  expect(checkpoint?.title).toBe('Оплата');
+  expect(checkpoint).not.toHaveProperty('url');
 });
 
 it('версия уровня чтения сохраняет чекпоинты', async () => {
@@ -2293,11 +2526,12 @@ it('снятие возвращает платформу «как у верси�
   expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
 
   // Ручка идемпотентна: «как у версии» и до, и после вызова.
-  await expect(
-    testDb.db.transaction((tx) =>
-      repository.clearRelease(admin(), tx, projectId, versionId, apiId),
-    ),
-  ).resolves.toBeDefined();
+  const repeated = await testDb.db.transaction((tx) =>
+    repository.clearRelease(admin(), tx, projectId, versionId, apiId),
+  );
+
+  expect(repeated).toMatchObject({ platformName: 'API', versionLabel: 'v1.0' });
+  expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
 });
 ```
 
@@ -2348,7 +2582,23 @@ Expected: FAIL — методов нет.
     };
 ```
 
-`clearRelease` — те же проверки и `delete`; отсутствие строки ошибкой не считается, но имя платформы и обозначение версии возвращаются так же (журналу они нужны и при снятии).
+В ветке `onConflictDoUpdate` к этому добавляется `updatedAt: new Date()` — как у остальных методов репозитория при правке.
+
+Текст отказа по виду платформы формулируется общо: «Модерации у платформы «API» не бывает» без продолжения про нашу машину — правило отвергает и вид «иное» (пакет в реестре), у которого машины тоже нет.
+
+`clearRelease` — те же проверки и `delete`. Подпись задана явно, потому что от неё зависит тест идемпотентности:
+
+```ts
+  async clearRelease(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    versionId: string,
+    platformId: string,
+  ): Promise<{ platformName: string; versionLabel: string }>
+```
+
+Имена берутся из платформы и версии, а не из удаляемой строки, поэтому возвращаются и при повторном вызове. `delete(...).returning()` здесь не годится: на втором вызове он отдал бы пустоту, и тест упал бы не по делу. Отсутствие строки ошибкой не считается.
 
 - [ ] **Step 4: Запустить**
 
@@ -2478,7 +2728,65 @@ git add apps/api/src/roadmap
 git commit -m "Помечать чекпоинты платформами и убирать за удалением"
 ```
 
-### Task 4.6: Ручка выпуска, журнал и описание инструмента
+### Task 4.6: Ответы чекпоинта несут теги
+
+**Files:**
+- Modify: `apps/api/src/roadmap/roadmap.repository.ts`
+- Modify: `apps/api/src/roadmap/roadmap.controller.ts`
+- Modify: `apps/api/src/roadmap/roadmap.repository.test.ts`
+
+Контроллер собирает ответы `POST` и `PATCH` чекпоинта **литералом** под аннотацией `Promise<RoadmapCheckpoint>`. С обязательным `platformIds` из Chunk 1 оба `return` перестают проходить типы, а теги в ответ не попадают — при том что веб (Task 6.6) на них опирается. Без этой задачи `pnpm typecheck` не позеленеет ни в одном чанке.
+
+- [ ] **Step 1: Падающий тест**
+
+```ts
+it('возвращает теги вместе с созданным и правленым чекпоинтом', async () => {
+  const versionId = await createVersion('v1.0');
+  const iosId = await createPlatform('App Store', PlatformKind.Store);
+
+  const created = await testDb.db.transaction((tx) =>
+    repository.createCheckpoint(admin(), tx, projectId, versionId, {
+      title: 'Вход по телефону',
+      platformIds: [iosId],
+    }),
+  );
+
+  expect(created.platformIds).toEqual([iosId]);
+
+  const updated = await testDb.db.transaction((tx) =>
+    repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
+      platformIds: [],
+    }),
+  );
+
+  expect(updated.platformIds).toEqual([]);
+});
+```
+
+- [ ] **Step 2: Запустить, убедиться что падает**
+
+Run: `cd apps/api && npx vitest run src/roadmap/roadmap.repository.test.ts`
+Expected: FAIL — в возвращённой строке `platformIds` нет: Task 4.5 как раз отделяет это поле от колонок чекпоинта.
+
+- [ ] **Step 3: Реализация**
+
+`createCheckpoint` и `updateCheckpoint` возвращают строку, дополненную тегами: `Promise<RoadmapCheckpointRow & { platformIds: string[] }>`. Набор берётся из того, что только что записано (присланный набор), а при его отсутствии в правке — выборкой по чекпоинту: ответ обязан описывать состояние после операции, а не присланное тело.
+
+Контроллер дописывает `platformIds: created.platformIds` в оба литерала ответа. Тела остаются явными: разворот строки унёс бы наружу `versionId` и отметки времени.
+
+- [ ] **Step 4: Запустить**
+
+Run: `cd apps/api && npx vitest run src/roadmap`
+Expected: PASS.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add apps/api/src/roadmap
+git commit -m "Возвращать теги вместе с чекпоинтом"
+```
+
+### Task 4.7: Ручка выпуска, журнал и описание инструмента
 
 **Files:**
 - Modify: `apps/api/src/roadmap/roadmap.service.ts`
@@ -2494,7 +2802,9 @@ git commit -m "Помечать чекпоинты платформами и у�
 ```ts
 it('пишет постановку выпуска в журнал', async () => {
   const versionId = /* создать версию службой */;
-  const platformId = /* завести платформу вставкой */;
+  // Вид обязательно `Store`: у серверной платформы модерации не бывает,
+  // и тест упал бы на отказе вместо проверки журнала.
+  const platformId = /* завести платформу вставкой, kind: PlatformKind.Store, name: 'App Store' */;
 
   await service.setRelease(admin(), projectId, versionId, platformId, {
     state: PlatformReleaseState.InReview,
@@ -2524,7 +2834,7 @@ Expected: FAIL — методов службы нет.
 
 - [ ] **Step 3: Реализация**
 
-В службу — `setRelease` и `clearRelease` по образцу остальных: транзакция, репозиторий, журнал (`PlatformReleaseSet` / `PlatformReleaseCleared`, `entityType: 'platform_release'`, в метаданных обозначение версии, имя платформы и состояние — всё из того, что вернул репозиторий).
+В службу — `setRelease` и `clearRelease` по образцу остальных: транзакция, репозиторий, журнал (`PlatformReleaseSet` / `PlatformReleaseCleared`, `entityType: 'platform_release'`, в метаданных обозначение версии, имя платформы и состояние — всё из того, что вернул репозиторий). `entityId` — идентификатор строки выпуска у постановки; у снятия строки уже нет, и поле не заполняется.
 
 В контроллер — две ручки; `Put` нужно **добавить в импорт** из `@nestjs/common` (сейчас там только `Post`, `Patch`, `Delete`):
 
@@ -2551,7 +2861,20 @@ Expected: FAIL — методов службы нет.
   async clearRelease(/* те же параметры без тела */): Promise<void> {}
 ```
 
-Ответ собирается явным объектом `PlatformRelease` — наружу не должны уйти `platformName`, `versionLabel` и отметки времени.
+Ответ **выписывается полем за полем**, как это уже делают ручки чекпоинта:
+
+```ts
+    return {
+      platformId: set.platformId,
+      state: set.state,
+      releasedDate: set.releasedDate,
+      buildLabel: set.buildLabel,
+    };
+```
+
+`return set` с объявленным типом `Promise<PlatformRelease>` компилятор пропустил бы — проверка лишних свойств работает только на свежих литералах, — и наружу уехали бы `platformName`, `versionLabel`, идентификаторы и отметки времени. Теста контроллеров в проекте нет, так что единственная защита здесь — явное тело.
+
+В импорт из `@cairn/shared` добавить `platformReleaseSetSchema`, `PlatformReleaseSet` и `PlatformRelease`.
 
 В `mcp-tools.ts` описание инструмента `get_roadmap` дополнить выпусками: «Роадмап: версии, чекпоинты, выпуски по платформам и текущая стадия». Модель выбирает инструмент по описанию, а ответ уже содержит сводку — `findForProject` возвращает её сам.
 
@@ -2559,8 +2882,8 @@ Expected: FAIL — методов службы нет.
 
 - [ ] **Step 4: Запустить**
 
-Run: `cd apps/api && npx vitest run src`
-Expected: PASS. `pnpm typecheck` из корня ещё красный в вебе — это Chunk 5 и 6.
+Run: `cd apps/api && npx vitest run src && cd ../web && npx vitest run src/components/AuditTable`
+Expected: PASS. Веб-набор прогоняется потому, что в этой же задаче правятся подписи действий в `AuditTable/constants.ts`. `pnpm typecheck` из корня ещё красный в вебе — это Chunk 5 и 6.
 
 - [ ] **Step 5: Коммит**
 
@@ -2646,31 +2969,28 @@ git commit -m "Дать панели ширину в половину экран
 
 - [ ] **Step 1: Падающий тест**
 
-Обвязка — как в `useMutationRoadmap.test.tsx`: локальный `wrapper` с `QueryClientProvider`, `vi.stubGlobal('fetch', …)` в тесте, инвалидация — через шпиона на клиенте.
+Обвязка — ровно как в `useMutationServer.test.tsx` (см. «Обвязка тестов» в преамбуле): модульный `let client`, присваиваемый внутри `wrapper`, шпион навешивается **после** `renderHook`. Другие образцы наблюдать инвалидацию не умеют: они создают клиент внутри `wrapper`, и внешний шпион его не видит.
 
 ```ts
 it('после заведения платформы сбрасывает и список, и роадмап', async () => {
   // Сводка релизов живёт в ответе роадмапа: без её сброса новая
   // платформа не появилась бы в сводке до перезагрузки страницы.
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const invalidated: unknown[] = [];
-
-  vi.spyOn(client, 'invalidateQueries').mockImplementation(async (filters) => {
-    invalidated.push(filters?.queryKey?.[0]);
-  });
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'p1' }), { status: 200 })),
+    vi.fn().mockResolvedValue({ ok: true, status: 201, json: async () => ({ id: 'p1' }) }),
   );
 
-  const { result } = renderHook(() => useMutationCreatePlatform('project-1'), {
-    wrapper: wrapperWith(client),
-  });
+  const { result } = renderHook(() => useMutationCreatePlatform('project-1'), { wrapper });
+  const invalidate = vi.spyOn(client, 'invalidateQueries');
 
   result.current.mutate({ kind: PlatformKind.Server, name: 'API' });
 
-  await waitFor(() => expect(invalidated).toContain('platforms'));
-  expect(invalidated).toContain('roadmap');
+  await waitFor(() => expect(invalidate).toHaveBeenCalled());
+
+  const keys = invalidate.mock.calls.map((call) => String(call[0]?.queryKey?.[0]));
+
+  expect(keys).toContain('platforms');
+  expect(keys).toContain('roadmap');
 });
 ```
 
@@ -2681,7 +3001,16 @@ Expected: FAIL — модуль `./usePlatforms` не найден.
 
 - [ ] **Step 3: Реализация**
 
-`usePlatforms.ts`: ключи `PLATFORM_KEYS.forProject(projectId)`, запрос `useQueryPlatforms(projectId, { enabled = true } = {})` (признак нужен там, где доступа к «Инфо» может не быть — экран инфраструктуры) и мутации `useMutationCreatePlatform`, `useMutationUpdatePlatform`, `useMutationDeletePlatform`. Общая функция инвалидации сбрасывает **оба** ключа — платформ и роадмапа:
+`usePlatforms.ts`: ключи `PLATFORM_KEYS.forProject(projectId)`, запрос
+
+```ts
+export function useQueryPlatforms(
+  projectId: string,
+  { enabled = true, initialData }: { enabled?: boolean; initialData?: Platform[] } = {},
+) { … }
+```
+
+Признак `enabled` нужен там, где доступа к «Инфо» может не быть (экран инфраструктуры), `initialData` — чтобы страница проекта, уже получившая платформы на сервере, не тянула их второй раз: `staleTime` в провайдере 30 секунд, и подставленные данные считаются свежими. Плюс мутации `useMutationCreatePlatform`, `useMutationUpdatePlatform`, `useMutationDeletePlatform`. Общая функция инвалидации сбрасывает **оба** ключа — платформ и роадмапа:
 
 ```ts
 /**
@@ -2716,7 +3045,7 @@ git commit -m "Завести хуки платформ"
 
 - [ ] **Step 1: Падающие тесты**
 
-Та же обвязка, что в Task 5.2.
+Та же обвязка, что в Task 5.2: модульный `let client` внутри `wrapper`, заглушка `fetch` объектом.
 
 ```ts
 it('ставит выпуск методом PUT и сбрасывает роадмап', async () => {
@@ -2774,6 +3103,9 @@ git commit -m "Завести хуки выпуска платформы"
 - [ ] **Step 1: Падающие тесты**
 
 ```ts
+const API = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
+const STORE = { id: 'p2', kind: PlatformKind.Store, name: 'App Store', position: 2 };
+
 describe('PlatformChips', () => {
   it('показывает имена платформ и ничего не предлагает убрать', () => {
     render(<PlatformChips platforms={[API, STORE]} />);
@@ -2791,7 +3123,7 @@ describe('PlatformChips', () => {
 });
 
 describe('PlatformsField', () => {
-  it('подсказка превращается в платформу и исчезает из подсказок', async () => {
+  it('подсказка превращается в платформу', async () => {
     const onAdd = vi.fn();
 
     render(<PlatformsField platforms={[]} onAdd={onAdd} onRemove={vi.fn()} />);
@@ -2849,7 +3181,7 @@ Expected: FAIL — компонентов нет.
 
 - [ ] **Step 3: Реализация**
 
-`PlatformChips/constants.ts` — подписи видов (нужны и чипам, и выбору вида):
+`PlatformsField/constants.ts` держит и подписи видов — их потребители здесь (выбор вида) и дальше `ReleaseSummary`; сами чипы вид не показывают и в подписях не нуждаются:
 
 ```ts
 /** Подписи видов платформы. */
@@ -2861,6 +3193,18 @@ export const PLATFORM_KIND_LABELS: Record<PlatformKind, string> = {
 ```
 
 `PlatformChips` — маленький презентационный компонент: список имён чипами, пустой список → `null`. Без `'use client'`: его рендерит серверный паспорт проекта.
+
+Тип пропа — **минимальная форма**, иначе Chunk 6 упрётся в несовместимость: паспорт передаёт `Platform[]` (с `position`), карточка окружения — `PlatformRef[]` (без), строка чекпоинта сопоставляет идентификаторы со списком проекта.
+
+```ts
+/** Пропсы чипов платформ. */
+export interface IProps {
+  /** Минимальная форма: всё, что нужно чипу, — имя и ключ списка. */
+  platforms: { id: string; name: string }[];
+}
+```
+
+`CustomPlatformForm` — несмотря на имя, **не** `<form>`: поле платформ живёт слотом внутри формы проекта, и вложенный `<form>` недопустим. Контейнер — `fieldset` или `div`, добавление — по кнопке `type="button"`. Enter в поле имени отправит внешнюю форму (та же особенность есть у `DomainsField` внутри формы окружения), поэтому кнопка «Добавить платформу» обязана быть видимой и близкой.
 
 `PlatformsField/constants.ts`:
 
@@ -2917,6 +3261,7 @@ git commit -m "Собирать платформы чипами с подска�
 - Create: `apps/web/src/app/(app)/CreateProjectPanel.tsx`
 - Create: `apps/web/src/app/(app)/CreateProjectPanel.test.tsx`
 - Modify: `apps/web/src/components/ProjectForm/{ProjectForm.tsx,types.ts,ProjectForm.test.tsx}`
+- Create: `apps/web/src/components/ProjectForm/ProjectFields.tsx`
 - Modify: `apps/web/src/components/ProjectList/{ProjectList.tsx,types.ts,ProjectList.test.tsx}`
 - Modify: `apps/web/src/app/(app)/page.tsx`
 - Delete: `apps/web/src/app/(app)/projects/new/`
@@ -2965,7 +3310,15 @@ it('в пустой системе зовёт завести первый про
 });
 ```
 
-`CreateProjectPanel.test.tsx` — экранный стиль (`vi.mock('@/api/hooks')`) **плюс мок роутера**, без которого `useRouter` бросит на рендере:
+`CreateProjectPanel.test.tsx` — экранный стиль (`vi.mock('@/api/hooks')`) плюс **локальный** мок роутера: глобальный в `vitest.setup.ts` падать не даёт, но и наблюдать `push` через него нельзя.
+
+`beforeEach` обязателен: автомок возвращает `undefined`, и компонент упадёт на `isPending` **до** рендера кнопки. Хелперы `query(data)` и `mutation()` — локальные, как в `RoadmapScreen.test.tsx`:
+
+```ts
+beforeEach(() => {
+  vi.mocked(hooks.useMutationCreateProject).mockReturnValue(mutation());
+});
+```
 
 ```ts
 const push = vi.fn();
@@ -3012,7 +3365,18 @@ Expected: FAIL — пропа `platformsSlot` нет, `createSlot` нет, ко�
 
 - [ ] **Step 3: Реализация**
 
-`ProjectForm`: новый необязательный проп `platformsSlot?: ReactNode`, рендерится после полей паспорта. Сами платформы форма **не хранит и не отправляет** — их добавляет к данным родитель. Шесть `TextField` при этом выносятся в подкомпонент `ProjectFields.tsx`: файл сейчас 94 строки, и со слотом перевалил бы за сотню.
+`ProjectForm`: новый необязательный проп `platformsSlot?: ReactNode`, рендерится после полей паспорта. Сами платформы форма **не хранит и не отправляет** — их добавляет к данным родитель.
+
+Пять `TextField` и `LifecycleField` выносятся в подкомпонент `ProjectFields.tsx`: файл сейчас 94 строки, и со слотом перевалил бы за сотню. Подкомпонент принимает `values` и обработчик правки, и обработчик обязан остаться дженериком:
+
+```ts
+interface IProps {
+  values: ProjectFormValues;
+  onChange: <K extends keyof ProjectFormValues>(key: K, value: ProjectFormValues[K]) => void;
+}
+```
+
+Сведение к `(key: string, value: unknown)` потеряло бы типизацию полей, а `any` запрещён.
 
 `ProjectList`: вместо `canCreate` и внутреннего `CreateLink` — проп
 
@@ -3134,6 +3498,12 @@ Expected: FAIL — компонента нет, проп `platforms` не при
 
 - [ ] **Step 3: Реализация**
 
+Фикстуры задать в файле: `INITIAL: ProjectFormValues` — все шесть полей (`name: 'Касса'`, остальные `null`, `lifecycle: ProjectLifecycle.Development`).
+
+`beforeEach` в `EditProjectPanel.test.tsx` настраивает **все четыре** хука компонента (`useMutationUpdateProject`, `useQueryPlatforms`, `useMutationCreatePlatform`, `useMutationDeletePlatform`): хуки вызываются до раннего возврата по правам, поэтому даже тест «нет кнопки без уровня записи» без настройки упадёт.
+
+В `ProjectSections.test.tsx` фикстура называется `detailed` (рядом есть `metadataOnly`) — `DETAIL` в файле нет.
+
 `EditProjectPanel` — клиентский островок: `canWrite` **пропом**, а не запросом. Страница и так серверная, и `/projects/:id/sections` ей дешевле третьего клиентского запроса прав на каждой карточке; заодно кнопка не мигает на время загрузки. Тот же приём уже применён на странице роадмапа, которая передаёт вниз `isSuperadmin`.
 
 Внутри: кнопка «Править», `Drawer` шириной `Half`, `ProjectForm` со слотом `PlatformsField`. Платформы приходят из `useQueryPlatforms(projectId)`, а `onAdd` / `onRemove` вызывают мутации платформ — поэтому чипы перерисовываются от кэша, а не от состояния формы. После сохранения паспорта — закрытие панели и `router.refresh()`.
@@ -3141,14 +3511,28 @@ Expected: FAIL — компонента нет, проп `platforms` не при
 `page.tsx` запрашивает рядом с проектом уровни доступа и платформы:
 
 ```ts
-  // Уровень метаданных платформ не отдаст, и это не повод валить
-  // страницу: паспорт показывается и без них.
+  const sections = await apiServer<SectionLevels>(`/projects/${id}/sections`);
+  const canWrite = sections[Section.Info] === AccessLevel.Write;
+
+  // Отказ по уровню — не повод валить страницу: паспорт показывается
+  // и без платформ. А вот 401 пробрасывается, иначе редирект на вход
+  // потеряется и страница отрисуется пустой.
   const platforms = await apiServer<Platform[]>(`/projects/${id}/platforms`).catch(
-    (): Platform[] => [],
+    (cause): Platform[] => {
+      if (cause instanceof ApiError && cause.status === 401) {
+        redirect('/login');
+      }
+
+      return [];
+    },
   );
 ```
 
-Платформы уходят в `ProjectSections` (чипами через `PlatformChips`) и в `EditProjectPanel` как `initialData` для `useQueryPlatforms` — иначе один и тот же список тянулся бы дважды.
+Запрос секций дублирует такой же запрос каркаса — мемоизация `fetch` внутри одного рендера их склеит, так что это не третий поход к API.
+
+Платформы уходят в `ProjectSections` чипами через `PlatformChips`. В `EditProjectPanel` они передаются как `initialData` для `useQueryPlatforms` — но **только если запрос удался**: пустой массив после отказа заставил бы панель тридцать секунд считать, что платформ нет, и не пробовать запросить их самой.
+
+Панель рендерится только при полной проекции: `ProjectFormValues` требует `purpose`, `stack`, `repoUrl` и `notes`, которых у `ProjectMetadata` нет, и без сужения типа шаг не скомпилируется. Сужение — тем же `'purpose' in project`, что уже используется в `ProjectSections`; `notFound()` здесь, в отличие от удаляемой страницы правки, недопустим: паспорт уровня метаданных показывается.
 
 Каталог `projects/[id]/edit` удалить целиком — на него и сейчас не ведёт ни одна ссылка.
 
@@ -3176,7 +3560,7 @@ git commit -m "Править проект в панели с его карто�
 
 - [ ] **Step 1: Падающие тесты**
 
-Фикстура в файле называется `initial`.
+Фикстура в файле называется `initial`, и **сначала** в неё добавляется `platformIds: []`: поле становится обязательным в значениях формы, и без этого третий тест упадёт на обращении к `undefined`, а не на отсутствии пропа.
 
 ```ts
 const API = { id: 'p1', kind: PlatformKind.Server, name: 'API' };
@@ -3190,14 +3574,18 @@ it('предлагает галочками только платформы на
   expect(screen.queryByLabelText('App Store')).not.toBeInTheDocument();
 });
 
-it('без пропа платформ группы не показывает и набор не отправляет', () => {
+it('без пропа платформ группы не показывает и набор не отправляет', async () => {
   // «Пропа нет» означает «список недоступен»: пустой набор снял бы
   // привязки, сделанные тем, у кого доступ к «Инфо» есть.
   const onSubmit = vi.fn();
 
-  render(<EnvironmentForm initial={initial} onSubmit={onSubmit} />);
+  render(<EnvironmentForm initial={{ ...initial, name: 'Прод' }} onSubmit={onSubmit} />);
 
   expect(screen.queryByText('Что здесь развёрнуто')).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+  expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty('platformIds');
 });
 
 it('отправляет отмеченные платформы', async () => {
@@ -3270,18 +3658,24 @@ git commit -m "Отмечать в форме окружения развёрн�
 - Modify: `apps/web/src/app/(app)/projects/[id]/infrastructure/InfrastructureScreen.tsx`
 - Modify: `apps/web/src/components/EnvironmentCard/{EnvironmentCard.tsx,EnvironmentCard.test.tsx}`
 
-Экран сейчас 142 строки и с панелью вырос бы до полутора сотен, поэтому форма уезжает в две панели по образцу `CreateVersionPanel`.
+Экран сейчас 142 строки. Уезжает около пятидесяти (мутации, `submit`, блок формы), приезжает около двадцати (запрос платформ, два рендера панелей) — этого мало, поэтому вместе с формой переезжают и две его функции: `formValuesOf` идёт в `EditEnvironmentPanel` (там она и нужна), `knownAddressesOf` — в `utils.ts` рядом с экраном, с barrel-экспортом. Цель — экран до сотни строк, панели по сорок-пятьдесят.
+
+Панели — обычные дочерние компоненты, а не островки: сам экран уже клиентский, в отличие от `CreateVersionPanel`, который живёт рядом с серверным маршрутом.
 
 - [ ] **Step 1: Падающие тесты**
 
-Теста у экрана нет вовсе — файл создаётся. Экран зовёт семь хуков, и замокать нужно **все**: автомок вернёт `undefined`, и экран упадёт на `environments.isPending`.
+Теста у экрана нет вовсе — файл создаётся. Замокать нужно **все** хуки поддерева: `vi.mock('@/api/hooks')` накрывает модуль целиком, а мутации теперь зовут панели, и автомок вернёт им `undefined`.
 
 ```ts
 vi.mock('@/api/hooks');
 
 beforeEach(() => {
   vi.mocked(hooks.useQueryEnvironments).mockReturnValue(query([]));
-  vi.mocked(hooks.useQuerySections).mockReturnValue(query({ [Section.Infrastructure]: AccessLevel.Write }));
+  // Обе секции: «Инфраструктура» открывает экран, «Инфо» — галочки
+  // платформ, и без неё они не появятся.
+  vi.mocked(hooks.useQuerySections).mockReturnValue(
+    query({ [Section.Infrastructure]: AccessLevel.Write, [Section.Info]: AccessLevel.Write }),
+  );
   vi.mocked(hooks.useQueryServers).mockReturnValue(query([]));
   vi.mocked(hooks.useQueryDomains).mockReturnValue(query([]));
   vi.mocked(hooks.useQueryPlatforms).mockReturnValue(query([]));
@@ -3307,11 +3701,16 @@ it('не показывает кнопку добавления без уров�
 });
 ```
 
-В `EnvironmentCard.test.tsx`:
+В `EnvironmentCard.test.tsx` фикстуры называются `metadata`, `server` и `detail`. Тест строится на `detail`: карточка показывает поля детали под `isDetailed(environment)`, и на метаданных чипы просто не отрисовались бы. Самой фикстуре `detail` тоже нужно добавить `platforms: []` — иначе остальные тесты карточки упадут на обращении к `undefined`.
 
 ```ts
 it('показывает развёрнутые платформы', () => {
-  render(<EnvironmentCard environment={{ ...environment, platforms: [API] }} canWrite={false} />);
+  render(
+    <EnvironmentCard
+      environment={{ ...detail, platforms: [{ id: 'p1', kind: PlatformKind.Server, name: 'API' }] }}
+      canWrite={false}
+    />,
+  );
 
   expect(screen.getByText('API')).toBeInTheDocument();
 });
@@ -3329,11 +3728,21 @@ Expected: FAIL — форма показывается инлайново, ди�
   `EnvironmentForm`; мутации и состояния форм собираются в них;
 - `InfrastructureScreen` держит только `isCreating` / `editingId`, список
   и две панели; закрытие панели сбрасывает оба состояния;
-- платформы берутся `useQueryPlatforms(projectId, { enabled: ... })` —
-  как рядом уже сделано для реестра машин: подрядчику без «Инфо» ручка
-  ответит отказом, и бить в неё незачем. В форму передаётся
-  `platforms.data` **как есть**, без `?? []`: иначе проп всегда окажется
-  «переданным», и правка начнёт снимать чужие галочки;
+- платформы берутся с признаком по **уровню «Инфо»**, а не по
+  суперадминству (в отличие от реестра машин рядом): подрядчик с записью
+  в «Инфо» галочки получить должен. Уровни на экране уже есть, и предикат
+  обязан быть терпим к тому, что они ещё не загружены — хук вызывается до
+  раннего возврата по `isPending`:
+
+  ```ts
+  const platforms = useQueryPlatforms(projectId, {
+    enabled: sections.data?.[Section.Info] !== undefined,
+  });
+  ```
+
+  В форму передаётся `platforms.data` **как есть**, без `?? []`: иначе
+  проп всегда окажется «переданным», и правка начнёт снимать чужие
+  галочки;
 - `formValuesOf` заполняет `platformIds` из `environment.platforms`
   (поле есть только у проекции чтения — брать через тот же приём, что
   `detail?.server?.id`);
@@ -3403,11 +3812,13 @@ describe('ReleaseSummary', () => {
   });
 
   it('держит порядок строк, пришедший от сервера', () => {
-    render(<ReleaseSummary summary={[row(API, null, []), row(STORE, null, [])]} />);
+    // Порядок пропа расходится с `position` намеренно: иначе тест прошёл
+    // бы и у компонента, который сортирует сам.
+    render(<ReleaseSummary summary={[row(STORE, null, []), row(API, null, [])]} />);
 
     const names = screen.getAllByRole('term').map((node) => node.textContent);
 
-    expect(names).toEqual(['API', 'App Store']);
+    expect(names).toEqual(['App Store', 'API']);
   });
 
   it('без платформ не рисует ничего', () => {
@@ -3425,7 +3836,7 @@ Expected: FAIL — компонента нет.
 
 - [ ] **Step 3: Реализация**
 
-Презентационный компонент, данные только пропами: тот же экземпляр работает на внутреннем экране (из кэша TanStack Query) и на публичной странице (пропом из RSC, без TanStack Query).
+Презентационный компонент, данные только пропами: тот же экземпляр работает на внутреннем экране (из кэша TanStack Query) и на публичной странице, которая получает роадмап пропом от серверной страницы и TanStack Query не поднимает — хотя сам `PublicRoadmapView` клиентский.
 
 `constants.ts`:
 
@@ -3479,7 +3890,9 @@ git commit -m "Показать сводку релизов одной табл�
 
 - [ ] **Step 1: Падающие тесты**
 
-Сначала **дополнить фикстуры**: в `RoadmapScreen.test.tsx` объекту `roadmap` добавить `summary` со строкой по «App Store», версиям — `releases: []`; в `PublicRoadmapView.test.tsx` фикстуре `roadmap` — то же.
+Сначала **дополнить фикстуры**: в `RoadmapScreen.test.tsx` объекту `roadmap` добавить `summary` со строкой по «App Store», версиям — `releases: []`, чекпоинтам — `platformIds: []`; в `PublicRoadmapView.test.tsx` фикстуре `roadmap` — то же (там проп типизирован `PublicRoadmap`, поэтому пропуск поймает и `typecheck`).
+
+Версия без `releases` не даёт ошибки типов: она молча провалится в ветку метаданных union'а и потеряет чекпоинты — это та же тихая деградация, о которой предупреждает Task 1.3, только на стороне веба.
 
 ```ts
 it('ставит сводку над диаграммой', () => {
@@ -3549,9 +3962,12 @@ git commit -m "Поставить сводку релизов над диагр�
 
 **Files:**
 - Create: `apps/web/src/components/VersionDrawer/{ReleaseList.tsx,ReleaseRow.tsx}`
+- Create: `apps/web/src/components/VersionDrawer/VersionActions.tsx`
+- Create: `apps/web/src/utils/today.ts`
 - Modify: `apps/web/src/components/VersionDrawer/{VersionDrawer.tsx,types.ts,VersionDrawer.test.tsx}`
 - Modify: `apps/web/src/components/VersionForm/{VersionForm.tsx,types.ts,VersionForm.test.tsx}`
-- Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/{RoadmapScreen.tsx,RoadmapVersionPanel.tsx,CreateVersionPanel.tsx}`
+- Modify: `apps/web/src/utils/index.ts`
+- Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/{RoadmapScreen.tsx,RoadmapScreen.test.tsx,RoadmapVersionPanel.tsx,CreateVersionPanel.tsx}`
 - Modify: `apps/web/src/app/roadmap/[token]/PublicRoadmapView.tsx`
 
 - [ ] **Step 1: Падающие тесты**
@@ -3567,8 +3983,20 @@ function optionsOf(select: HTMLElement): string[] {
 const API = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
 const STORE = { id: 'p2', kind: PlatformKind.Store, name: 'App Store', position: 2 };
 
+/**
+ * Версия с выпуском: фикстуры задаются в файле.
+ *
+ * `VERSION` — уровень чтения с `releases: []`, `VERSION_WITH_RELEASE` —
+ * с выпуском «в релизе» от 14.03.2026 и обозначением сборки «1.2 (45)»,
+ * `METADATA_VERSION` — без `checkpoints` и `releases`.
+ */
+
+// Действия берутся фабрикой `makeActions()` из файла, а не общей
+// константой: `clearMocks` в конфиге веба не включён, и вызовы
+// протекали бы между тестами.
+
 it('предлагает модерацию только магазину', () => {
-  render(<VersionDrawer version={VERSION} platforms={[API, STORE]} isCurrent isOpen onClose={vi.fn()} actions={ACTIONS} />);
+  render(<VersionDrawer version={VERSION} platforms={[API, STORE]} isCurrent isOpen onClose={vi.fn()} actions={makeActions()} />);
 
   expect(optionsOf(screen.getByLabelText('Состояние API'))).toEqual([
     'как у версии',
@@ -3578,33 +4006,50 @@ it('предлагает модерацию только магазину', () =
   expect(optionsOf(screen.getByLabelText('Состояние App Store'))).toContain('на модерации');
 });
 
-it('выбор состояния ставит выпуск сразу', async () => {
-  render(<VersionDrawer version={VERSION} platforms={[STORE]} isCurrent isOpen onClose={vi.fn()} actions={ACTIONS} />);
+it('отправляет всю тройку, а не одно изменённое поле', async () => {
+  // `PUT` заменяет клетку целиком (Chunk 4, Task 4.4): посылка одного
+  // состояния обнулила бы уже введённое обозначение сборки.
+  const actions = makeActions();
+
+  render(
+    <VersionDrawer
+      version={VERSION_WITH_RELEASE}
+      platforms={[STORE]}
+      isCurrent
+      isOpen
+      onClose={vi.fn()}
+      actions={actions}
+    />,
+  );
 
   await userEvent.selectOptions(screen.getByLabelText('Состояние App Store'), 'in_review');
 
-  expect(ACTIONS.onSetRelease).toHaveBeenCalledWith('p2', { state: 'in_review' });
+  expect(actions.onSetRelease).toHaveBeenCalledWith('p2', {
+    state: 'in_review',
+    releasedDate: '2026-03-14',
+    buildLabel: '1.2 (45)',
+  });
 });
 
 it('выбор «в релизе» подставляет сегодняшнюю дату', async () => {
   // Иначе сводка покажет релиз без числа, а дата версии молча уедет
   // на хранимую колонку.
-  render(<VersionDrawer version={VERSION} platforms={[STORE]} isCurrent isOpen onClose={vi.fn()} actions={ACTIONS} />);
+  render(<VersionDrawer version={VERSION} platforms={[STORE]} isCurrent isOpen onClose={vi.fn()} actions={makeActions()} />);
 
   await userEvent.selectOptions(screen.getByLabelText('Состояние App Store'), 'released');
 
-  expect(ACTIONS.onSetRelease).toHaveBeenCalledWith('p2', {
+  expect(actions.onSetRelease).toHaveBeenCalledWith('p2', {
     state: 'released',
     releasedDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
   });
 });
 
 it('«как у версии» снимает выпуск', async () => {
-  render(<VersionDrawer version={VERSION_WITH_RELEASE} platforms={[STORE]} isCurrent isOpen onClose={vi.fn()} actions={ACTIONS} />);
+  render(<VersionDrawer version={VERSION_WITH_RELEASE} platforms={[STORE]} isCurrent isOpen onClose={vi.fn()} actions={makeActions()} />);
 
   await userEvent.selectOptions(screen.getByLabelText('Состояние App Store'), '');
 
-  expect(ACTIONS.onClearRelease).toHaveBeenCalledWith('p2');
+  expect(actions.onClearRelease).toHaveBeenCalledWith('p2');
 });
 
 it('без действий показывает выпуски без органов управления', () => {
@@ -3689,9 +4134,22 @@ Expected: FAIL — пропа `platforms` нет, `hasPlatforms` нет.
   в `VersionForm`;
 - `CreateVersionPanel` получает `platforms` и передаёт тот же признак:
   иначе поле осталось бы видимым там, где версия как раз и заводится;
+- «сегодня» берётся **общей утилитой**: функция `today()` сейчас
+  модульно-приватная в `VersionForm.tsx`, и копировать её нельзя. Переезжает
+  в `apps/web/src/utils/today.ts` с barrel-экспортом, `VersionForm`
+  начинает импортировать её оттуда;
+- поле обозначения сборки отправляет значение **по уходу из него**
+  (`onBlur`), а не по нажатию клавиши: `PUT` на каждый символ и лишний,
+  и затирающий, а правило проекта требует не частить запросами;
+- кнопки «Редактировать» и «Удалить версию» выносятся в
+  `VersionActions.tsx` — безусловно, а не «если лимит превышен»:
+  `VersionDrawer.tsx` сейчас 88 строк, и после этой задачи вместе
+  с Task 6.6 он выходит за сотню гарантированно;
 - `RoadmapScreen` передаёт `roadmap.data.summary.map((row) => row.platform)`
   в обе панели; `RoadmapVersionPanel` получает новый проп `platforms` и
-  собирает действия из `useMutationSetRelease` / `useMutationClearRelease`;
+  собирает действия из `useMutationSetRelease` / `useMutationClearRelease`.
+  В `RoadmapScreen.test.tsx` обе новые мутации надо добавить в `beforeEach`:
+  панель читает их `isPending` на рендере, и автомок уронил бы экран;
 - `PublicRoadmapView` передаёт платформы из `summary` без действий.
 
 - [ ] **Step 4: Запустить**
@@ -3711,18 +4169,21 @@ git commit -m "Вести выпуски платформ в панели вер
 **Files:**
 - Create: `apps/web/src/components/CheckpointForm/PlatformsToggles.tsx`
 - Modify: `apps/web/src/components/CheckpointForm/{CheckpointForm.tsx,types.ts,CheckpointForm.test.tsx}`
-- Modify: `apps/web/src/components/VersionDrawer/{CheckpointList.tsx,CheckpointItem.tsx,CheckpointList.test.tsx,VersionDrawer.tsx,types.ts}`
+- Create: `apps/web/src/components/CheckpointForm/CheckpointFields.tsx`
+- Modify: `apps/web/src/components/VersionDrawer/{CheckpointList.tsx,CheckpointItem.tsx,CheckpointList.test.tsx,VersionDrawer.tsx,VersionDrawer.test.tsx,types.ts}`
 - Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapVersionPanel.tsx`
 
 Правка чекпоинта появляется здесь не только ради тегов: сейчас у существующего чекпоинта нельзя поправить **ни формулировку, ни ссылку на задачу** — только закрыть или удалить, и опечатка означает пересоздание записи. Теги без правки повторили бы ту же беду.
 
 - [ ] **Step 1: Падающие тесты**
 
+Фикстуры в `CheckpointList.test.tsx` называются `plain` и `withUrl`; `API` и `STORE` задаются в файле. Обеим существующим фикстурам **сначала** добавляется `platformIds: []`: после правки `CheckpointItem` читает набор, и без этого упадут все шесть тестов файла и восемь тестов `VersionDrawer`.
+
 ```ts
 it('показывает теги платформ у чекпоинта', () => {
   render(
     <CheckpointList
-      checkpoints={[{ ...CHECKPOINT, platformIds: ['p1'] }]}
+      checkpoints={[{ ...plain, platformIds: ['p1'] }]}
       platforms={[API]}
       canWrite={false}
       onToggle={vi.fn()}
@@ -3736,7 +4197,7 @@ it('показывает теги платформ у чекпоинта', () =>
 it('неизвестный тег пропускает молча', () => {
   render(
     <CheckpointList
-      checkpoints={[{ ...CHECKPOINT, platformIds: ['нет такой'] }]}
+      checkpoints={[{ ...plain, platformIds: ['нет такой'] }]}
       platforms={[API]}
       canWrite={false}
       onToggle={vi.fn()}
@@ -3744,7 +4205,7 @@ it('неизвестный тег пропускает молча', () => {
     />,
   );
 
-  expect(screen.getByLabelText(CHECKPOINT.title)).toBeInTheDocument();
+  expect(screen.getByLabelText(plain.title)).toBeInTheDocument();
 });
 
 it('правит формулировку, ссылку и теги существующего чекпоинта', async () => {
@@ -3752,7 +4213,7 @@ it('правит формулировку, ссылку и теги сущест
 
   render(
     <CheckpointList
-      checkpoints={[{ ...CHECKPOINT, platformIds: [] }]}
+      checkpoints={[{ ...plain, platformIds: [] }]}
       platforms={[API, STORE]}
       canWrite
       onToggle={vi.fn()}
@@ -3761,13 +4222,13 @@ it('правит формулировку, ссылку и теги сущест
     />,
   );
 
-  await userEvent.click(screen.getByRole('button', { name: `Править ${CHECKPOINT.title}` }));
+  await userEvent.click(screen.getByRole('button', { name: `Править ${plain.title}` }));
   await userEvent.clear(screen.getByLabelText('Формулировка'));
   await userEvent.type(screen.getByLabelText('Формулировка'), 'Вход по телефону');
   await userEvent.click(screen.getByLabelText('App Store'));
   await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-  expect(onEdit).toHaveBeenCalledWith(CHECKPOINT.id, {
+  expect(onEdit).toHaveBeenCalledWith(plain.id, {
     title: 'Вход по телефону',
     url: null,
     platformIds: ['p2'],
@@ -3776,7 +4237,7 @@ it('правит формулировку, ссылку и теги сущест
 
 it('без права записи править не предлагает', () => {
   render(
-    <CheckpointList checkpoints={[CHECKPOINT]} canWrite={false} onToggle={vi.fn()} onDelete={vi.fn()} />,
+    <CheckpointList checkpoints={[plain]} canWrite={false} onToggle={vi.fn()} onDelete={vi.fn()} />,
   );
 
   expect(screen.queryByRole('button', { name: /Править/ })).not.toBeInTheDocument();
@@ -3828,11 +4289,23 @@ Expected: FAIL — пропов нет, кнопки «Править» нет.
 - [ ] **Step 3: Реализация**
 
 - `CheckpointForm`: вместо `initialTitle` — `initial?: { title, url, platformIds }`
-  и `submitLabel = 'Добавить'`; `platforms?: Platform[]`; переключатели
-  выносятся в `PlatformsToggles.tsx` (файл ровно 100 строк, и без выноса
-  лимит будет превышен). `platformIds` отправляется **только когда проп
-  платформ передан**. После отправки в режиме создания поля и выбор
-  сбрасываются, в режиме правки — нет: форма закрывается родителем;
+  и `submitLabel = 'Добавить'`; `platforms?: Platform[]`. `platformIds`
+  отправляется **только когда проп платформ передан**. После отправки
+  в режиме создания поля и выбор сбрасываются, в режиме правки — нет:
+  форма закрывается родителем;
+- **идентификаторы полей становятся уникальными.** Сейчас форма задаёт
+  `id="checkpoint-title"` и `id="checkpoint-url"` жёстко, а форма
+  добавления рисуется всегда при наличии прав — рядом с формой правки
+  в DOM оказались бы два элемента с одним `id`, обе подписи указали бы
+  на первый, и `getByLabelText('Формулировка')` упал бы на «found
+  multiple elements». Идентификатор собирается из того, что правится:
+  `checkpoint-new-title` у новой записи, `checkpoint-<id>-title`
+  у существующей;
+- **файл разгружается всерьёз.** `CheckpointForm.tsx` ровно 100 строк,
+  и вынос только новых переключателей ничего не решает: остальные правки
+  добавляют ещё около десяти строк. Поля «Формулировка» и «Ссылка на
+  задачу» переезжают в `CheckpointFields.tsx` (там же живут уникальные
+  `id`), переключатели — в `PlatformsToggles.tsx`;
 - `CheckpointItem`: теги через `PlatformChips` после формулировки
   (неизвестный идентификатор пропускается молча) и кнопка «Править»
   с `aria-label` вида «Править {формулировка}» — при праве записи;
@@ -3840,12 +4313,17 @@ Expected: FAIL — пропов нет, кнопки «Править» нет.
   на его месте `CheckpointForm` с начальными значениями; `onEdit`
   вызывается с идентификатором и данными, после чего правка закрывается;
 - `VersionDrawer`: передаёт платформы и в список, и в форму добавления;
-  `IVersionActions` получает `onEditCheckpoint(checkpointId, input)`;
+  `IVersionActions` получает `onEditCheckpoint(checkpointId, input)` —
+  **необязательным**, по образцу уже необязательного
+  `onReadCheckpointTitle`: иначе фабрика `makeActions` в
+  `VersionDrawer.test.tsx` перестанет проходить типизацию;
 - `RoadmapVersionPanel`: `onEditCheckpoint` собирается из уже
   существующего `useMutationUpdateCheckpoint` — он принимает те же поля,
   включая `platformIds`.
 
-`VersionDrawer.tsx` после Task 6.5 и 6.6 подходит к сотне строк: блок кнопок «Редактировать» / «Удалить версию» вынести в `VersionActions.tsx`, если лимит превышен.
+Полезная нагрузка `onEditCheckpoint` — `RoadmapCheckpointUpdate`: `CheckpointForm.onSubmit` отдаёт `RoadmapCheckpointCreate`, и он присваивается без третьего типа (обязательный `title` годится для необязательного).
+
+Поведение подстановки заголовка по ссылке сохраняется само: чтение молчит при непустой формулировке, а в режиме правки она предзаполнена. Это стоит закрепить тестом «правка не затирает формулировку по уходу из поля ссылки» — регресс дорогой, а строка одна.
 
 - [ ] **Step 4: Запустить**
 
@@ -3868,6 +4346,7 @@ git commit -m "Править чекпоинт и помечать его пла
 
 ## Финальная проверка
 
+- [ ] Предварительная работа выполнена: `docs/superpowers/plans/2026-10-07-cairn-snapshot-realign.md` пройден, и `cd apps/api && npx drizzle-kit generate --name=check` отвечает «No schema changes» ещё до начала этой работы.
 - [ ] `pnpm test` из корня — зелено во всех рабочих пространствах (интеграционные поднимают PostgreSQL через Testcontainers).
 - [ ] `pnpm typecheck` из корня — зелено.
 - [ ] `pnpm build` — зелено.
