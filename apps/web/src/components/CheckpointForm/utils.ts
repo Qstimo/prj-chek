@@ -1,3 +1,5 @@
+import type { RoadmapCheckpointCreate } from '@cairn/shared';
+
 /** Что нужно знать, чтобы решить, идти ли за заголовком. */
 interface IReadArgs {
   /** Содержимое поля ссылки как есть, вместе с пробелами. */
@@ -23,4 +25,33 @@ export async function readLinkTitle({ url, title, onReadTitle }: IReadArgs): Pro
   }
 
   return onReadTitle(candidate).catch(() => null);
+}
+
+/** Значения формы на момент отправки. */
+interface SubmitValues {
+  title: string;
+  url: string;
+  platformIds: string[];
+  /** Переданы ли платформы: от этого зависит, отправлять ли набор. */
+  hasPlatforms: boolean;
+}
+
+/**
+ * Собирает полезную нагрузку из значений формы.
+ *
+ * Набор тегов отправляется только когда платформы переданы: пустой
+ * массив снял бы теги у проекта, где платформ просто не видно, —
+ * отсутствие поля означает «не трогать».
+ */
+export function submitValuesOf({
+  title,
+  url,
+  platformIds,
+  hasPlatforms,
+}: SubmitValues): RoadmapCheckpointCreate {
+  return {
+    title: title.trim(),
+    url: url.trim() || null,
+    ...(hasPlatforms ? { platformIds } : {}),
+  };
 }

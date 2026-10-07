@@ -57,6 +57,8 @@ export function RoadmapVersionPanel({
                 updateCheckpoint.mutate({ versionId: version.id, checkpointId, input: { isDone } }),
               onAddCheckpoint: (input) =>
                 createCheckpoint.mutate({ versionId: version.id, input }),
+              onEditCheckpoint: (checkpointId, input) =>
+                updateCheckpoint.mutate({ versionId: version.id, checkpointId, input }),
               onReadCheckpointTitle: (url) => readLinkTitle.mutateAsync(url),
               onDeleteCheckpoint: (checkpointId) =>
                 deleteCheckpoint.mutate({ versionId: version.id, checkpointId }),

@@ -1,26 +1,37 @@
 'use client';
 
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 
 import { FormError } from '../FormError';
-import { FIELD_CLASS } from './constants';
+import { CheckpointFields } from './CheckpointFields';
+import { PlatformsToggles } from './PlatformsToggles';
 import type { IProps } from './types';
-import { readLinkTitle } from './utils';
+import { readLinkTitle, submitValuesOf } from './utils';
 
 /**
- * Форма чекпоинта: формулировка и указатель на задачу во внешнем трекере.
- * Ссылка — вся прибавка: исполнителей, оценок и дат у чекпоинта нет (ТЗ 1.4).
+ * Форма чекпоинта: формулировка, указатель на задачу и теги платформ.
+ *
+ * Работает и на создание, и на правку: у существующего чекпоинта раньше
+ * нельзя было поправить ни формулировку, ни ссылку — только закрыть или
+ * удалить, и опечатка означала пересоздание записи.
+ *
+ * Исполнителей, оценок и дат у чекпоинта по-прежнему нет (ТЗ 1.4).
  */
 export function CheckpointForm({
-  initialTitle = '',
+  initial,
+  submitLabel = 'Добавить',
   onSubmit,
   onReadTitle,
+  platforms,
   isSubmitting = false,
   error,
+  idPrefix = 'checkpoint',
 }: IProps) {
-  const [title, setTitle] = useState(initialTitle);
-  const [url, setUrl] = useState('');
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [url, setUrl] = useState(initial?.url ?? '');
+  const [platformIds, setPlatformIds] = useState<string[]>(initial?.platformIds ?? []);
 
+  const isCreating = initial === undefined;
   const canSubmit = title.trim().length > 0 && !isSubmitting;
 
   function submit(): void {
@@ -28,23 +39,19 @@ export function CheckpointForm({
       return;
     }
 
-    onSubmit({ title: title.trim(), url: url.trim() || null });
-    setTitle('');
-    setUrl('');
+    onSubmit(submitValuesOf({ title, url, platformIds, hasPlatforms: platforms !== undefined }));
+
+    // В режиме правки форму закрывает родитель, и сбрасывать нечего.
+    if (isCreating) {
+      setTitle('');
+      setUrl('');
+      setPlatformIds([]);
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     submit();
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
-    // С многострочным полем Enter перестаёт отправлять форму, и без этого
-    // сочетания клавиатурного пути к кнопке не остаётся вовсе.
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      submit();
-    }
   }
 
   /** Подставляет заголовок задачи по уходу из поля ссылки. */
@@ -58,33 +65,24 @@ export function CheckpointForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
-      <div className="space-y-1">
-        <label htmlFor="checkpoint-title" className="block text-sm font-medium">
-          Формулировка
-        </label>
-        <textarea
-          id="checkpoint-title"
-          rows={7}
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          onKeyDown={handleKeyDown}
-          className={FIELD_CLASS}
-        />
-      </div>
+      <CheckpointFields
+        title={title}
+        url={url}
+        onTitleChange={setTitle}
+        onUrlChange={setUrl}
+        onSubmitShortcut={submit}
+        onUrlBlur={handleUrlBlur}
+        idPrefix={idPrefix}
+      />
 
-      <div className="space-y-1">
-        <label htmlFor="checkpoint-url" className="block text-sm font-medium">
-          Ссылка на задачу
-        </label>
-        <input
-          id="checkpoint-url"
-          type="url"
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          onBlur={handleUrlBlur}
-          className={FIELD_CLASS}
+      {platforms && (
+        <PlatformsToggles
+          platforms={platforms}
+          value={platformIds}
+          onChange={setPlatformIds}
+          idPrefix={idPrefix}
         />
-      </div>
+      )}
 
       <FormError message={error} />
 
@@ -93,7 +91,7 @@ export function CheckpointForm({
         disabled={!canSubmit}
         className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
       >
-        Добавить
+        {submitLabel}
       </button>
     </form>
   );

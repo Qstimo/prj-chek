@@ -11,6 +11,13 @@ import type {
 export interface IVersionActions {
   onToggleCheckpoint: (checkpointId: string, isDone: boolean) => void;
   onAddCheckpoint: (input: RoadmapCheckpointCreate) => void;
+  /**
+   * Сохранение правки чекпоинта: формулировка, ссылка и теги.
+   *
+   * Необязательно, как и чтение заголовка по ссылке: фабрики действий
+   * в тестах не обязаны знать о каждой возможности панели.
+   */
+  onEditCheckpoint?: (checkpointId: string, input: RoadmapCheckpointCreate) => void;
   /** Чтение заголовка задачи по ссылке: подставляется в пустую формулировку. */
   onReadCheckpointTitle?: (url: string) => Promise<string | null>;
   onDeleteCheckpoint: (checkpointId: string) => void;

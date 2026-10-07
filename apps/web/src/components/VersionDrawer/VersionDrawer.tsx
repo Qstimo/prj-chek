@@ -76,13 +76,17 @@ export function VersionDrawer({
         <CheckpointList
           checkpoints={detail.checkpoints}
           canWrite={Boolean(actions)}
+          platforms={platforms.length > 0 ? platforms : undefined}
           onToggle={(checkpointId, isDone) => actions?.onToggleCheckpoint(checkpointId, isDone)}
           onDelete={(checkpointId) => actions?.onDeleteCheckpoint(checkpointId)}
+          onEdit={actions?.onEditCheckpoint}
+          onReadTitle={actions?.onReadCheckpointTitle}
         />
       )}
 
       {actions && (
         <CheckpointForm
+          platforms={platforms.length > 0 ? platforms : undefined}
           isSubmitting={actions.isSubmittingCheckpoint}
           onSubmit={actions.onAddCheckpoint}
           onReadTitle={actions.onReadCheckpointTitle}

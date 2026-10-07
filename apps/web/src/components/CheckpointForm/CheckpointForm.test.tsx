@@ -1,3 +1,4 @@
+import { PlatformKind, type Platform } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -27,7 +28,7 @@ describe('CheckpointForm', () => {
   });
 
   it('поддерживает предзаполнение', () => {
-    render(<CheckpointForm initialTitle="Из хроники" onSubmit={vi.fn()} />);
+    render(<CheckpointForm initial={{ title: 'Из хроники' }} onSubmit={vi.fn()} />);
 
     expect(screen.getByLabelText('Формулировка')).toHaveValue('Из хроники');
   });
@@ -143,5 +144,41 @@ describe('CheckpointForm', () => {
     await userEvent.tab();
 
     expect(onReadTitle).not.toHaveBeenCalled();
+  });
+
+  const API: Platform = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
+  const STORE: Platform = { id: 'p2', kind: PlatformKind.Store, name: 'App Store', position: 2 };
+
+  it('отправляет выбранные платформы с новым чекпоинтом', async () => {
+    const onSubmit = vi.fn();
+
+    render(<CheckpointForm onSubmit={onSubmit} platforms={[API, STORE]} />);
+
+    await userEvent.type(screen.getByLabelText('Формулировка'), 'Вход по телефону');
+    await userEvent.click(screen.getByLabelText('App Store'));
+    await userEvent.click(screen.getByRole('button', { name: 'Добавить' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ platformIds: ['p2'] }));
+  });
+
+  it('без платформ проекта переключателей нет', () => {
+    render(<CheckpointForm onSubmit={vi.fn()} />);
+
+    expect(screen.queryByText('Платформы')).not.toBeInTheDocument();
+  });
+
+  it('предзаполняется для правки и зовёт кнопку «Сохранить»', () => {
+    render(
+      <CheckpointForm
+        initial={{ title: 'Оплата', url: 'https://tracker.example.com/1', platformIds: ['p1'] }}
+        submitLabel="Сохранить"
+        platforms={[API]}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Формулировка')).toHaveValue('Оплата');
+    expect(screen.getByLabelText('Ссылка на задачу')).toHaveValue('https://tracker.example.com/1');
+    expect(screen.getByLabelText('API')).toBeChecked();
   });
 });

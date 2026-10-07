@@ -1,4 +1,4 @@
-import type { RoadmapCheckpoint } from '@cairn/shared';
+import { PlatformKind, type Platform, type RoadmapCheckpoint } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -81,5 +81,78 @@ describe('CheckpointList', () => {
     render(<CheckpointList checkpoints={[]} canWrite onToggle={vi.fn()} onDelete={vi.fn()} />);
 
     expect(screen.getByText('Чекпоинтов пока нет.')).toBeInTheDocument();
+  });
+
+  const API: Platform = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
+  const STORE: Platform = { id: 'p2', kind: PlatformKind.Store, name: 'App Store', position: 2 };
+
+  it('показывает теги платформ у чекпоинта', () => {
+    render(
+      <CheckpointList
+        checkpoints={[{ ...plain, platformIds: ['p1'] }]}
+        platforms={[API]}
+        canWrite={false}
+        onToggle={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('API')).toBeInTheDocument();
+  });
+
+  it('неизвестный тег пропускает молча', () => {
+    // Платформу могли удалить, а закэшированный ответ ещё помнит тег:
+    // уборка делает это штатным случаем.
+    render(
+      <CheckpointList
+        checkpoints={[{ ...plain, platformIds: ['нет такой'] }]}
+        platforms={[API]}
+        canWrite={false}
+        onToggle={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText(plain.title)).toBeInTheDocument();
+  });
+
+  it('правит формулировку, ссылку и теги существующего чекпоинта', async () => {
+    const onEdit = vi.fn();
+
+    render(
+      <CheckpointList
+        checkpoints={[plain]}
+        platforms={[API, STORE]}
+        canWrite
+        onToggle={vi.fn()}
+        onDelete={vi.fn()}
+        onEdit={onEdit}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: `Править ${plain.title}` }));
+    await userEvent.clear(screen.getByLabelText('Формулировка'));
+    await userEvent.type(screen.getByLabelText('Формулировка'), 'Вход по телефону');
+    await userEvent.click(screen.getByLabelText('App Store'));
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onEdit).toHaveBeenCalledWith(plain.id, {
+      title: 'Вход по телефону',
+      url: null,
+      platformIds: ['p2'],
+    });
+  });
+
+  it('без права записи править не предлагает', () => {
+    render(
+      <CheckpointList
+        checkpoints={[plain]}
+        canWrite={false}
+        onToggle={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /Править/ })).not.toBeInTheDocument();
   });
 });
