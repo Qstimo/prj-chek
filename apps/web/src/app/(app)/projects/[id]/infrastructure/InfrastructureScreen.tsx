@@ -1,28 +1,20 @@
 'use client';
 
-import {
-  AccessLevel,
-  EnvironmentKind,
-  Section,
-  type EnvironmentCreate,
-  type DomainRow,
-  type EnvironmentDetail,
-  type EnvironmentMetadata,
-} from '@cairn/shared';
+import { AccessLevel, Section } from '@cairn/shared';
 import { useState } from 'react';
 
 import {
-  useMutationCreateEnvironment,
   useMutationDeleteEnvironment,
-  useMutationUpdateEnvironment,
-  useQueryEnvironments,
   useQueryDomains,
+  useQueryEnvironments,
+  useQueryPlatforms,
   useQuerySections,
   useQueryServers,
 } from '@/api/hooks';
-import { EnvironmentForm, type EnvironmentFormValues } from '@/components/EnvironmentForm';
 import { EnvironmentList } from '@/components/EnvironmentList';
-import { describeApiError } from '@/api';
+
+import { EnvironmentPanel } from './EnvironmentPanel';
+import { sharedFormProps } from './utils';
 
 /** Пропсы экрана инфраструктуры. */
 interface IProps {
@@ -31,19 +23,19 @@ interface IProps {
   isSuperadmin: boolean;
 }
 
-/** Окружения проекта: просмотр и правка (спека 8). */
+/** Окружения проекта: список и две выезжающие панели (спека 8). */
 export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
   const environments = useQueryEnvironments(projectId);
   const sections = useQuerySections(projectId);
-  const create = useMutationCreateEnvironment(projectId);
-  const update = useMutationUpdateEnvironment(projectId);
   const remove = useMutationDeleteEnvironment(projectId);
-  // Реестр машин запрашивается только суперадмином: остальным API ответит
-  // отказом, а список ему всё равно не показывается.
+  // Признаки доступа к реестрам объяснены в `sharedFormProps`. Предикат
+  // платформ терпит незагруженные уровни: хук вызывается до раннего
+  // возврата по `isPending`.
   const servers = useQueryServers({ enabled: isSuperadmin });
-  // Реестр адресов — тем же признаком и по той же причине: подрядчику он
-  // раскрыл бы чужие адреса, а через них — существование чужих проектов.
   const domains = useQueryDomains({ enabled: isSuperadmin });
+  const platforms = useQueryPlatforms(projectId, {
+    enabled: sections.data?.[Section.Info] !== undefined,
+  });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
@@ -61,20 +53,16 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
 
   const canWrite = sections.data[Section.Infrastructure] === AccessLevel.Write;
   const editing = environments.data.find((environment) => environment.id === editingId);
-
-  function submit(input: EnvironmentCreate): void {
-    if (editingId) {
-      update.mutate({ id: editingId, input }, { onSuccess: () => setEditingId(null) });
-
-      return;
-    }
-
-    create.mutate(input, { onSuccess: () => setIsCreating(false) });
-  }
+  const shared = sharedFormProps({
+    isSuperadmin,
+    servers: servers.data,
+    domains: domains.data,
+    platforms: platforms.data,
+  });
 
   return (
     <div className="space-y-4">
-      {canWrite && !isCreating && !editingId && (
+      {canWrite && (
         <button
           type="button"
           onClick={() => setIsCreating(true)}
@@ -84,17 +72,16 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
         </button>
       )}
 
-      {(isCreating || editing) && (
-        <EnvironmentForm
-          initial={formValuesOf(editing)}
-          servers={servers.data ?? []}
-          canAssignServer={isSuperadmin}
-          knownDomains={isSuperadmin ? knownAddressesOf(domains.data ?? []) : undefined}
-          isSubmitting={create.isPending || update.isPending}
-          error={describeApiError(create.error ?? update.error)}
-          onSubmit={submit}
-        />
-      )}
+      <EnvironmentPanel
+        projectId={projectId}
+        environment={editing ?? null}
+        isOpen={isCreating || editing !== undefined}
+        onClose={() => {
+          setIsCreating(false);
+          setEditingId(null);
+        }}
+        {...shared}
+      />
 
       <EnvironmentList
         environments={environments.data}
@@ -107,36 +94,4 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
       />
     </div>
   );
-}
-
-/** Собирает значения формы из окружения либо даёт пустые для создания. */
-function formValuesOf(
-  editing: EnvironmentMetadata | EnvironmentDetail | undefined,
-): EnvironmentFormValues {
-  const detail = editing && 'server' in editing ? editing : null;
-
-  return {
-    name: editing?.name ?? '',
-    kind: editing?.kind ?? EnvironmentKind.Production,
-    serverId: detail?.server?.id ?? null,
-    serverName: detail?.server?.name ?? null,
-    healthCheckPath: detail?.healthCheckPath ?? null,
-    notes: detail?.notes ?? null,
-    domains: editing?.domains ?? [],
-  };
-}
-
-/**
- * Известные адреса для подсказки: корни реестра и растущие из них имена.
- *
- * Корни тоже годятся в адрес окружения — прод часто отвечает по самому
- * `example.com`. Повторы отсекаются: тогда корень попал бы в список дважды.
- */
-function knownAddressesOf(domains: DomainRow[]): string[] {
-  const names = domains.flatMap((domain) => [
-    domain.name,
-    ...domain.subdomains.map((subdomain) => subdomain.name),
-  ]);
-
-  return [...new Set(names)].sort();
 }

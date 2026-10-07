@@ -17,5 +17,6 @@ export const FIELD_LABELS = {
   provider: 'Провайдер',
   specs: 'Характеристики',
   healthCheckPath: 'Путь проверки',
+  platforms: 'Развёрнуто',
   notes: 'Заметки',
 } as const;

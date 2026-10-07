@@ -1,4 +1,4 @@
-import { EnvironmentKind } from '@cairn/shared';
+import { EnvironmentKind, PlatformKind } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -27,6 +27,7 @@ const detail = {
   healthCheckPath: '/api/health',
   notes: 'Заметка',
   server,
+  platforms: [],
   createdAt: '2026-08-27T10:00:00.000Z',
   updatedAt: '2026-08-27T10:00:00.000Z',
 };
@@ -115,5 +116,20 @@ describe('EnvironmentCard', () => {
 
     expect(onDelete).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Удалить' })).toBeInTheDocument();
+  });
+
+  it('показывает развёрнутые платформы', () => {
+    // Строится на проекции чтения: поля детали карточка показывает
+    // только под ней, и на метаданных чипы не отрисовались бы.
+    render(
+      <EnvironmentCard
+        environment={{
+          ...detail,
+          platforms: [{ id: 'p1', kind: PlatformKind.Server, name: 'API' }],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('API')).toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@
 import type { EnvironmentDetail, EnvironmentMetadata } from '@cairn/shared';
 
 import { CardActions } from './CardActions';
+import { PlatformChips } from '../PlatformChips';
 import { FIELD_LABELS, KIND_LABELS } from './constants';
 import type { IProps } from './types';
 
@@ -40,6 +41,13 @@ export function EnvironmentCard({ environment, canWrite = false, onEdit, onDelet
           <Field label={FIELD_LABELS.healthCheckPath} value={detail.healthCheckPath} />
           <Field label={FIELD_LABELS.notes} value={detail.notes} />
         </dl>
+      )}
+
+      {detail && detail.platforms.length > 0 && (
+        <div className="space-y-1">
+          <span className="text-sm text-muted-foreground">{FIELD_LABELS.platforms}</span>
+          <PlatformChips platforms={detail.platforms} />
+        </div>
       )}
 
       {canWrite && <CardActions onEdit={onEdit} onDelete={onDelete} />}

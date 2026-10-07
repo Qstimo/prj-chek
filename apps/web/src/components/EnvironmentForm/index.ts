@@ -1,2 +1,2 @@
 export { EnvironmentForm } from './EnvironmentForm';
-export type { EnvironmentFormValues, IProps } from './types';
+export type { EnvironmentFormValues, IProps, ServerOption } from './types';
