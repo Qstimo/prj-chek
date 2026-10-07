@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { RoadmapVersionState } from '../enums';
 import {
+  publicCheckpointSchema,
   publicRoadmapSchema,
   roadmapCheckpointCreateSchema,
   roadmapCheckpointSchema,
+  roadmapCheckpointUpdateSchema,
+  roadmapResponseSchema,
   roadmapVersionCreateSchema,
   roadmapVersionMetadataSchema,
   roadmapVersionUpdateSchema,
@@ -90,6 +93,7 @@ describe('ссылка на задачу у чекпоинта', () => {
     title: 'Перевести биллинг',
     isDone: false,
     position: 1,
+    platformIds: [],
   };
 
   it('принимает ссылку на задачу', () => {
@@ -118,6 +122,7 @@ describe('ссылка на задачу у чекпоинта', () => {
       releasedDate: null,
       position: 1,
       progress: { done: 0, total: 1 },
+      releases: [],
       checkpoints: [{ ...checkpoint, url: 'https://tracker.example.com/TASK-17' }],
     };
 
@@ -126,6 +131,7 @@ describe('ссылка на задачу у чекпоинта', () => {
         projectName: 'Лавка',
         stage: { current: 1, total: 1 },
         versions: [version],
+        summary: [],
       }),
     ).toThrow();
   });
@@ -139,6 +145,7 @@ describe('ссылка на задачу у чекпоинта', () => {
       releasedDate: null,
       position: 1,
       progress: { done: 0, total: 1 },
+      releases: [],
       checkpoints: [checkpoint],
     };
 
@@ -147,7 +154,48 @@ describe('ссылка на задачу у чекпоинта', () => {
         projectName: 'Лавка',
         stage: { current: 1, total: 1 },
         versions: [version],
+        summary: [],
       }),
     ).not.toThrow();
+  });
+});
+
+describe('платформы в роадмапе', () => {
+  it('чекпоинт несёт теги платформ, а публичный — без ссылки', () => {
+    // Тег платформы говорит, куда поедет результат, и не делает чекпоинт
+    // задачей трекера: ни исполнителя, ни оценки, ни даты у него нет (ТЗ 1.4).
+    const fields = {
+      id: '33333333-3333-4333-8333-333333333333',
+      title: 'Вход по телефону',
+      isDone: false,
+      position: 1,
+      platformIds: ['44444444-4444-4444-8444-444444444444'],
+    };
+
+    expect(publicCheckpointSchema.parse(fields).platformIds).toHaveLength(1);
+    expect(() => publicCheckpointSchema.parse({ ...fields, url: 'https://tracker/1' })).toThrow();
+  });
+
+  it('правка чекпоинта принимает набор тегов и отвергает повторы', () => {
+    const platformId = '44444444-4444-4444-8444-444444444444';
+
+    // Положительный случай обязателен: схема и так строгая, и без него
+    // тест прошёл бы на неизвестном ключе, а не на проверке повторов.
+    expect(roadmapCheckpointUpdateSchema.parse({ platformIds: [platformId] }).platformIds).toEqual(
+      [platformId],
+    );
+    expect(() =>
+      roadmapCheckpointUpdateSchema.parse({ platformIds: [platformId, platformId] }),
+    ).toThrow();
+  });
+
+  it('ответ роадмапа несёт сводку релизов', () => {
+    const parsed = roadmapResponseSchema.parse({
+      stage: { current: null, total: 0 },
+      versions: [],
+      summary: [],
+    });
+
+    expect(parsed.summary).toEqual([]);
   });
 });

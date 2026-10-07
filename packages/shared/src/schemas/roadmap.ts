@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { RoadmapVersionState } from '../enums';
 import { dayDateSchema } from './day-date';
+import { platformIdsSchema, platformReleaseSchema, releaseSummaryRowSchema } from './platform';
 
 /** Адрес задачи во внешнем трекере. */
 const checkpointUrlSchema = z.string().trim().url().max(2000).nullable();
@@ -25,6 +26,13 @@ export const roadmapCheckpointSchema = z.object({
    * у чекпоинта по-прежнему нет, и трекером продукт не становится (ТЗ 1.4).
    */
   url: checkpointUrlSchema,
+  /**
+   * Платформы, на которые едет результат. Необязательно и больше одной.
+   *
+   * Намеренно без `platformIdsSchema`: это выдача, а не приём, и
+   * проверять в ней повторы и лимит незачем.
+   */
+  platformIds: z.array(z.string().uuid()),
 });
 
 /** Прогресс версии: вычисляется, не хранится (ТЗ 3.5). */
@@ -44,9 +52,10 @@ export const roadmapVersionMetadataSchema = z.object({
   progress: roadmapProgressSchema,
 });
 
-/** Версия на уровне чтения: плюс формулировки чекпоинтов. */
+/** Версия на уровне чтения: плюс формулировки чекпоинтов и выпуски. */
 export const roadmapVersionDetailSchema = roadmapVersionMetadataSchema.extend({
   checkpoints: z.array(roadmapCheckpointSchema),
+  releases: z.array(platformReleaseSchema),
 });
 
 /** Стадия проекта: позиция текущей версии в последовательности. */
@@ -55,10 +64,11 @@ export const roadmapStageSchema = z.object({
   total: z.number().int().nonnegative(),
 });
 
-/** Роадмап проекта в проекции по уровню. */
+/** Роадмап проекта в проекции по уровню, со сводкой релизов. */
 export const roadmapResponseSchema = z.object({
   stage: roadmapStageSchema,
   versions: z.array(z.union([roadmapVersionDetailSchema, roadmapVersionMetadataSchema])),
+  summary: z.array(releaseSummaryRowSchema),
 });
 
 /** Создание версии. */
@@ -87,6 +97,12 @@ export const roadmapCheckpointCreateSchema = z
   .object({
     title: z.string().trim().min(1).max(300),
     url: checkpointUrlSchema.optional(),
+    /**
+     * Набор целиком: он правится целиком в одной форме чекпоинта.
+     * Отсутствие поля в правке означает «не трогать», пустой массив —
+     * «снять все»; иначе переключение галочки «закрыт» снесло бы теги.
+     */
+    platformIds: platformIdsSchema.optional(),
   })
   .strict();
 
@@ -97,6 +113,8 @@ export const roadmapCheckpointUpdateSchema = z
     url: checkpointUrlSchema.optional(),
     isDone: z.boolean().optional(),
     position: z.number().int().positive().optional(),
+    /** Набор целиком; отсутствие поля не трогает теги. */
+    platformIds: platformIdsSchema.optional(),
   })
   .strict();
 
@@ -130,6 +148,7 @@ export const publicCheckpointSchema = roadmapCheckpointSchema.omit({ url: true }
 /** Версия в публичной выдаче. */
 export const publicVersionSchema = roadmapVersionMetadataSchema.extend({
   checkpoints: z.array(publicCheckpointSchema),
+  releases: z.array(platformReleaseSchema),
 });
 
 /** Публичный роадмап: то же, что видит уровень чтения внутри, без ссылок. */
@@ -137,6 +156,7 @@ export const publicRoadmapSchema = z.object({
   projectName: z.string(),
   stage: roadmapStageSchema,
   versions: z.array(publicVersionSchema),
+  summary: z.array(releaseSummaryRowSchema),
 });
 
 /** Чекпоинт. */
