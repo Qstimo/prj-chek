@@ -72,4 +72,20 @@ describe('Drawer', () => {
 
     expect(screen.getByRole('dialog')).toHaveClass('max-w-[480px]');
   });
+
+  it('половинная ширина не сжимает панель ни на телефоне, ни на планшете', () => {
+    // На телефоне ограничения быть не должно вовсе, а 50vw на планшете —
+    // это 384px, уже нынешних 480px: «половина экрана» обернулась бы
+    // сужением.
+    render(
+      <Drawer isOpen onClose={vi.fn()} title="Панель" width={DrawerWidth.Half}>
+        содержимое
+      </Drawer>,
+    );
+
+    const dialog = screen.getByRole('dialog');
+
+    expect(dialog).toHaveClass('md:max-w-[max(480px,50vw)]');
+    expect(dialog.className).not.toMatch(/(^|\s)max-w-/);
+  });
 });
