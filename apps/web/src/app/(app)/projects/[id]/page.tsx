@@ -1,23 +1,38 @@
-import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
+import {
+  AccessLevel,
+  Section,
+  type Platform,
+  type ProjectDetail,
+  type ProjectMetadata,
+  type SectionLevels,
+} from '@cairn/shared';
 import { notFound, redirect } from 'next/navigation';
 
 import { ApiError } from '@/api';
 import { apiServer } from '@/api/server';
 import { ProjectSections } from '@/components/ProjectSections';
 
+import { EditProjectPanel } from './EditProjectPanel';
+
 /**
- * Карточка проекта: паспорт.
+ * Карточка проекта: паспорт, платформы и правка в выезжающей панели.
  *
- * Уровни доступа по секциям здесь не запрашиваются — их берёт каркас
- * (`layout.tsx`), который и решает состав разделов.
+ * Уровни доступа запрашиваются и здесь: панели нужно право записи
+ * в «Инфо», а клиентский запрос прав заставлял бы кнопку «Править»
+ * мигать на время загрузки. Такой же запрос делает каркас, и мемоизация
+ * `fetch` внутри одного рендера их склеивает.
  */
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   let project: ProjectMetadata | ProjectDetail;
+  let sections: SectionLevels;
 
   try {
-    project = await apiServer<ProjectMetadata | ProjectDetail>(`/projects/${id}`);
+    [project, sections] = await Promise.all([
+      apiServer<ProjectMetadata | ProjectDetail>(`/projects/${id}`),
+      apiServer<SectionLevels>(`/projects/${id}/sections`),
+    ]);
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 401) {
       redirect('/login');
@@ -31,9 +46,46 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     throw cause;
   }
 
+  // Отказ по уровню — не повод валить страницу: паспорт показывается
+  // и без платформ. А вот 401 пробрасывается, иначе редирект на вход
+  // потеряется и страница отрисуется пустой.
+  const platforms = await apiServer<Platform[]>(`/projects/${id}/platforms`).catch(
+    (cause: unknown): Platform[] | undefined => {
+      if (cause instanceof ApiError && cause.status === 401) {
+        redirect('/login');
+      }
+
+      return undefined;
+    },
+  );
+
   return (
     <main className="space-y-6 pb-6">
-      <ProjectSections project={project} />
+      <ProjectSections project={project} platforms={platforms ?? []} />
+
+      {/* Панель требует полный паспорт: у проекции метаданных нет полей
+          формы, и сузить тип нужно здесь. `notFound()` недопустим —
+          паспорт уровня метаданных показывается. */}
+      {isDetailed(project) && (
+        <EditProjectPanel
+          projectId={id}
+          canWrite={sections[Section.Info] === AccessLevel.Write}
+          initialPlatforms={platforms}
+          initial={{
+            name: project.name,
+            purpose: project.purpose,
+            stack: project.stack,
+            repoUrl: project.repoUrl,
+            notes: project.notes,
+            lifecycle: project.lifecycle,
+          }}
+        />
+      )}
     </main>
   );
+}
+
+/** Отличает полную проекцию от проекции метаданных. */
+function isDetailed(project: ProjectMetadata | ProjectDetail): project is ProjectDetail {
+  return 'purpose' in project;
 }

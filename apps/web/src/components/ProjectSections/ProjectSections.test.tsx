@@ -1,4 +1,4 @@
-import { AccessLevel, ProjectLifecycle, Section } from '@cairn/shared';
+import { AccessLevel, PlatformKind, ProjectLifecycle, Section } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
@@ -71,5 +71,22 @@ describe('ProjectSections', () => {
 
     expect(screen.queryByRole('link', { name: 'Инфраструктура' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Переменные' })).not.toBeInTheDocument();
+  });
+
+  it('показывает платформы проекта', () => {
+    render(
+      <ProjectSections
+        project={detailed}
+        platforms={[{ id: 'p1', kind: PlatformKind.Store, name: 'RuStore', position: 1 }]}
+      />,
+    );
+
+    expect(screen.getByText('RuStore')).toBeInTheDocument();
+  });
+
+  it('без платформ ничего лишнего не рисует', () => {
+    render(<ProjectSections project={detailed} platforms={[]} />);
+
+    expect(screen.queryByText('RuStore')).not.toBeInTheDocument();
   });
 });

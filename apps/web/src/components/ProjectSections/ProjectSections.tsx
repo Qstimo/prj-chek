@@ -1,5 +1,6 @@
 import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
 
+import { PlatformChips } from '../PlatformChips';
 import { FIELD_LABELS } from './constants';
 import type { IProps } from './types';
 
@@ -11,7 +12,7 @@ import type { IProps } from './types';
  * Переходы по разделам сюда не входят: крошки и полоса разделов живут
  * в каркасе экранов проекта, иначе на карточке было бы две одинаковых полосы.
  */
-export function ProjectSections({ project }: IProps) {
+export function ProjectSections({ project, platforms = [] }: IProps) {
   const detail = isDetailed(project) ? project : null;
 
   return (
@@ -33,6 +34,14 @@ export function ProjectSections({ project }: IProps) {
             </div>
           )}
           {detail.notes && <Field label={FIELD_LABELS.notes} value={detail.notes} />}
+          {platforms.length > 0 && (
+            <div>
+              <dt className="text-sm text-muted-foreground">{FIELD_LABELS.platforms}</dt>
+              <dd className="pt-1">
+                <PlatformChips platforms={platforms} />
+              </dd>
+            </div>
+          )}
         </dl>
       ) : (
         <p className="text-muted-foreground">
