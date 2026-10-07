@@ -11,6 +11,7 @@ import {
 import { today } from '@/utils';
 
 import { RELEASE_STATE_LABELS } from '../ReleaseSummary';
+import { NO_RELEASE_LABEL } from './constants';
 
 /** Пропсы строки выпуска. */
 interface IProps {
@@ -57,7 +58,7 @@ export function ReleaseRow({ platform, release, onSet, onClear }: IProps) {
           onChange={(event) => change(event.target.value)}
           className="rounded-md border border-border px-2 py-1 text-sm"
         >
-          <option value="">как у версии</option>
+          <option value="">{NO_RELEASE_LABEL}</option>
           {releaseStatesFor(platform.kind).map((state) => (
             <option key={state} value={state}>
               {RELEASE_STATE_LABELS[state]}
@@ -66,7 +67,7 @@ export function ReleaseRow({ platform, release, onSet, onClear }: IProps) {
         </select>
       ) : (
         <span className="text-sm text-muted-foreground">
-          {release ? RELEASE_STATE_LABELS[release.state] : 'как у версии'}
+          {release ? RELEASE_STATE_LABELS[release.state] : NO_RELEASE_LABEL}
         </span>
       )}
 

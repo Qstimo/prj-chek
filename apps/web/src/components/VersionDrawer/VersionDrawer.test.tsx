@@ -190,8 +190,10 @@ describe('VersionDrawer', () => {
       />,
     );
 
+    // Прочерк — это отсутствие собственного состояния: платформа идёт
+    // вместе с версией, и своей строки выпуска у неё нет.
     expect(optionsOf(screen.getByLabelText('Состояние API'))).toEqual([
-      'как у версии',
+      '—',
       'на тесте',
       'в релизе',
     ]);
@@ -254,7 +256,7 @@ describe('VersionDrawer', () => {
     });
   });
 
-  it('«как у версии» снимает выпуск', async () => {
+  it('прочерк снимает выпуск', async () => {
     const actions = makeActions();
 
     render(
