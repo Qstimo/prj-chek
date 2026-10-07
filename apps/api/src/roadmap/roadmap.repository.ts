@@ -2,6 +2,7 @@ import {
   AccessLevel,
   RoadmapVersionState,
   Section,
+  type PlatformRelease,
   type PublicRoadmap,
   type PublicVersion,
   type RoadmapCheckpointCreate,
@@ -22,13 +23,17 @@ import { generateToken } from '../auth/token';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
 import {
+  checkpointPlatforms,
+  projectPlatforms,
   projects,
   roadmapCheckpoints,
   roadmapPublicLinks,
   roadmapVersions,
+  versionPlatformReleases,
   type RoadmapCheckpointRow,
   type RoadmapVersionRow,
 } from '../db/schema';
+import { releaseSummaryOf } from './release.summary';
 import { versionProjection } from './roadmap.projection';
 
 /**
@@ -54,13 +59,19 @@ export class RoadmapRepository {
       AccessLevel.Metadata,
     );
 
-    const { versions, byVersion } = await this.loadRoadmap(this.db, projectId);
+    const { versions, byVersion, platforms, releases, byRelease, tags } = await this.loadRoadmap(
+      this.db,
+      projectId,
+    );
 
     return {
       stage: stageOf(versions),
       versions: versions.map((version) =>
-        versionProjection(version, byVersion.get(version.id) ?? [], [], level),
+        versionProjection(version, byVersion.get(version.id) ?? [], byRelease.get(version.id) ?? [], level, {
+          platformsByCheckpoint: tags,
+        }),
       ),
+      summary: releaseSummaryOf(platforms, versions, releases),
     };
   }
 
@@ -282,7 +293,10 @@ export class RoadmapRepository {
       return null;
     }
 
-    const { versions, byVersion } = await this.loadRoadmap(this.db, link.projectId);
+    const { versions, byVersion, platforms, releases, byRelease, tags } = await this.loadRoadmap(
+      this.db,
+      link.projectId,
+    );
 
     return {
       projectName: link.projectName,
@@ -291,10 +305,15 @@ export class RoadmapRepository {
         (version) =>
           // Без ссылок на задачи: страница открыта без авторизации, и адрес
           // внутреннего трекера с номером задачи наружу уходить не должен.
-          versionProjection(version, byVersion.get(version.id) ?? [], [], AccessLevel.Read, {
-            withLinks: false,
-          }) as PublicVersion,
+          versionProjection(
+            version,
+            byVersion.get(version.id) ?? [],
+            byRelease.get(version.id) ?? [],
+            AccessLevel.Read,
+            { withLinks: false, platformsByCheckpoint: tags },
+          ) as PublicVersion,
       ),
+      summary: releaseSummaryOf(platforms, versions, releases),
     };
   }
 
@@ -328,7 +347,76 @@ export class RoadmapRepository {
       ]);
     }
 
-    return { versions, byVersion };
+    // Платформы читаются таблицей, а не репозиторием платформ: тот
+    // проверяет доступ к «Инфо», которого у подрядчика с одним роадмапом
+    // нет. Право на эти данные даёт сама секция «Роадмап» (дизайн 9).
+    const platformRows = await executor
+      .select()
+      .from(projectPlatforms)
+      .where(eq(projectPlatforms.projectId, projectId))
+      .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt));
+
+    const platforms = platformRows.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      name: row.name,
+      position: row.position,
+    }));
+
+    const versionIds = versions.map((version) => version.id);
+
+    const releaseRows = versionIds.length
+      ? await executor
+          .select()
+          .from(versionPlatformReleases)
+          .where(inArray(versionPlatformReleases.versionId, versionIds))
+      : [];
+
+    const releases = releaseRows.map((row) => ({
+      versionId: row.versionId,
+      platformId: row.platformId,
+      state: row.state,
+      releasedDate: row.releasedDate,
+      buildLabel: row.buildLabel,
+    }));
+
+    const byRelease = new Map<string, PlatformRelease[]>();
+
+    for (const release of releases) {
+      byRelease.set(release.versionId, [
+        ...(byRelease.get(release.versionId) ?? []),
+        {
+          platformId: release.platformId,
+          state: release.state,
+          releasedDate: release.releasedDate,
+          buildLabel: release.buildLabel,
+        },
+      ]);
+    }
+
+    // Теги сортируются по позиции платформы — тем же порядком, что
+    // сводка: иначе чипы у чекпоинта тасовались бы между запросами.
+    const checkpointIds = checkpoints.map((checkpoint) => checkpoint.id);
+
+    const tagRows = checkpointIds.length
+      ? await executor
+          .select({
+            checkpointId: checkpointPlatforms.checkpointId,
+            platformId: checkpointPlatforms.platformId,
+          })
+          .from(checkpointPlatforms)
+          .innerJoin(projectPlatforms, eq(projectPlatforms.id, checkpointPlatforms.platformId))
+          .where(inArray(checkpointPlatforms.checkpointId, checkpointIds))
+          .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt))
+      : [];
+
+    const tags = new Map<string, string[]>();
+
+    for (const row of tagRows) {
+      tags.set(row.checkpointId, [...(tags.get(row.checkpointId) ?? []), row.platformId]);
+    }
+
+    return { versions, byVersion, platforms, releases, byRelease, tags };
   }
 
   /** Версия обязана принадлежать проекту из адреса. */

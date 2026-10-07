@@ -1,5 +1,7 @@
 import {
   AccessLevel,
+  PlatformKind,
+  PlatformReleaseState,
   RoadmapVersionState,
   Section,
   SubjectKind,
@@ -12,7 +14,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AccessService } from '../access/access.service';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
-import { grants, projects, roadmapCheckpoints, subjects, users } from '../db/schema';
+import {
+  checkpointPlatforms,
+  grants,
+  projectPlatforms,
+  projects,
+  roadmapCheckpoints,
+  subjects,
+  users,
+  versionPlatformReleases,
+} from '../db/schema';
 import { RoadmapRepository } from './roadmap.repository';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
@@ -106,6 +117,27 @@ describe('репозиторий роадмапа', () => {
     );
 
     return created.id;
+  }
+
+  /**
+   * Платформа вставкой: репозиторий платформ потребовал бы «Инфо»,
+   * которого у субъекта этих тестов нет.
+   *
+   * Позиция параметром: выборка сортирует по ней, и одинаковая позиция
+   * превратила бы проверку порядка в проверку времени создания.
+   */
+  async function createPlatform(
+    name: string,
+    kind = PlatformKind.Server,
+    position = 1,
+    target = projectId,
+  ): Promise<string> {
+    const [created] = await testDb.db
+      .insert(projectPlatforms)
+      .values({ projectId: target, name, kind, position })
+      .returning();
+
+    return created!.id;
   }
 
   describe('версии', () => {
@@ -425,6 +457,106 @@ describe('репозиторий роадмапа', () => {
           }),
         ),
       ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    });
+  });
+
+  describe('сводка релизов', () => {
+    it('отдаёт сводку рядом с версиями', async () => {
+      await grant(AccessLevel.Read);
+      await createPlatform('API', PlatformKind.Server, 1);
+      await createPlatform('App Store', PlatformKind.Store, 2);
+
+      const roadmap = await repository.findForProject(member(), projectId);
+
+      expect(roadmap.summary.map((row) => row.platform.name)).toEqual(['API', 'App Store']);
+    });
+
+    it('отдаёт сводку и на уровне метаданных', async () => {
+      // Обозначения версий и даты метаданными и являются; формулировок
+      // чекпоинтов в сводке нет.
+      await grant(AccessLevel.Metadata);
+      await createPlatform('API');
+
+      const roadmap = await repository.findForProject(member(), projectId);
+
+      expect(roadmap.summary).toHaveLength(1);
+    });
+
+    it('показывает выпуск в сводке', async () => {
+      await grant(AccessLevel.Read);
+      const platformId = await createPlatform('API');
+      const versionId = await createVersion('v1.2');
+      await testDb.db.insert(versionPlatformReleases).values({
+        versionId,
+        platformId,
+        state: PlatformReleaseState.Released,
+        releasedDate: '2026-03-12',
+      });
+
+      const roadmap = await repository.findForProject(member(), projectId);
+
+      expect(roadmap.summary[0]?.released).toMatchObject({
+        versionLabel: 'v1.2',
+        date: '2026-03-12',
+      });
+    });
+
+    it('отдаёт сводку в публичной выдаче, без ссылок на задачи', async () => {
+      // Чекпоинт со ссылкой обязателен: без него `checkpoints[0]` —
+      // `undefined`, и проверка прошла бы при любой реализации.
+      await createPlatform('API');
+      const versionId = await createVersion('v1.0');
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Оплата',
+          url: 'https://tracker.example.com/TASK-1',
+        }),
+      );
+      const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
+
+      const roadmap = await repository.publicRoadmap(token);
+      const checkpoint = roadmap?.versions[0]?.checkpoints[0];
+
+      expect(roadmap?.summary).toHaveLength(1);
+      expect(checkpoint?.title).toBe('Оплата');
+      expect(checkpoint).not.toHaveProperty('url');
+    });
+
+    it('версия уровня чтения сохраняет чекпоинты и выпуски', async () => {
+      // Страховка от тихой деградации union: проекция, забывшая
+      // `releases`, провалилась бы в ветку метаданных и потеряла
+      // чекпоинты вместо ошибки.
+      await grant(AccessLevel.Read);
+      const versionId = await createVersion('v1.0');
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Оплата' }),
+      );
+
+      const roadmap = await repository.findForProject(member(), projectId);
+
+      expect(roadmap.versions[0]).toHaveProperty('checkpoints');
+      expect(roadmap.versions[0]).toHaveProperty('releases');
+    });
+
+    it('отдаёт теги чекпоинта по порядку платформ', async () => {
+      await grant(AccessLevel.Read);
+      const webId = await createPlatform('Веб', PlatformKind.Server, 2);
+      const apiId = await createPlatform('API', PlatformKind.Server, 1);
+      const versionId = await createVersion('v1.0');
+      const checkpoint = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Оплата' }),
+      );
+      await testDb.db
+        .insert(checkpointPlatforms)
+        .values([
+          { checkpointId: checkpoint.id, platformId: webId },
+          { checkpointId: checkpoint.id, platformId: apiId },
+        ]);
+
+      const roadmap = await repository.findForProject(member(), projectId);
+      const detail = roadmap.versions[0] as RoadmapVersionDetail;
+
+      expect(detail.checkpoints[0]?.platformIds).toEqual([apiId, webId]);
     });
   });
 });
