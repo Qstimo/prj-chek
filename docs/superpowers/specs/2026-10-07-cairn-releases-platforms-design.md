@@ -257,7 +257,13 @@ platformReleaseSetSchema  = { state, releasedDate?, buildLabel? } // strict
 releaseRefSchema          = { versionId, versionLabel, buildLabel, date }
 releaseSummaryRowSchema   = { platform, released: releaseRef|null,
                               pending: (releaseRef & { state })[] }
+platformIdsSchema         = uuid[] до 20, без повторов
 ```
+
+Рядом со схемами — чистая функция `releaseStatesFor(kind)`: состояния,
+допустимые у платформы этого вида. Один источник и для выбора в интерфейсе,
+и для проверки на сервере; два списка разошлись бы, и в базе завелась бы
+запись о модерации нашего собственного API.
 
 Правки существующих схем:
 
@@ -381,8 +387,8 @@ MCP отдельных инструментов не получает: `get_road
   пропадают;
 - «своя платформа» — поле имени и выбор вида.
 
-Компонент принимает `platforms` и колбэки `onAdd` / `onRemove` /
-`onRename`; что они делают, решает родитель: при создании — меняют
+Компонент принимает `platforms` и колбэки `onAdd` / `onRemove`;
+что они делают, решает родитель: при создании — меняют
 состояние формы, при правке — вызывают мутации платформ сразу, по образцу
 галочек чекпоинтов.
 
