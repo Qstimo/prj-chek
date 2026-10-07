@@ -3,6 +3,7 @@
 import type { PublicRoadmap } from '@cairn/shared';
 import { useState } from 'react';
 
+import { ReleaseSummary } from '@/components/ReleaseSummary';
 import { RoadmapTimeline } from '@/components/RoadmapTimeline';
 import { VersionDrawer } from '@/components/VersionDrawer';
 
@@ -21,6 +22,8 @@ export function PublicRoadmapView({ roadmap }: IProps) {
 
   return (
     <>
+      <ReleaseSummary summary={roadmap.summary} />
+
       <RoadmapTimeline
         versions={roadmap.versions}
         currentIndex={currentIndex}

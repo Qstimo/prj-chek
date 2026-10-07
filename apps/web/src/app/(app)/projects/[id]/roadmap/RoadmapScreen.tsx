@@ -1,9 +1,11 @@
 'use client';
 
 import { AccessLevel, Section } from '@cairn/shared';
+import Link from 'next/link';
 import { useState } from 'react';
 
 import { useQueryRoadmap, useQuerySections } from '@/api/hooks';
+import { ReleaseSummary } from '@/components/ReleaseSummary';
 import { RoadmapTimeline } from '@/components/RoadmapTimeline';
 
 import { CreateVersionPanel } from './CreateVersionPanel';
@@ -48,6 +50,16 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
 
   return (
     <div className="space-y-6">
+      <ReleaseSummary summary={roadmap.data.summary} />
+
+      {roadmap.data.summary.length === 0 && canWrite && (
+        <p className="text-sm text-muted-foreground">
+          <Link href={`/projects/${projectId}`} className="underline">
+            Платформы задаются в паспорте проекта
+          </Link>
+        </p>
+      )}
+
       <RoadmapTimeline
         versions={roadmap.data.versions}
         currentIndex={currentIndex}

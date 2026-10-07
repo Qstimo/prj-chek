@@ -1,4 +1,4 @@
-import { RoadmapVersionState } from '@cairn/shared';
+import { PlatformKind, RoadmapVersionState } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -17,7 +17,15 @@ const roadmap = {
       releasedDate: null,
       position: 1,
       progress: { done: 0, total: 1 },
-      checkpoints: [{ id: 'c1', title: 'Оплата', isDone: false, position: 1 }],
+      releases: [],
+      checkpoints: [{ id: 'c1', title: 'Оплата', isDone: false, position: 1, platformIds: [] }],
+    },
+  ],
+  summary: [
+    {
+      platform: { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 },
+      released: { versionId: '1', versionLabel: 'v1.2', buildLabel: null, date: '2026-03-14' },
+      pending: [],
     },
   ],
 };
@@ -39,5 +47,13 @@ describe('PublicRoadmapView', () => {
 
     expect(screen.queryByRole('button', { name: 'Редактировать' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Оплата')).toBeDisabled();
+  });
+
+  it('показывает сводку без адресов', () => {
+    render(<PublicRoadmapView roadmap={roadmap} />);
+
+    expect(screen.getByText('API')).toBeInTheDocument();
+    expect(screen.getByText('в релизе v1.2')).toBeInTheDocument();
+    expect(screen.queryByText(/example\.com/)).not.toBeInTheDocument();
   });
 });

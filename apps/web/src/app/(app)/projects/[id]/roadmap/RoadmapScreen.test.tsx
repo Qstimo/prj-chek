@@ -1,4 +1,10 @@
-import { AccessLevel, RoadmapVersionState, Section } from '@cairn/shared';
+import {
+  AccessLevel,
+  PlatformKind,
+  PlatformReleaseState,
+  RoadmapVersionState,
+  Section,
+} from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,7 +26,8 @@ const roadmap = {
       releasedDate: null,
       position: 1,
       progress: { done: 0, total: 1 },
-      checkpoints: [{ id: 'c1', title: 'Оплата', isDone: false, position: 1 }],
+      releases: [],
+      checkpoints: [{ id: 'c1', title: 'Оплата', isDone: false, position: 1, platformIds: [] }],
     },
     {
       id: '2',
@@ -30,7 +37,23 @@ const roadmap = {
       releasedDate: null,
       position: 2,
       progress: { done: 0, total: 0 },
+      releases: [],
       checkpoints: [],
+    },
+  ],
+  summary: [
+    {
+      platform: { id: 'p2', kind: PlatformKind.Store, name: 'App Store', position: 1 },
+      released: { versionId: '1', versionLabel: 'v1.0', buildLabel: null, date: '2026-03-14' },
+      pending: [
+        {
+          versionId: '2',
+          versionLabel: 'v2.0',
+          buildLabel: null,
+          date: null,
+          state: PlatformReleaseState.InReview,
+        },
+      ],
     },
   ],
 };
@@ -124,5 +147,38 @@ describe('RoadmapScreen', () => {
     render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
 
     expect(screen.queryByRole('button', { name: 'Добавить версию' })).not.toBeInTheDocument();
+  });
+
+  it('ставит сводку над диаграммой', () => {
+    render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
+
+    const summary = screen.getByText('App Store');
+    const timeline = screen.getByRole('group', { name: 'Диаграмма роадмапа' });
+
+    // Сводка должна отвечать до того, как читатель дошёл до диаграммы.
+    expect(
+      summary.compareDocumentPosition(timeline) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('подсказывает, где заводятся платформы, когда их нет', async () => {
+    vi.mocked(hooks.useQueryRoadmap).mockReturnValue(query({ ...roadmap, summary: [] }));
+
+    render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
+
+    expect(
+      screen.getByRole('link', { name: /Платформы задаются в паспорте проекта/ }),
+    ).toHaveAttribute('href', '/projects/p1');
+  });
+
+  it('без права записи о паспорте не подсказывает', () => {
+    vi.mocked(hooks.useQueryRoadmap).mockReturnValue(query({ ...roadmap, summary: [] }));
+    vi.mocked(hooks.useQuerySections).mockReturnValue(
+      query({ [Section.Roadmap]: AccessLevel.Read }),
+    );
+
+    render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
+
+    expect(screen.queryByText(/Платформы задаются/)).not.toBeInTheDocument();
   });
 });

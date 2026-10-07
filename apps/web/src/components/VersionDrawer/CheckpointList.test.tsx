@@ -11,6 +11,7 @@ const plain: RoadmapCheckpoint = {
   url: null,
   isDone: false,
   position: 1,
+  platformIds: [],
 };
 
 const withUrl: RoadmapCheckpoint = {
@@ -19,6 +20,7 @@ const withUrl: RoadmapCheckpoint = {
   url: 'https://tracker.example.com/TASK-17',
   isDone: false,
   position: 2,
+  platformIds: [],
 };
 
 describe('CheckpointList', () => {
