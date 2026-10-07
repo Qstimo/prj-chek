@@ -1,4 +1,4 @@
-import type { EnvironmentCreate, EnvironmentKind } from '@cairn/shared';
+import type { EnvironmentCreate, EnvironmentKind, PlatformRef } from '@cairn/shared';
 
 /** Машина в списке выбора: только то, что нужно выпадающему списку. */
 export interface ServerOption {
@@ -23,6 +23,8 @@ export interface EnvironmentFormValues {
   notes: string | null;
   /** Домены окружения. Они же его адрес: отдельного поля адреса нет. */
   domains: string[];
+  /** Платформы, развёрнутые в окружении. */
+  platformIds: string[];
 }
 
 /** Пропсы формы окружения. */
@@ -42,6 +44,14 @@ export interface IProps {
    * раскрыл бы чужие адреса, а через них — существование чужих проектов.
    */
   knownDomains?: string[];
+  /**
+   * Платформы проекта для группы «что здесь развёрнуто».
+   *
+   * Отсутствие пропа означает, что список недоступен: группа не
+   * показывается и набор не отправляется. Пустой массив в этом случае
+   * затёр бы привязки, сделанные тем, у кого доступ к «Инфо» есть.
+   */
+  platforms?: PlatformRef[];
   /** Сообщение об ошибке. */
   error?: string;
   /** Отправка в процессе. */

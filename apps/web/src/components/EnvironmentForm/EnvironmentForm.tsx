@@ -1,15 +1,16 @@
 'use client';
 
-import type { EnvironmentCreate } from '@cairn/shared';
 import { useState, type FormEvent } from 'react';
 
-import { DomainsField } from '../DomainsField';
+import { FormError } from '../FormError';
 import { TextField } from '../TextField';
-import { DOMAINS_HINT, FIELD_LABELS, HEALTH_CHECK_PATH_HINT } from './constants';
+import { FIELD_LABELS } from './constants';
+import { EnvironmentFields } from './EnvironmentFields';
 import { KindField } from './KindField';
+import { PlatformsCheckboxes } from './PlatformsCheckboxes';
 import { ServerField } from './ServerField';
 import type { EnvironmentFormValues, IProps } from './types';
-import { FormError } from '../FormError';
+import { submitValuesOf } from './utils';
 
 /** Форма окружения: создание и правка (ТЗ 3.2). */
 export function EnvironmentForm({
@@ -18,6 +19,7 @@ export function EnvironmentForm({
   servers = [],
   canAssignServer = false,
   knownDomains,
+  platforms,
   error,
   isSubmitting = false,
 }: IProps) {
@@ -39,16 +41,7 @@ export function EnvironmentForm({
       return;
     }
 
-    onSubmit({
-      name: values.name.trim(),
-      kind: values.kind,
-      healthCheckPath: emptyToNull(values.healthCheckPath),
-      notes: emptyToNull(values.notes),
-      domains: values.domains,
-      // Привязку принимает только суперадмин: у остальных API ответит 403,
-      // и отправлять поле без права выбора незачем.
-      ...(canAssignServer ? { serverId: values.serverId } : {}),
-    } satisfies EnvironmentCreate);
+    onSubmit(submitValuesOf(values, { canAssignServer, hasPlatforms: platforms !== undefined }));
   }
 
   return (
@@ -70,31 +63,15 @@ export function EnvironmentForm({
         onChange={(value) => change('serverId', value)}
       />
 
-      <div className="space-y-1">
-        <TextField
-          id="healthCheckPath"
-          label={FIELD_LABELS.healthCheckPath}
-          value={values.healthCheckPath ?? ''}
-          onChange={(value) => change('healthCheckPath', value)}
-        />
-        <p className="text-xs text-muted-foreground">{HEALTH_CHECK_PATH_HINT}</p>
-      </div>
-      <TextField
-        id="notes"
-        label={FIELD_LABELS.notes}
-        value={values.notes ?? ''}
-        onChange={(value) => change('notes', value)}
-        multiline
-      />
+      <EnvironmentFields values={values} onChange={change} knownDomains={knownDomains} />
 
-      <div className="space-y-1">
-        <DomainsField
-          value={values.domains}
-          onChange={(value) => change('domains', value)}
-          knownDomains={knownDomains}
+      {platforms && (
+        <PlatformsCheckboxes
+          platforms={platforms}
+          value={values.platformIds}
+          onChange={(value) => change('platformIds', value)}
         />
-        <p className="text-xs text-muted-foreground">{DOMAINS_HINT}</p>
-      </div>
+      )}
 
       <FormError message={error} />
 
@@ -107,11 +84,4 @@ export function EnvironmentForm({
       </button>
     </form>
   );
-}
-
-/** Превращает пустую строку в отсутствие значения. */
-function emptyToNull(value: string | null): string | null {
-  const trimmed = value?.trim() ?? '';
-
-  return trimmed.length > 0 ? trimmed : null;
 }

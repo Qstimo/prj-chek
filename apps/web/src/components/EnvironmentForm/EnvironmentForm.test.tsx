@@ -1,4 +1,4 @@
-import { EnvironmentKind } from '@cairn/shared';
+import { EnvironmentKind, PlatformKind } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -13,7 +13,11 @@ const initial = {
   healthCheckPath: null,
   notes: null,
   domains: [],
+  platformIds: [],
 };
+
+const API = { id: 'p1', kind: PlatformKind.Server, name: 'API' };
+const STORE = { id: 'p2', kind: PlatformKind.Store, name: 'App Store' };
 
 const SERVERS = [
   { id: '11111111-1111-1111-1111-111111111111', name: 'hetzner-fsn-1' },
@@ -193,5 +197,57 @@ describe('EnvironmentForm', () => {
 
       expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     });
+  });
+
+  it('предлагает галочками только платформы наших машин', () => {
+    render(<EnvironmentForm initial={initial} onSubmit={vi.fn()} platforms={[API, STORE]} />);
+
+    // У магазина нет ни машины, ни адреса: ставить его в окружение нечем.
+    expect(screen.getByLabelText('API')).toBeInTheDocument();
+    expect(screen.queryByLabelText('App Store')).not.toBeInTheDocument();
+  });
+
+  it('без пропа платформ группы не показывает и набор не отправляет', async () => {
+    // «Пропа нет» означает «список недоступен»: пустой набор снял бы
+    // привязки, сделанные тем, у кого доступ к «Инфо» есть.
+    const onSubmit = vi.fn();
+
+    render(<EnvironmentForm initial={{ ...initial, name: 'Прод' }} onSubmit={onSubmit} />);
+
+    expect(screen.queryByText('Что здесь развёрнуто')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty('platformIds');
+  });
+
+  it('отправляет отмеченные платформы', async () => {
+    const onSubmit = vi.fn();
+
+    render(<EnvironmentForm initial={initial} onSubmit={onSubmit} platforms={[API]} />);
+
+    await userEvent.type(screen.getByLabelText('Название'), 'Прод');
+    await userEvent.click(screen.getByLabelText('API'));
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ platformIds: ['p1'] }));
+  });
+
+  it('сохраняет уже стоящие галочки', async () => {
+    // Самое опасное место: правка любого поля окружения не должна
+    // снимать привязки платформ.
+    const onSubmit = vi.fn();
+
+    render(
+      <EnvironmentForm
+        initial={{ ...initial, name: 'Прод', platformIds: ['p1'] }}
+        onSubmit={onSubmit}
+        platforms={[API]}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ platformIds: ['p1'] }));
   });
 });
