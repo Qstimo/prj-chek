@@ -224,6 +224,13 @@ export class UsersService {
     return byUser;
   }
 
+  /** Находит субъект пользователя: выдачи адресуются субъектом, а не учёткой. */
+  async subjectIdOfUser(userId: string): Promise<string> {
+    const user = await this.requireUser(userId);
+
+    return user.subjectId;
+  }
+
   /** Находит запись пользователя по его субъекту. */
   async userIdOfSubject(subjectId: string): Promise<string> {
     const [user] = await this.db

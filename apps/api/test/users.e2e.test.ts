@@ -102,7 +102,7 @@ describe('пользователи по HTTP', () => {
 
     const response = await admin
       .post('/invitations')
-      .send({ email: 'new@cairn.local' })
+      .send({ name: 'Новый', email: 'new@cairn.local' })
       .expect(201);
 
     expect(response.body.url).toContain('/invite/');
@@ -111,7 +111,51 @@ describe('пользователи по HTTP', () => {
   it('отклоняет приглашение действующего пользователя', async () => {
     const admin = await signIn('admin@cairn.local');
 
-    await admin.post('/invitations').send({ email: 'user@cairn.local' }).expect(409);
+    await admin
+      .post('/invitations')
+      .send({ name: 'Пользователь', email: 'user@cairn.local' })
+      .expect(409);
+  });
+
+  it('суперадмин читает паспорт пользователя', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    const response = await admin.get(`/users/${targetUserId}`).expect(200);
+
+    expect(response.body.email).toBe('user@cairn.local');
+    expect(response.body.name).toBe('user@cairn.local');
+  });
+
+  it('неизвестный пользователь — 404', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin.get('/users/11111111-1111-1111-1111-111111111111').expect(404);
+  });
+
+  it('суперадмин правит имя', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    const response = await admin.patch(`/users/${targetUserId}`).send({ name: 'Анна' }).expect(200);
+
+    expect(response.body.name).toBe('Анна');
+  });
+
+  it('занятая почта — 409', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin.patch(`/users/${targetUserId}`).send({ email: 'admin@cairn.local' }).expect(409);
+  });
+
+  it('пустая правка — 400', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin.patch(`/users/${targetUserId}`).send({}).expect(400);
+  });
+
+  it('обычному пользователю правка закрыта', async () => {
+    const user = await signIn('user@cairn.local');
+
+    await user.patch(`/users/${targetUserId}`).send({ name: 'Анна' }).expect(403);
   });
 
   it('сброс пароля закрывает доступ пользователю', async () => {
@@ -136,7 +180,7 @@ describe('пользователи по HTTP', () => {
     const admin = await signIn('admin@cairn.local');
     const invitation = await admin
       .post('/invitations')
-      .send({ email: 'new@cairn.local' })
+      .send({ name: 'Новый', email: 'new@cairn.local' })
       .expect(201);
 
     const token = String(invitation.body.url).split('/invite/')[1];
