@@ -2,15 +2,14 @@
 
 import type { Platform, RoadmapVersionDetail, RoadmapVersionMetadata } from '@cairn/shared';
 
+import { describeApiError } from '@/api/errors';
 import {
-  useMutationClearRelease,
   useMutationCreateCheckpoint,
   useMutationDeleteCheckpoint,
   useMutationDeleteVersion,
   useMutationReadLinkTitle,
-  useMutationSetRelease,
+  useMutationSaveVersion,
   useMutationUpdateCheckpoint,
-  useMutationUpdateVersion,
 } from '@/api/hooks';
 import { VersionDrawer } from '@/components/VersionDrawer';
 
@@ -25,7 +24,13 @@ interface IProps {
   onClose: () => void;
 }
 
-/** Панель версии на внутреннем экране: собирает мутации в `actions`. */
+/**
+ * Панель версии на внутреннем экране: собирает мутации в `actions`.
+ *
+ * Паспорт и выпуски уходят одной мутацией `useMutationSaveVersion`:
+ * черновик панели — одна запись, и порядок запросов знает мутация,
+ * а не компонент. Чекпоинты остаются мгновенными действиями.
+ */
 export function RoadmapVersionPanel({
   projectId,
   version,
@@ -34,14 +39,12 @@ export function RoadmapVersionPanel({
   canWrite,
   onClose,
 }: IProps) {
-  const updateVersion = useMutationUpdateVersion(projectId);
+  const saveVersion = useMutationSaveVersion(projectId);
   const deleteVersion = useMutationDeleteVersion(projectId);
   const createCheckpoint = useMutationCreateCheckpoint(projectId);
   const updateCheckpoint = useMutationUpdateCheckpoint(projectId);
   const deleteCheckpoint = useMutationDeleteCheckpoint(projectId);
   const readLinkTitle = useMutationReadLinkTitle(projectId);
-  const setRelease = useMutationSetRelease(projectId);
-  const clearRelease = useMutationClearRelease(projectId);
 
   return (
     <VersionDrawer
@@ -62,15 +65,11 @@ export function RoadmapVersionPanel({
               onReadCheckpointTitle: (url) => readLinkTitle.mutateAsync(url),
               onDeleteCheckpoint: (checkpointId) =>
                 deleteCheckpoint.mutate({ versionId: version.id, checkpointId }),
-              onSubmitVersion: (input, onSuccess) =>
-                updateVersion.mutate({ versionId: version.id, input }, { onSuccess }),
+              onSaveVersion: (patch, ops) =>
+                saveVersion.mutate({ versionId: version.id, patch, ops }),
               onDeleteVersion: () => deleteVersion.mutate(version.id, { onSuccess: onClose }),
-              onSetRelease: (platformId, input) =>
-                setRelease.mutate({ versionId: version.id, platformId, input }),
-              onClearRelease: (platformId) =>
-                clearRelease.mutate({ versionId: version.id, platformId }),
-              isSubmittingVersion: updateVersion.isPending,
-              versionError: updateVersion.error?.message,
+              isSavingVersion: saveVersion.isPending,
+              saveError: describeApiError(saveVersion.error),
               isSubmittingCheckpoint: createCheckpoint.isPending,
             }
           : undefined

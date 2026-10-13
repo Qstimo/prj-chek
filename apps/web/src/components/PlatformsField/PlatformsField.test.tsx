@@ -51,8 +51,54 @@ describe('PlatformsField', () => {
     render(<PlatformsField platforms={[platform]} onAdd={vi.fn()} onRemove={onRemove} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Убрать RuStore' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Да, убрать' }));
 
     expect(onRemove).toHaveBeenCalledWith(platform);
+  });
+
+  it('заведённая платформа не убирается с первого щелчка', async () => {
+    // Вместе с платформой исчезают её выпуски во всех версиях — а это
+    // единственное место, где живут фактические даты релизов.
+    const onRemove = vi.fn();
+    const platform = { id: 'p2', kind: PlatformKind.Store, name: 'RuStore' };
+
+    render(<PlatformsField platforms={[platform]} onAdd={vi.fn()} onRemove={onRemove} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Убрать RuStore' }));
+
+    expect(onRemove).not.toHaveBeenCalled();
+
+    const confirm = screen.getByRole('dialog', { name: 'Подтверждение удаления платформы' });
+
+    expect(confirm).toHaveTextContent('RuStore');
+    expect(confirm).toHaveTextContent(/выпуски/);
+  });
+
+  it('отмена оставляет платформу на месте', async () => {
+    const onRemove = vi.fn();
+    const platform = { id: 'p2', kind: PlatformKind.Store, name: 'RuStore' };
+
+    render(<PlatformsField platforms={[platform]} onAdd={vi.fn()} onRemove={onRemove} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Убрать RuStore' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+
+    expect(onRemove).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('незаписанный чип убирается сразу', async () => {
+    // В панели создания проекта платформы ещё нет на сервере: терять
+    // нечего, и спрашивать не о чем.
+    const onRemove = vi.fn();
+    const platform = { kind: PlatformKind.Store, name: 'RuStore' };
+
+    render(<PlatformsField platforms={[platform]} onAdd={vi.fn()} onRemove={onRemove} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Убрать RuStore' }));
+
+    expect(onRemove).toHaveBeenCalledWith(platform);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('не отправляет пустое имя своей платформы', async () => {

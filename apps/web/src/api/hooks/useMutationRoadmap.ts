@@ -5,7 +5,6 @@ import type {
   RoadmapCheckpointCreate,
   RoadmapCheckpointUpdate,
   RoadmapVersionCreate,
-  RoadmapVersionUpdate,
 } from '@cairn/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -28,20 +27,6 @@ export function useMutationCreateVersion(projectId: string) {
   return useMutation({
     mutationFn: (input: RoadmapVersionCreate) =>
       apiClient(`/projects/${projectId}/roadmap/versions`, { method: 'POST', body: input }),
-    onSuccess: invalidate,
-  });
-}
-
-/** Правка версии. */
-export function useMutationUpdateVersion(projectId: string) {
-  const invalidate = useRoadmapInvalidation(projectId);
-
-  return useMutation({
-    mutationFn: ({ versionId, input }: { versionId: string; input: RoadmapVersionUpdate }) =>
-      apiClient(`/projects/${projectId}/roadmap/versions/${versionId}`, {
-        method: 'PATCH',
-        body: input,
-      }),
     onSuccess: invalidate,
   });
 }

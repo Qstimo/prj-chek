@@ -10,6 +10,38 @@ import { RoadmapVersionState } from '@cairn/shared';
  */
 export const NO_RELEASE_LABEL = '—';
 
+/**
+ * Вид поля в строке выпуска.
+ *
+ * Своей строкой, а не через `TextField`: тот несёт видимую подпись и
+ * полную ширину, а в строке платформы подпись у поля только для читалок,
+ * и поля стоят в ряд с селектом. Вид повторяет `TextField` и `Select`
+ * намеренно — это тот же контрол в более тесном месте.
+ */
+export const CELL_INPUT_CLASSES =
+  'h-9 rounded-md border border-border bg-surface px-3 text-sm transition focus:border-border-strong';
+
+/** Заголовок блока чекпоинтов и напоминание о том, как он себя ведёт. */
+export const CHECKPOINTS_TITLE = 'Чекпоинты';
+
+/**
+ * Чекпоинты меняются сразу, в отличие от полей версии и выпусков.
+ *
+ * Названная разница вместо одинакового поведения: чекпоинт — отдельная
+ * сущность со своим адресом, и собирать его в черновик значило бы
+ * заводить пачку запросов с частичной ошибкой посередине.
+ */
+export const CHECKPOINTS_HINT = 'меняются сразу';
+
+/** Предупреждение о несохранённом черновике версии. */
+export const UNSAVED_WARNING = 'Есть несохранённые изменения';
+
+/** Подтверждение закрытия панели с несохранённым черновиком. */
+export const CLOSE_CONFIRM_LABEL = 'Подтверждение закрытия';
+
+/** Подпись утверждающей кнопки подтверждения. */
+export const CLOSE_CONFIRM_ACTION = 'Закрыть без сохранения';
+
 /** Подписи состояний версии на языке интерфейса. */
 export const STATE_LABELS: Record<RoadmapVersionState, string> = {
   [RoadmapVersionState.Planned]: 'Запланирована',

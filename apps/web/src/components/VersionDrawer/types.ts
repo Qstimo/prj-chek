@@ -1,11 +1,45 @@
 import type {
   Platform,
   PlatformReleaseSet,
+  PlatformReleaseState,
   RoadmapCheckpointCreate,
-  RoadmapVersionCreate,
   RoadmapVersionDetail,
   RoadmapVersionMetadata,
+  RoadmapVersionState,
+  RoadmapVersionUpdate,
 } from '@cairn/shared';
+
+/**
+ * Клетка выпуска в черновике.
+ *
+ * Пустые строки вместо `null`: это то, что умеют поля ввода, а в контракт
+ * они уходят как `null` при сборке операции.
+ */
+export interface IReleaseCell {
+  state: PlatformReleaseState;
+  releasedDate: string;
+  buildLabel: string;
+}
+
+/**
+ * Черновик версии: поля паспорта и клетки выпусков.
+ *
+ * Чекпоинтов здесь нет намеренно: это отдельные сущности со своим
+ * адресом, и они меняются сразу (дизайн, раздел 2).
+ */
+export interface IVersionDraft {
+  label: string;
+  state: RoadmapVersionState;
+  plannedDate: string;
+  releasedDate: string;
+  /** Клетка на платформу; `null` — «как у версии». */
+  releases: Record<string, IReleaseCell | null>;
+}
+
+/** Операция над клеткой выпуска: поставить целиком либо снять. */
+export type ReleaseOp =
+  | { platformId: string; kind: 'set'; input: PlatformReleaseSet }
+  | { platformId: string; kind: 'clear' };
 
 /** Действия уровня записи. Отсутствие блока — панель только на просмотр. */
 export interface IVersionActions {
@@ -21,18 +55,17 @@ export interface IVersionActions {
   /** Чтение заголовка задачи по ссылке: подставляется в пустую формулировку. */
   onReadCheckpointTitle?: (url: string) => Promise<string | null>;
   onDeleteCheckpoint: (checkpointId: string) => void;
-  /** Сохранение полей версии; `onSuccess` возвращает панель в просмотр. */
-  onSubmitVersion: (input: RoadmapVersionCreate, onSuccess: () => void) => void;
-  onDeleteVersion: () => void;
   /**
-   * Постановка выпуска платформы. Отправляется вся тройка: `PUT`
-   * заменяет клетку целиком.
+   * Сохранение черновика: патч версии и операции над клетками выпусков.
+   *
+   * Одним колбэком, а не тремя: для человека это один щелчок, и порядок
+   * запросов — не дело панели. Колбэка успеха нет намеренно: разницу
+   * обнуляют перечитанные данные, когда доходят до пропа версии.
    */
-  onSetRelease?: (platformId: string, input: PlatformReleaseSet) => void;
-  /** Снятие выпуска: платформа снова идёт «как у версии». */
-  onClearRelease?: (platformId: string) => void;
-  isSubmittingVersion: boolean;
-  versionError?: string;
+  onSaveVersion: (patch: RoadmapVersionUpdate, ops: ReleaseOp[]) => void;
+  onDeleteVersion: () => void;
+  isSavingVersion: boolean;
+  saveError?: string;
   isSubmittingCheckpoint: boolean;
 }
 

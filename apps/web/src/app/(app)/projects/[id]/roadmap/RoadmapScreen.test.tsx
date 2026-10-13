@@ -75,7 +75,6 @@ beforeEach(() => {
   );
   vi.mocked(hooks.useQueryPublicLink).mockReturnValue(query(null));
   vi.mocked(hooks.useMutationCreateVersion).mockReturnValue(mutation());
-  vi.mocked(hooks.useMutationUpdateVersion).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationDeleteVersion).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationCreateCheckpoint).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationUpdateCheckpoint).mockReturnValue(mutation());
@@ -83,8 +82,9 @@ beforeEach(() => {
   vi.mocked(hooks.useMutationPublishRoadmap).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationUnpublishRoadmap).mockReturnValue(mutation());
   // Панель версии читает их `isPending` на рендере: автомок уронил бы экран.
-  vi.mocked(hooks.useMutationSetRelease).mockReturnValue(mutation());
-  vi.mocked(hooks.useMutationClearRelease).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationSaveVersion).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationUpdateCheckpoint).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationReadLinkTitle).mockReturnValue(mutation());
 });
 
 describe('RoadmapScreen', () => {
@@ -141,6 +141,54 @@ describe('RoadmapScreen', () => {
     rerender(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('правки версии и выпуска уходят одной мутацией', async () => {
+    // Для человека это один щелчок: паспорт и клетки платформ — одна
+    // запись, и порядок запросов знает мутация, а не экран.
+    const mutate = vi.fn();
+    vi.mocked(hooks.useMutationSaveVersion).mockReturnValue(
+      { mutate, isPending: false, error: null } as never,
+    );
+    render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Версия v1.0' }));
+    await userEvent.type(screen.getByLabelText('Обозначение'), '1');
+    await userEvent.selectOptions(
+      screen.getByLabelText('Состояние App Store'),
+      PlatformReleaseState.OnTest,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(mutate).toHaveBeenCalledWith({
+      versionId: '1',
+      patch: { label: 'v1.01' },
+      ops: [
+        {
+          platformId: 'p2',
+          kind: 'set',
+          input: { state: PlatformReleaseState.OnTest, releasedDate: null, buildLabel: null },
+        },
+      ],
+    });
+  });
+
+  it('другая версия открывается со своим черновиком', async () => {
+    // Черновик живёт в состоянии панели, и без `key` правки первой версии
+    // переехали бы на вторую.
+    render(<RoadmapScreen projectId="p1" isSuperadmin={false} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Версия v1.0' }));
+    await userEvent.type(screen.getByLabelText('Обозначение'), '1');
+
+    // Панель модальна: чтобы открыть другую версию, её сначала закрывают,
+    // и несохранённый черновик по пути спрашивает подтверждение.
+    await userEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Закрыть без сохранения' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Версия v2.0' }));
+
+    expect(screen.getByLabelText('Обозначение')).toHaveValue('v2.0');
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
   });
 
   it('без права записи нет кнопки добавления', () => {

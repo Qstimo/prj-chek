@@ -56,7 +56,7 @@ TDD: сначала падающий тест, затем реализация. 
 - Modify: `apps/api/src/roadmap/roadmap.repository.ts`
 - Modify: `apps/api/src/roadmap/roadmap.repository.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 В `describe` правки версии (рядом с «пишет дату релиза» на строках ~220):
 
@@ -91,7 +91,7 @@ it('у проекта без платформ дата релиза пишетс
 
 Платформу в тестах заводить вставкой в таблицу, как уже делает файл (комментарий на строке ~123: репозиторий платформ потребовал бы доступа к «Инфо»).
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 Приватный метод репозитория:
 
@@ -115,7 +115,7 @@ private async requireNoStoredReleasedDate(
 
 Зовётся в `createVersion` и `updateVersion` после проверки права и до записи.
 
-- [ ] **Step 3: Проверка**
+- [x] **Step 3: Проверка**
 
 `cd apps/api && npx vitest run src/roadmap/roadmap.repository.test.ts`
 
@@ -127,7 +127,7 @@ private async requireNoStoredReleasedDate(
 - Modify: `apps/api/src/platforms/platforms.repository.test.ts`
 - Modify: `apps/api/src/platforms/platforms.service.test.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 В `platforms.repository.test.ts`, дополняя существующий «удаление платформы снимает выпуски, теги и связи» (строка ~192):
 
@@ -144,17 +144,17 @@ it('сообщает, сколько выпусков унесло удален�
 
 В `platforms.service.test.ts` — метаданные записи журнала содержат `{ name: 'App Store', releases: 2 }`.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 `remove` возвращает `ProjectPlatformRow & { releases: number }`: удаление выпусков идёт с `.returning({ id: versionPlatformReleases.versionId })`, длина массива — число. Служба кладёт его в `metadata` (`metadata?: Record<string, unknown>`, новых типов не нужно).
 
-- [ ] **Step 3: Проверка**
+- [x] **Step 3: Проверка**
 
 `cd apps/api && npx vitest run src/platforms`
 
 ### Task 1.3: Весь набор API
 
-- [ ] `cd apps/api && npx vitest run` и `pnpm typecheck`
+- [x] `cd apps/api && npx vitest run` и `pnpm typecheck`
 
 ---
 
@@ -166,20 +166,20 @@ it('сообщает, сколько выпусков унесло удален�
 - Create: `apps/web/src/assets/icons/{ChevronDownIcon.tsx,index.ts}`
 - Create: `apps/web/src/components/Select/{Select.tsx,types.ts,Select.test.tsx,index.ts}`
 
-- [ ] **Step 1: Падающие тесты** (`Select.test.tsx`)
+- [x] **Step 1: Падающие тесты** (`Select.test.tsx`)
 
 - отдаёт выбранное значение в `onChange`;
 - находится по `aria-label`, когда подписи рядом нет;
 - связывается с подписью по `id`;
 - показывает переданные `children` как опции.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 `IProps`: `value`, `onChange(value: string)`, `children`, необязательные `id`, `aria-label`, `disabled`. Разметка — обёртка `relative`, нативный `<select>` с `appearance-none h-9 w-full rounded-md border border-border bg-surface px-3 pr-8 text-sm transition focus:border-border-strong`, иконка абсолютом справа с `pointer-events-none`.
 
 Иконка — функциональный компонент со `<svg aria-hidden="true">`; каталог `assets/icons/` заводится здесь.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/Select`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/Select`
 
 ### Task 2.2: Замена нативных селектов на `Select`
 
@@ -193,9 +193,9 @@ it('сообщает, сколько выпусков унесло удален�
 - `apps/web/src/components/AccessMatrix/AccessMatrix.tsx`
 - `apps/web/src/components/UserGrantsMatrix/{UserGrantsMatrix.tsx,AddProjectField.tsx}`
 
-- [ ] **Step 1**: ничего не пишем — тесты этих мест уже есть и обязаны остаться зелёными без правок. Это и есть проверка: `userEvent.selectOptions` работает с нативным контролом.
-- [ ] **Step 2**: заменить разметку, снять собственные классы рамки и отступов, подпись оставить как была (`htmlFor`/`aria-label`).
-- [ ] **Step 3**: `cd apps/web && npx vitest run` — весь набор веба зелёный.
+- [x] **Step 1**: ничего не пишем — тесты этих мест уже есть и обязаны остаться зелёными без правок. Это и есть проверка: `userEvent.selectOptions` работает с нативным контролом.
+- [x] **Step 2**: заменить разметку, снять собственные классы рамки и отступов, подпись оставить как была (`htmlFor`/`aria-label`).
+- [x] **Step 3**: `cd apps/web && npx vitest run` — весь набор веба зелёный.
 
 `ReleaseRow` в этом списке нет: он переписывается целиком в Chunk 3.
 
@@ -204,35 +204,35 @@ it('сообщает, сколько выпусков унесло удален�
 **Files:**
 - Create: `apps/web/src/components/ConfirmDialog/{ConfirmDialog.tsx,types.ts,ConfirmDialog.test.tsx,index.ts}`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 - находится по роли `dialog` и подписи;
 - «подтвердить» зовёт `onConfirm`, «отмена» — `onCancel`;
 - подпись кнопки подтверждения задаётся пропом.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 По образцу `ServerList/DeleteConfirmDialog`: блок `role="dialog"` с `aria-label`, вопрос как `children`, две кнопки. `IProps`: `label`, `confirmLabel`, `onConfirm`, `onCancel`, `children`. Браузерный `confirm()` не используется — он не поддаётся тестам.
 
 Существующие три диалога (`ServerList`, `DomainList`, `UserCard`) не переписываются (дизайн §13).
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/ConfirmDialog`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/ConfirmDialog`
 
 ### Task 2.4: Прилипающая шапка и слот действий в `Drawer`
 
 **Files:**
 - Modify: `apps/web/src/components/Drawer/{Drawer.tsx,types.ts,Drawer.test.tsx}`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 - переданный `actions` показывается в панели;
 - без `actions` шапка выглядит как прежде (кнопка «Закрыть» на месте).
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 `actions?: ReactNode` в `IProps`; в шапке — `actions` слева от `Dialog.Close`. Шапка получает `sticky top-0 z-10 -mx-6 -mt-6 mb-0 bg-background px-6 pt-6 pb-4`: контент панели имеет свой `p-6`, и шапка должна перекрывать его по ширине, иначе из-под неё при прокрутке будет видно текст.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/Drawer`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/Drawer`
 
 ---
 
@@ -243,7 +243,7 @@ it('сообщает, сколько выпусков унесло удален�
 **Files:**
 - Modify: `apps/web/src/components/VersionDrawer/{utils.ts,utils.test.ts,types.ts}`
 
-- [ ] **Step 1: Падающие тесты** — таблицей случаев, без рендера:
+- [x] **Step 1: Падающие тесты** — таблицей случаев, без рендера:
 
 `versionPatchOf(version, draft, hasPlatforms)`:
 - черновик равен версии → `{}`;
@@ -261,11 +261,11 @@ it('сообщает, сколько выпусков унесло удален�
 
 `isDirtyOf`: пусто+пусто → `false`; любой из двух непустой → `true`.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 Типы `IVersionDraft`, `IReleaseCell`, `ReleaseOp` — в `types.ts`. Функции — в `utils.ts` рядом с существующим `isDetailed`. Пустая строка в полях черновика означает «не задано» и уходит в контракт как `null`.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/VersionDrawer/utils.test.ts`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/VersionDrawer/utils.test.ts`
 
 ### Task 3.2: Поля версии отдельно от формы
 
@@ -273,17 +273,17 @@ it('сообщает, сколько выпусков унесло удален�
 - Create: `apps/web/src/components/VersionFields/{VersionFields.tsx,types.ts,VersionFields.test.tsx,index.ts}`
 - Modify: `apps/web/src/components/VersionForm/{VersionForm.tsx,VersionForm.test.tsx}`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 `VersionFields`: показывает обозначение, состояние и плановую дату; «Дата релиза» видна только при состоянии «выпущена» и отсутствии платформ; правка поля зовёт `onChange` с новым черновиком.
 
 `VersionForm`: существующие тесты остаются зелёными — поведение прежнее, меняется только внутреннее устройство.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 `VersionFields` принимает `draft`, `onChange`, `hasPlatforms`. Подстановка сегодняшней даты при переходе в «выпущена» переезжает сюда из `VersionForm`. `VersionForm` остаётся обёрткой: своё состояние черновика, `VersionFields` и `FormActions`.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/Version`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/Version`
 
 ### Task 3.3: Клетка выпуска — состояние, дата, сборка
 
@@ -291,7 +291,7 @@ it('сообщает, сколько выпусков унесло удален�
 - Modify: `apps/web/src/components/VersionDrawer/{ReleaseRow.tsx,ReleaseList.tsx}`
 - Modify: `apps/web/src/components/VersionDrawer/VersionDrawer.test.tsx`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 - поле даты появляется при выборе «в релизе» и подставляет сегодняшнюю;
 - дату можно исправить, в том числе на прошлое число;
@@ -300,11 +300,11 @@ it('сообщает, сколько выпусков унесло удален�
 - подписи органов называют платформу («Дата App Store»);
 - без `actions` органов нет, значения видны.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 `ReleaseRow` получает `cell: IReleaseCell | null`, `versionLabel` (для подсказки) и `onChange(platformId, cell | null)`; запросов не делает. Состояние — `Select`, дата — `input type="date"`, сборка — `input type="text"`. Отправки по уходу из поля не нужно: черновик локальный, запрос будет один по кнопке.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/VersionDrawer`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/VersionDrawer`
 
 ### Task 3.4: Панель: черновик, кнопка, предупреждение, подтверждение закрытия
 
@@ -312,7 +312,7 @@ it('сообщает, сколько выпусков унесло удален�
 - Modify: `apps/web/src/components/VersionDrawer/{VersionDrawer.tsx,types.ts,VersionDrawer.test.tsx}`
 - Modify: `apps/web/src/components/VersionDrawer/{CheckpointList.tsx,constants.ts}`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 - кнопка «Сохранить» в панели неактивна, пока ничего не меняли;
 - правка поля версии делает её активной и показывает «Есть несохранённые изменения»;
@@ -325,7 +325,7 @@ it('сообщает, сколько выпусков унесло удален�
 - без `actions` нет ни кнопки, ни полей, ни подтверждения — только паспорт и значения;
 - блок чекпоинтов подписан так, что видно: он меняется сразу.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 `IVersionActions` меняется: вместо `onSubmitVersion`, `onSetRelease`, `onClearRelease` — `onSaveVersion(patch, ops, onSaved)`, `isSavingVersion`, `saveError`. Состояние `isEditing` и кнопка «Править» уходят, `VersionActions` остаётся только с удалением.
 
@@ -335,7 +335,7 @@ it('сообщает, сколько выпусков унесло удален�
 
 Подпись блока чекпоинтов — в `constants.ts`.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/VersionDrawer`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/VersionDrawer`
 
 ---
 
@@ -347,7 +347,7 @@ it('сообщает, сколько выпусков унесло удален�
 - Create: `apps/web/src/api/hooks/{useMutationSaveVersion.ts,useMutationSaveVersion.test.tsx}`
 - Modify: `apps/web/src/api/hooks/index.ts`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 - пустой патч — запроса версии нет;
 - патч и две операции — три запроса в порядке «версия, затем операции по порядку»;
@@ -355,11 +355,11 @@ it('сообщает, сколько выпусков унесло удален�
 - роадмап перечитывается один раз;
 - ошибка на второй операции отвергает мутацию, но перечитывание всё равно происходит.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 `mutationFn` принимает `{ versionId, patch, ops }`, выполняет запросы последовательно (`for...of` с `await`), `onSettled` сбрасывает `ROADMAP_KEYS.forProject(projectId)`. Существующие `useMutationSetRelease`/`useMutationClearRelease` остаются: они описывают по одной ручке и используются тестами.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/api/hooks`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/api/hooks`
 
 ### Task 4.2: Панель роадмапа на новой мутации
 
@@ -367,20 +367,20 @@ it('сообщает, сколько выпусков унесло удален�
 - Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapVersionPanel.tsx`
 - Modify: `apps/web/src/app/(app)/projects/[id]/roadmap/RoadmapScreen.test.tsx`
 
-- [ ] **Step 1: Падающие тесты** (на уровне экрана)
+- [x] **Step 1: Падающие тесты** (на уровне экрана)
 
 - правка поля версии и клетки выпуска, затем «Сохранить» — уходят `PATCH` и `PUT` на нужные адреса;
 - после сохранения роадмап перечитывается.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 `onSaveVersion` зовёт `saveVersion.mutate({ versionId, patch, ops }, { onSuccess: onSaved })`; `isSavingVersion` и `saveError` — из мутации. Мутации `setRelease`/`clearRelease` из панели уходят.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run "src/app/(app)/projects"`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run "src/app/(app)/projects"`
 
 ### Task 4.3: Публичная страница не изменилась
 
-- [ ] `cd apps/web && npx vitest run src/app/roadmap` — `PublicRoadmapView` передаёт панель без `actions`, и панель обязана остаться читающей: ни кнопки, ни полей, ни подтверждения.
+- [x] `cd apps/web && npx vitest run src/app/roadmap` — `PublicRoadmapView` передаёт панель без `actions`, и панель обязана остаться читающей: ни кнопки, ни полей, ни подтверждения.
 
 ---
 
@@ -391,20 +391,20 @@ it('сообщает, сколько выпусков унесло удален�
 **Files:**
 - Modify: `apps/web/src/components/PlatformsField/{PlatformsField.tsx,types.ts,PlatformsField.test.tsx,constants.ts}`
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 - «×» у записанной платформы не зовёт `onRemove`, а показывает подтверждение;
 - текст называет платформу и говорит, что исчезнут выпуски во всех версиях и теги чекпоинтов;
 - «Да, убрать» зовёт `onRemove`, «Отмена» — нет;
 - у платформы без `id` (панель создания проекта, чип ещё не записан) подтверждения нет — терять нечего.
 
-- [ ] **Step 2: Реализация**
+- [x] **Step 2: Реализация**
 
 Состояние «что подтверждаем» — `platform | null`. `ConfirmDialog` под списком чипов. Текст — в `constants.ts`.
 
 Компонент близок к лимиту 100 строк: если переступит, чипы уезжают в подкомпонент `PlatformChipList`.
 
-- [ ] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/PlatformsField`
+- [x] **Step 3: Проверка** `cd apps/web && npx vitest run src/components/PlatformsField`
 
 ---
 
@@ -412,24 +412,24 @@ it('сообщает, сколько выпусков унесло удален�
 
 ### Task 6.1: Полный набор и типы
 
-- [ ] `pnpm test`
-- [ ] `pnpm typecheck`
-- [ ] `pnpm build`
+- [x] `pnpm test`
+- [x] `pnpm typecheck`
+- [x] `pnpm build`
 
 ### Task 6.2: Документация репозитория
 
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] Абзац состояния репозитория дописывается последней доводкой: панель версии правится черновиком с одной кнопкой наверху, у выпуска есть дата и обозначение сборки, дата релиза при платформах закрыта на сервере.
-- [ ] В списке источников правды появляется `2026-10-13-cairn-version-drawer-draft-design.md` и его план.
-- [ ] Утверждение про `409` в разделе о роадмапе перестаёт быть обещанием: теперь оно описывает код.
+- [x] Абзац состояния репозитория дописывается последней доводкой: панель версии правится черновиком с одной кнопкой наверху, у выпуска есть дата и обозначение сборки, дата релиза при платформах закрыта на сервере.
+- [x] В списке источников правды появляется `2026-10-13-cairn-version-drawer-draft-design.md` и его план.
+- [x] Утверждение про `409` в разделе о роадмапе перестаёт быть обещанием: теперь оно описывает код.
 
 ### Task 6.3: Ручная проверка
 
-- [ ] проект с платформами: смена состояния версии и двух клеток выпусков одной кнопкой; дата выпуска задним числом доезжает в диаграмму и сводку;
-- [ ] проект без платформ: «Дата релиза» на месте, сводки нет, панель ведёт себя как прежде;
-- [ ] закрытие панели с правками спрашивает подтверждение по Esc, по клику в подложку и по «Закрыть»;
-- [ ] удаление платформы спрашивает подтверждение, в журнале появляется число выпусков;
-- [ ] публичная страница роадмапа: панель только на чтение, кнопки нет;
-- [ ] селекты одинаковы на всех экранах, включая матрицы доступов.
+- [x] проект с платформами: смена состояния версии и двух клеток выпусков одной кнопкой; дата выпуска задним числом доезжает в диаграмму и сводку;
+- [x] проект без платформ: «Дата релиза» на месте, сводки нет, панель ведёт себя как прежде;
+- [x] закрытие панели с правками спрашивает подтверждение по Esc, по клику в подложку и по «Закрыть»;
+- [x] удаление платформы спрашивает подтверждение, в журнале появляется число выпусков;
+- [x] публичная страница роадмапа: панель только на чтение, кнопки нет;
+- [x] селекты одинаковы на всех экранах, включая матрицы доступов.

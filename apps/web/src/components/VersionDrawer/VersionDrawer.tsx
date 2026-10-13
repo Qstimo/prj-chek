@@ -3,20 +3,36 @@
 import { useState } from 'react';
 
 import { CheckpointForm } from '../CheckpointForm';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { Drawer, DrawerWidth } from '../Drawer';
-import { VersionForm } from '../VersionForm';
+import { FormError } from '../FormError';
+import { VersionFields } from '../VersionFields';
 import { CheckpointList } from './CheckpointList';
 import { ReleaseList } from './ReleaseList';
+import { SaveButton } from './SaveButton';
 import { VersionActions } from './VersionActions';
 import { VersionPassport } from './VersionPassport';
+import {
+  CHECKPOINTS_HINT,
+  CHECKPOINTS_TITLE,
+  CLOSE_CONFIRM_ACTION,
+  CLOSE_CONFIRM_LABEL,
+  UNSAVED_WARNING,
+} from './constants';
 import type { IProps } from './types';
-import { isDetailed } from './utils';
+import { draftOf, isDetailed, isDirtyOf, releaseOpsOf, versionPatchOf } from './utils';
 
 /**
- * Панель версии роадмапа: просмотр и правка (спека, раздел 3).
+ * Панель версии роадмапа: черновик паспорта и выпусков, чекпоинты на месте.
  *
  * Презентационный компонент: данные и колбэки — пропами, поэтому одинаково
  * работает на внутреннем экране и на публичной странице без TanStack Query.
+ *
+ * Черновик берётся из версии при создании компонента, поэтому родитель
+ * обязан дать панели `key` версии: без него черновик одной версии переехал
+ * бы на другую. Сбрасывает его не колбэк успеха, а перечитанные данные:
+ * когда ответ сервера доходит до пропа, разница обнуляется сама, и
+ * обнулять её вручную значило бы на миг вернуть поля к старому значению.
  */
 export function VersionDrawer({
   version,
@@ -26,29 +42,65 @@ export function VersionDrawer({
   onClose,
   actions,
 }: IProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const detail = isDetailed(version) ? version : null;
+  const [draft, setDraft] = useState(() => draftOf(version, platforms));
+  const [isConfirmingClose, setIsConfirmingClose] = useState(false);
 
-  function handleClose(): void {
-    setIsEditing(false);
+  const detail = isDetailed(version) ? version : null;
+  const patch = versionPatchOf(version, draft, platforms.length > 0);
+  const ops = releaseOpsOf(version, draft, platforms);
+  const isDirty = isDirtyOf(patch, ops);
+
+  /** Esc, подложка и крестик идут сюда: перехват у всех трёх общий. */
+  function requestClose(): void {
+    if (isDirty) {
+      setIsConfirmingClose(true);
+
+      return;
+    }
+
     onClose();
   }
 
   return (
-    <Drawer isOpen={isOpen} onClose={handleClose} title={version.label} width={DrawerWidth.Wide}>
-      {isEditing && actions ? (
-        <VersionForm
-          initial={{
-            label: version.label,
-            state: version.state,
-            plannedDate: version.plannedDate,
-            releasedDate: version.releasedDate,
-          }}
+    <Drawer
+      isOpen={isOpen}
+      onClose={requestClose}
+      title={version.label}
+      width={DrawerWidth.Wide}
+      actions={
+        actions && (
+          <SaveButton
+            canSave={isDirty}
+            isSaving={actions.isSavingVersion}
+            onSave={() => actions.onSaveVersion(patch, ops)}
+          />
+        )
+      }
+    >
+      {actions && isDirty && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {UNSAVED_WARNING}
+        </p>
+      )}
+
+      <FormError message={actions?.saveError} />
+
+      {isConfirmingClose && (
+        <ConfirmDialog
+          label={CLOSE_CONFIRM_LABEL}
+          confirmLabel={CLOSE_CONFIRM_ACTION}
+          onConfirm={onClose}
+          onCancel={() => setIsConfirmingClose(false)}
+        >
+          Изменения в версии «{version.label}» будут потеряны.
+        </ConfirmDialog>
+      )}
+
+      {actions ? (
+        <VersionFields
+          draft={draft}
+          onChange={(fields) => setDraft({ ...draft, ...fields })}
           hasPlatforms={platforms.length > 0}
-          isSubmitting={actions.isSubmittingVersion}
-          error={actions.versionError}
-          onSubmit={(input) => actions.onSubmitVersion(input, () => setIsEditing(false))}
-          onCancel={() => setIsEditing(false)}
         />
       ) : (
         <VersionPassport version={version} isCurrent={isCurrent} />
@@ -57,22 +109,33 @@ export function VersionDrawer({
       {detail && (
         <ReleaseList
           platforms={platforms}
-          releases={detail.releases}
-          onSet={actions?.onSetRelease}
-          onClear={actions?.onClearRelease}
+          releases={draft.releases}
+          versionLabel={version.label}
+          onChange={
+            actions &&
+            ((platformId, cell) =>
+              setDraft({ ...draft, releases: { ...draft.releases, [platformId]: cell } }))
+          }
         />
       )}
 
       {detail && (
-        <CheckpointList
-          checkpoints={detail.checkpoints}
-          canWrite={Boolean(actions)}
-          platforms={platforms.length > 0 ? platforms : undefined}
-          onToggle={(checkpointId, isDone) => actions?.onToggleCheckpoint(checkpointId, isDone)}
-          onDelete={(checkpointId) => actions?.onDeleteCheckpoint(checkpointId)}
-          onEdit={actions?.onEditCheckpoint}
-          onReadTitle={actions?.onReadCheckpointTitle}
-        />
+        <section className="space-y-2">
+          <h3 className="text-sm font-medium">
+            {CHECKPOINTS_TITLE}
+            <span className="ml-2 font-normal text-muted-foreground">— {CHECKPOINTS_HINT}</span>
+          </h3>
+
+          <CheckpointList
+            checkpoints={detail.checkpoints}
+            canWrite={Boolean(actions)}
+            platforms={platforms.length > 0 ? platforms : undefined}
+            onToggle={(checkpointId, isDone) => actions?.onToggleCheckpoint(checkpointId, isDone)}
+            onDelete={(checkpointId) => actions?.onDeleteCheckpoint(checkpointId)}
+            onEdit={actions?.onEditCheckpoint}
+            onReadTitle={actions?.onReadCheckpointTitle}
+          />
+        </section>
       )}
 
       {actions && (
@@ -84,12 +147,7 @@ export function VersionDrawer({
         />
       )}
 
-      {actions && !isEditing && (
-        <VersionActions
-          onEdit={() => setIsEditing(true)}
-          onDelete={actions.onDeleteVersion}
-        />
-      )}
+      {actions && <VersionActions onDelete={actions.onDeleteVersion} />}
     </Drawer>
   );
 }

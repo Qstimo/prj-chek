@@ -1,24 +1,27 @@
 'use client';
 
-import type { Platform, PlatformRelease, PlatformReleaseSet } from '@cairn/shared';
+import type { Platform } from '@cairn/shared';
 
 import { ReleaseRow } from './ReleaseRow';
+import type { IReleaseCell } from './types';
 
 /** Пропсы блока платформ. */
 interface IProps {
   platforms: Platform[];
-  releases: PlatformRelease[];
-  onSet?: (platformId: string, input: PlatformReleaseSet) => void;
-  onClear?: (platformId: string) => void;
+  /** Клетки черновика: платформа → выпуск либо `null` («как у версии»). */
+  releases: Record<string, IReleaseCell | null>;
+  /** Обозначение версии: подсказка для пустого обозначения сборки. */
+  versionLabel: string;
+  onChange?: (platformId: string, cell: IReleaseCell | null) => void;
 }
 
 /**
  * Выпуски версии по платформам.
  *
- * Два входа: список платформ проекта приходит пропом из сводки, текущие
- * значения — из `releases` версии. Платформ нет — блока нет.
+ * Два входа: список платформ проекта приходит пропом из сводки, значения —
+ * из черновика панели. Платформ нет — блока нет.
  */
-export function ReleaseList({ platforms, releases, onSet, onClear }: IProps) {
+export function ReleaseList({ platforms, releases, versionLabel, onChange }: IProps) {
   if (platforms.length === 0) {
     return null;
   }
@@ -32,9 +35,9 @@ export function ReleaseList({ platforms, releases, onSet, onClear }: IProps) {
           <ReleaseRow
             key={platform.id}
             platform={platform}
-            release={releases.find((release) => release.platformId === platform.id)}
-            onSet={onSet}
-            onClear={onClear}
+            cell={releases[platform.id] ?? null}
+            versionLabel={versionLabel}
+            onChange={onChange}
           />
         ))}
       </ul>

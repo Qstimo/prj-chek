@@ -106,6 +106,12 @@ describe('EditProjectPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Править' }));
     await userEvent.click(screen.getByRole('button', { name: 'Убрать RuStore' }));
 
+    // Записанная платформа уносит с собой выпуски всех версий, поэтому
+    // спрашивает подтверждение.
+    expect(remove).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Да, убрать' }));
+
     expect(remove).toHaveBeenCalledWith('p9');
   });
 

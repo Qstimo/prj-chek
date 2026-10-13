@@ -84,7 +84,10 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
       )}
 
       {selected && (
+        // `key` версии: черновик панели живёт в её состоянии, и без него
+        // правки одной версии переехали бы на следующую открытую.
         <RoadmapVersionPanel
+          key={selected.id}
           projectId={projectId}
           version={selected}
           platforms={platforms}
