@@ -1,10 +1,16 @@
-import { type GrantMatrixRow, type GrantRevoke, type GrantSet, type Section } from '@cairn/shared';
+import {
+  type GrantMatrixRow,
+  type GrantRevoke,
+  type GrantSet,
+  type Section,
+  type UserGrantRow,
+} from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor } from '../db/db.types';
-import { grants, subjects } from '../db/schema';
+import { grants, projects, subjects } from '../db/schema';
 
 /**
  * Доступ к выдачам.
@@ -98,5 +104,41 @@ export class GrantsRepository {
     }
 
     return [...bySubject.values()];
+  }
+
+  /**
+   * Собирает матрицу «проект × секция» для субъекта.
+   *
+   * Зеркало {@link matrixForProject} и живёт рядом с ним: это один срез
+   * одной таблицы, и расходиться им нельзя. Проектов без выдач в ответе
+   * нет — отсутствие доступа выражается отсутствием строки.
+   */
+  async matrixForSubject(subjectId: string): Promise<UserGrantRow[]> {
+    const rows = await this.db
+      .select({
+        projectId: grants.projectId,
+        projectName: projects.name,
+        section: grants.section,
+        level: grants.level,
+      })
+      .from(grants)
+      .innerJoin(projects, eq(projects.id, grants.projectId))
+      .where(eq(grants.subjectId, subjectId))
+      .orderBy(projects.name);
+
+    const byProject = new Map<string, UserGrantRow>();
+
+    for (const row of rows) {
+      const existing: UserGrantRow = byProject.get(row.projectId) ?? {
+        projectId: row.projectId,
+        projectName: row.projectName,
+        levels: {},
+      };
+
+      existing.levels[row.section] = row.level;
+      byProject.set(row.projectId, existing);
+    }
+
+    return [...byProject.values()];
   }
 }

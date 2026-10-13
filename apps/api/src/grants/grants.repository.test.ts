@@ -163,4 +163,54 @@ describe('GrantsRepository', () => {
       });
     });
   });
+
+  describe('matrixForSubject', () => {
+    it('собирает уровни по проектам', async () => {
+      await testDb.db.transaction(async (tx) => {
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Info,
+          level: AccessLevel.Read,
+        });
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId,
+          section: Section.Docs,
+          level: AccessLevel.Write,
+        });
+      });
+
+      const rows = await repository.matrixForSubject(subjectId);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ projectId, projectName: 'Проект' });
+      expect(rows[0]?.levels).toEqual({
+        [Section.Info]: AccessLevel.Read,
+        [Section.Docs]: AccessLevel.Write,
+      });
+    });
+
+    it('не показывает проекты без выдач', async () => {
+      // Карточка отвечает на вопрос «куда у него есть доступ».
+      await testDb.db.insert(projects).values({ slug: 'drugoy', name: 'Другой' });
+
+      expect(await repository.matrixForSubject(subjectId)).toEqual([]);
+    });
+
+    it('не показывает чужие выдачи', async () => {
+      const [other] = await testDb.db
+        .insert(subjects)
+        .values({ kind: SubjectKind.User, label: 'чужой' })
+        .returning();
+
+      await testDb.db.transaction(async (tx) => {
+        await repository.set(tx, projectId, grantedBy, {
+          subjectId: other!.id,
+          section: Section.Info,
+          level: AccessLevel.Read,
+        });
+      });
+
+      expect(await repository.matrixForSubject(subjectId)).toEqual([]);
+    });
+  });
 });
