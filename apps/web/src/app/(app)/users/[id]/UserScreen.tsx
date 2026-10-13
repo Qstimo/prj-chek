@@ -15,6 +15,8 @@ import { UserGrantsPanel } from './UserGrantsPanel';
 /** Пропсы экрана учётной записи. */
 interface IProps {
   userId: string;
+  /** Субъект того, кто смотрит: карточка может оказаться его собственной. */
+  currentSubjectId: string;
 }
 
 /**
@@ -23,7 +25,7 @@ interface IProps {
  * Выданная ссылка показывается под карточкой: сброс пароля отдаёт её
  * единственный раз, и спрятать её в панели действий нельзя.
  */
-export function UserScreen({ userId }: IProps) {
+export function UserScreen({ userId, currentSubjectId }: IProps) {
   const user = useQueryUser(userId);
   const resetPassword = useMutationResetPassword();
   const action = useMutationUserAction();
@@ -50,6 +52,7 @@ export function UserScreen({ userId }: IProps) {
         editSlot={
           <EditUserPanel
             userId={userId}
+            isSelf={user.data.subjectId === currentSubjectId}
             initial={{ name: user.data.name, email: user.data.email }}
           />
         }

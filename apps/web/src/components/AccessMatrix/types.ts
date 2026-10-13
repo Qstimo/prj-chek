@@ -8,6 +8,14 @@ export type { GrantChange };
 export interface MatrixSubject {
   subjectId: string;
   subjectLabel: string;
+  /**
+   * Логин субъекта, если он человек.
+   *
+   * Имена не уникальны и правятся свободно, поэтому тёзок в этой таблице
+   * различает только адрес — и он же идёт в подпись селекта. У машинных
+   * субъектов адреса нет, и подписью остаётся метка.
+   */
+  subjectEmail?: string;
   isRevoked: boolean;
   /** Суперадмин обходит выдачи: селекты в его строке ничего не меняли бы. */
   isSuperadmin?: boolean;

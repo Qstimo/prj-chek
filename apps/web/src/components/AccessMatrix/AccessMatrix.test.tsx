@@ -70,6 +70,45 @@ describe('AccessMatrix', () => {
     expect(screen.getByText(/отозван/i)).toBeInTheDocument();
   });
 
+  it('показывает адрес рядом с именем', () => {
+    // Имена не уникальны и правятся свободно: двух тёзок в этой таблице
+    // различает только логин, а перепутать их здесь дороже всего.
+    render(
+      <AccessMatrix
+        rows={[{ ...rows[0]!, subjectLabel: 'Иван Петров', subjectEmail: 'ivan@cairn.local' }]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Иван Петров')).toBeInTheDocument();
+    expect(screen.getByText('ivan@cairn.local')).toBeInTheDocument();
+  });
+
+  it('различает тёзок по адресу в подписи селекта', () => {
+    render(
+      <AccessMatrix
+        rows={[
+          {
+            ...rows[0]!,
+            subjectId: '33333333-3333-3333-3333-333333333333',
+            subjectLabel: 'Иван Петров',
+            subjectEmail: 'first@cairn.local',
+          },
+          {
+            ...rows[0]!,
+            subjectId: '44444444-4444-4444-4444-444444444444',
+            subjectLabel: 'Иван Петров',
+            subjectEmail: 'second@cairn.local',
+          },
+        ]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('first@cairn.local, Инфо')).toBeInTheDocument();
+    expect(screen.getByLabelText('second@cairn.local, Инфо')).toBeInTheDocument();
+  });
+
   it('у суперадмина показывает полный доступ вместо селектов', () => {
     // Селекты предлагали выдать доступ, который ничего не меняет:
     // суперадмин обходит выдачи, не доходя до таблицы.

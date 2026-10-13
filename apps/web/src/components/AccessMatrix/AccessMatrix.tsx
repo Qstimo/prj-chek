@@ -48,6 +48,9 @@ export function AccessMatrix({ rows, onChange }: IProps) {
                 {row.isRevoked && (
                   <span className="ml-2 text-xs text-muted-foreground">отозван</span>
                 )}
+                {row.subjectEmail && (
+                  <span className="block text-xs text-muted-foreground">{row.subjectEmail}</span>
+                )}
               </th>
               {row.isSuperadmin ? (
                 <td
@@ -60,7 +63,7 @@ export function AccessMatrix({ rows, onChange }: IProps) {
                 SECTION_LABELS.map(({ section, label }) => (
                   <td key={section} className="border-b border-border p-2">
                     <select
-                      aria-label={`${row.subjectLabel}, ${label}`}
+                      aria-label={`${row.subjectEmail ?? row.subjectLabel}, ${label}`}
                       value={row.levels[section] ?? ''}
                       onChange={(event) =>
                         onChange({

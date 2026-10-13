@@ -60,6 +60,7 @@ export function AccessScreen({ projectId }: IProps) {
   const rows = users.data.map((user) => ({
     subjectId: user.subjectId,
     subjectLabel: user.name,
+    subjectEmail: user.email,
     isRevoked: user.isRevoked,
     isSuperadmin: user.isSuperadmin,
     levels: levelsBySubject.get(user.subjectId) ?? {},

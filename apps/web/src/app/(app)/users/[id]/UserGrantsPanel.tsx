@@ -3,8 +3,10 @@
 import type { UserGrantRow, UserRow } from '@cairn/shared';
 import { useState } from 'react';
 
+import { describeApiError } from '@/api';
 import { useMutationSetUserGrant, useQueryProjects, useQueryUserGrants } from '@/api/hooks';
 import { FULL_ACCESS_NOTE } from '@/components/AccessMatrix/constants';
+import { FormError } from '@/components/FormError';
 import { UserGrantsMatrix } from '@/components/UserGrantsMatrix';
 
 /** Пропсы блока доступов. */
@@ -53,6 +55,10 @@ export function UserGrantsPanel({ user }: IProps) {
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-medium">Доступы</h2>
+
+      {/* Отказ записи иначе был бы не виден: селект управляется данными
+          сервера и просто вернулся бы к прежнему уровню. */}
+      <FormError message={describeApiError(setGrant.error)} />
 
       <UserGrantsMatrix
         rows={rows}
