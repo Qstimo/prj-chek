@@ -29,6 +29,18 @@ export const grantMatrixRowSchema = z.object({
   levels: z.record(z.nativeEnum(Section), z.nativeEnum(AccessLevel)),
 });
 
+/**
+ * Строка матрицы человека: проект и его уровни по секциям.
+ *
+ * Проектов без выдач в ответе нет: карточка отвечает на вопрос «куда
+ * у него есть доступ», а не перечисляет все проекты системы.
+ */
+export const userGrantRowSchema = z.object({
+  projectId: z.string().uuid(),
+  projectName: z.string(),
+  levels: z.record(z.nativeEnum(Section), z.nativeEnum(AccessLevel)),
+});
+
 /** Установка уровня доступа. */
 export type GrantSet = z.infer<typeof grantSetSchema>;
 
@@ -44,5 +56,16 @@ export type GrantRevoke = z.infer<typeof grantRevokeSchema>;
  * Клиент получил бы непустое значение по типам и `undefined` в рантайме.
  */
 export type GrantMatrixRow = Omit<z.infer<typeof grantMatrixRowSchema>, 'levels'> & {
+  levels: Partial<Record<Section, AccessLevel>>;
+};
+
+/**
+ * Строка матрицы человека.
+ *
+ * `levels` переопределён частичной записью по той же причине, что
+ * и у {@link GrantMatrixRow}: `z.record` с перечислением в ключе
+ * выводится в zod полным `Record`.
+ */
+export type UserGrantRow = Omit<z.infer<typeof userGrantRowSchema>, 'levels'> & {
   levels: Partial<Record<Section, AccessLevel>>;
 };
