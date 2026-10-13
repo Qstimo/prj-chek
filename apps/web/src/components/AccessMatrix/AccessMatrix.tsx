@@ -2,7 +2,7 @@
 
 import type { AccessLevel } from '@cairn/shared';
 
-import { LEVEL_OPTIONS, SECTION_LABELS } from './constants';
+import { FULL_ACCESS_LABEL, LEVEL_OPTIONS, SECTION_LABELS } from './constants';
 import type { IProps } from './types';
 
 /**
@@ -49,28 +49,37 @@ export function AccessMatrix({ rows, onChange }: IProps) {
                   <span className="ml-2 text-xs text-muted-foreground">отозван</span>
                 )}
               </th>
-              {SECTION_LABELS.map(({ section, label }) => (
-                <td key={section} className="border-b border-border p-2">
-                  <select
-                    aria-label={`${row.subjectLabel}, ${label}`}
-                    value={row.levels[section] ?? ''}
-                    onChange={(event) =>
-                      onChange({
-                        subjectId: row.subjectId,
-                        section,
-                        level: (event.target.value || null) as AccessLevel | null,
-                      })
-                    }
-                    className="rounded-md border border-border px-2 py-1"
-                  >
-                    {LEVEL_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+              {row.isSuperadmin ? (
+                <td
+                  colSpan={SECTION_LABELS.length}
+                  className="border-b border-border p-2 text-muted-foreground"
+                >
+                  {FULL_ACCESS_LABEL}
                 </td>
-              ))}
+              ) : (
+                SECTION_LABELS.map(({ section, label }) => (
+                  <td key={section} className="border-b border-border p-2">
+                    <select
+                      aria-label={`${row.subjectLabel}, ${label}`}
+                      value={row.levels[section] ?? ''}
+                      onChange={(event) =>
+                        onChange({
+                          subjectId: row.subjectId,
+                          section,
+                          level: (event.target.value || null) as AccessLevel | null,
+                        })
+                      }
+                      className="rounded-md border border-border px-2 py-1"
+                    >
+                      {LEVEL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                ))
+              )}
             </tr>
           ))}
         </tbody>

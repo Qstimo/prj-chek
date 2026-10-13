@@ -9,6 +9,8 @@ export interface MatrixSubject {
   subjectId: string;
   subjectLabel: string;
   isRevoked: boolean;
+  /** Суперадмин обходит выдачи: селекты в его строке ничего не меняли бы. */
+  isSuperadmin?: boolean;
   levels: GrantMatrixRow['levels'];
 }
 

@@ -70,6 +70,15 @@ describe('AccessMatrix', () => {
     expect(screen.getByText(/отозван/i)).toBeInTheDocument();
   });
 
+  it('у суперадмина показывает полный доступ вместо селектов', () => {
+    // Селекты предлагали выдать доступ, который ничего не меняет:
+    // суперадмин обходит выдачи, не доходя до таблицы.
+    render(<AccessMatrix rows={[{ ...rows[0]!, isSuperadmin: true }]} onChange={vi.fn()} />);
+
+    expect(screen.getByText('Полный доступ')).toBeInTheDocument();
+    expect(screen.queryByLabelText('user@cairn.local, Инфо')).not.toBeInTheDocument();
+  });
+
   it('объясняет пустую матрицу', () => {
     render(<AccessMatrix rows={[]} onChange={vi.fn()} />);
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { describeApiError } from '@/api';
+import { ApiError, describeApiError } from '@/api';
 import {
   useMutationCreateAgentToken,
   useMutationRevokeAgentToken,
@@ -12,6 +12,8 @@ import {
 } from '@/api/hooks';
 import { AccessMatrix } from '@/components/AccessMatrix';
 import { AgentTokensPanel } from '@/components/AgentTokensPanel';
+
+import { SUPERADMIN_ONLY } from './constants';
 
 /** Пропсы экрана доступов. */
 interface IProps {
@@ -42,9 +44,13 @@ export function AccessScreen({ projectId }: IProps) {
   }
 
   if (grants.isError || users.isError || tokens.isError) {
+    const failure = grants.error ?? users.error ?? tokens.error;
+
     return (
       <p role="alert" className="text-destructive">
-        Не удалось загрузить матрицу доступов.
+        {failure instanceof ApiError && failure.status === 403
+          ? SUPERADMIN_ONLY
+          : 'Не удалось загрузить матрицу доступов.'}
       </p>
     );
   }
@@ -53,8 +59,9 @@ export function AccessScreen({ projectId }: IProps) {
 
   const rows = users.data.map((user) => ({
     subjectId: user.subjectId,
-    subjectLabel: user.email,
+    subjectLabel: user.name,
     isRevoked: user.isRevoked,
+    isSuperadmin: user.isSuperadmin,
     levels: levelsBySubject.get(user.subjectId) ?? {},
   }));
 
