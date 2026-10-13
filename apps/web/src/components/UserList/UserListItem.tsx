@@ -1,59 +1,33 @@
-'use client';
-
 import type { UserRow } from '@cairn/shared';
+import Link from 'next/link';
 
-import { ACTION_LABELS, BUTTON_CLASS } from './constants';
 import { statusOf } from './utils';
 
 /** Пропсы строки пользователя. */
 interface IProps {
   user: UserRow;
-  onRevoke: (userId: string) => void;
-  onRestore: (userId: string) => void;
-  onRequestReset: (userId: string) => void;
-  onResetTotp: (userId: string) => void;
 }
 
-/**
- * Строка пользователя со сведениями и действиями.
- *
- * Сброс пароля здесь только запрашивается — само действие подтверждает
- * родитель через диалог, чтобы случайное нажатие не завершило сессии.
- */
-export function UserListItem({ user, onRevoke, onRestore, onRequestReset, onResetTotp }: IProps) {
+/** Строка списка: имя, адрес, состояние и переход на карточку. */
+export function UserListItem({ user }: IProps) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-3">
-      <div>
-        <p className="font-medium">
-          {user.email}
-          {user.isSuperadmin && (
-            <span className="ml-2 text-xs text-muted-foreground">Суперадмин</span>
-          )}
-        </p>
-        <p className="text-sm text-muted-foreground">{statusOf(user)}</p>
-      </div>
+    <li className="rounded-lg border border-border bg-surface">
+      <Link
+        href={`/users/${user.id}`}
+        className="flex flex-wrap items-center justify-between gap-3 p-3"
+      >
+        <span>
+          <span className="font-medium">
+            {user.name}
+            {user.isSuperadmin && (
+              <span className="ml-2 text-xs text-muted-foreground">Суперадмин</span>
+            )}
+          </span>
+          <span className="block text-sm text-muted-foreground">{user.email}</span>
+        </span>
 
-      <div className="flex flex-wrap gap-2">
-        {user.isRevoked ? (
-          <button type="button" onClick={() => onRestore(user.id)} className={BUTTON_CLASS}>
-            {ACTION_LABELS.restore}
-          </button>
-        ) : (
-          <button type="button" onClick={() => onRevoke(user.id)} className={BUTTON_CLASS}>
-            {ACTION_LABELS.revoke}
-          </button>
-        )}
-
-        <button type="button" onClick={() => onRequestReset(user.id)} className={BUTTON_CLASS}>
-          {ACTION_LABELS.resetPassword}
-        </button>
-
-        {user.isTotpEnabled && (
-          <button type="button" onClick={() => onResetTotp(user.id)} className={BUTTON_CLASS}>
-            {ACTION_LABELS.resetTotp}
-          </button>
-        )}
-      </div>
+        <span className="text-sm text-muted-foreground">{statusOf(user)}</span>
+      </Link>
     </li>
   );
 }
