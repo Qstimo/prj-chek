@@ -1,4 +1,4 @@
-import { PlatformKind, SubjectKind } from '@cairn/shared';
+import { PlatformKind, PlatformReleaseState, SubjectKind } from '@cairn/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -6,7 +6,15 @@ import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
-import { auditLog, projectPlatforms, projects, subjects, users } from '../db/schema';
+import {
+  auditLog,
+  projectPlatforms,
+  projects,
+  roadmapVersions,
+  subjects,
+  users,
+  versionPlatformReleases,
+} from '../db/schema';
 import { PlatformsRepository } from './platforms.repository';
 import { PlatformsService } from './platforms.service';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
@@ -116,8 +124,33 @@ describe('сервис платформ', () => {
 
     const [entry] = await entriesOf(AuditAction.PlatformDeleted);
 
-    expect(entry?.metadata).toMatchObject({ name: 'API' });
+    expect(entry?.metadata).toMatchObject({ name: 'API', releases: 0 });
     expect(await testDb.rowsOf(projectPlatforms)).toHaveLength(0);
+  });
+
+  it('называет число выпусков, унесённых удалением платформы', async () => {
+    // Удаление платформы — штатный способ сменить её вид, и единственный
+    // след унесённых дат релизов остаётся в журнале.
+    const created = await service.create(admin(), projectId, {
+      kind: PlatformKind.Store,
+      name: 'App Store',
+    });
+    const [version] = await testDb.db
+      .insert(roadmapVersions)
+      .values({ projectId, label: 'v1.0', position: 1 })
+      .returning();
+    await testDb.db.insert(versionPlatformReleases).values({
+      versionId: version!.id,
+      platformId: created.id,
+      state: PlatformReleaseState.Released,
+      releasedDate: '2026-03-16',
+    });
+
+    await service.remove(admin(), projectId, created.id);
+
+    const [entry] = await entriesOf(AuditAction.PlatformDeleted);
+
+    expect(entry?.metadata).toMatchObject({ name: 'App Store', releases: 1 });
   });
 
   it('при отказе в правах ничего не пишет', async () => {

@@ -242,6 +242,78 @@ describe('репозиторий роадмапа', () => {
 
       expect(updated.releasedDate).toBe('2026-09-02');
     });
+
+    it('отвергает дату релиза у версии проекта с платформами', async () => {
+      // Дизайн релизов, раздел 6: дата версии вычисляется из выпусков,
+      // и запись в колонку завела бы вторую правду после первой.
+      const versionId = await createVersion('v1');
+      await createPlatform('API');
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.updateVersion(admin(), tx, projectId, versionId, {
+            releasedDate: '2026-09-01',
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('отвергает и обнуление даты релиза у проекта с платформами', async () => {
+      // Отвергается присутствие ключа, а не значение: `null` — такая же
+      // запись в колонку, как и дата.
+      const versionId = await createVersion('v1');
+      await createPlatform('API');
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.updateVersion(admin(), tx, projectId, versionId, { releasedDate: null }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('отвергает дату релиза и при создании версии', async () => {
+      // Вторая правда при заведении версии ничем не лучше, чем при правке.
+      await createPlatform('API');
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.createVersion(admin(), tx, projectId, {
+            label: 'v1',
+            releasedDate: '2026-09-01',
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('правка остальных полей при платформах проходит', async () => {
+      // Проверка смотрит на ключ даты, а не на сам факт платформ:
+      // иначе роадмап проекта с платформами стал бы неправимым.
+      const versionId = await createVersion('v1');
+      await createPlatform('API');
+
+      const updated = await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, versionId, {
+          state: RoadmapVersionState.Released,
+        }),
+      );
+
+      expect(updated.state).toBe(RoadmapVersionState.Released);
+    });
+
+    it('платформа чужого проекта дату релиза не запирает', async () => {
+      // Запрет принадлежит проекту версии: платформы соседа о ней
+      // ничего не говорят.
+      const versionId = await createVersion('v1');
+      await createPlatform('API', PlatformKind.Server, 1, otherProjectId);
+
+      const updated = await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, versionId, {
+          releasedDate: '2026-09-02',
+        }),
+      );
+
+      expect(updated.releasedDate).toBe('2026-09-02');
+    });
   });
 
   describe('роадмап и стадия', () => {

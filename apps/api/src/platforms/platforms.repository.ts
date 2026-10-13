@@ -160,25 +160,31 @@ export class PlatformsRepository {
    *
    * Явными строками, без каскада: на всех ссылках `restrict`, и удаление
    * без уборки упёрлось бы в ссылочную целостность.
+   *
+   * Возвращает число унесённых выпусков: это единственное место, где
+   * у проекта с платформами живут фактические даты релизов, а удаление
+   * платформы — штатный способ сменить её вид. Журналу нужно назвать
+   * потерю числом, и считать его потом уже негде.
    */
   async remove(
     subject: RequestSubject,
     tx: Transaction,
     projectId: string,
     platformId: string,
-  ): Promise<ProjectPlatformRow> {
+  ): Promise<ProjectPlatformRow & { releases: number }> {
     await this.access.requireLevel(subject, projectId, Section.Info, AccessLevel.Write, tx);
 
     const platform = await this.requireInProject(tx, projectId, platformId);
 
     await tx.delete(checkpointPlatforms).where(eq(checkpointPlatforms.platformId, platformId));
-    await tx
+    const releases = await tx
       .delete(versionPlatformReleases)
-      .where(eq(versionPlatformReleases.platformId, platformId));
+      .where(eq(versionPlatformReleases.platformId, platformId))
+      .returning({ versionId: versionPlatformReleases.versionId });
     await tx.delete(environmentPlatforms).where(eq(environmentPlatforms.platformId, platformId));
     await tx.delete(projectPlatforms).where(eq(projectPlatforms.id, platformId));
 
-    return platform;
+    return { ...platform, releases: releases.length };
   }
 
   /**

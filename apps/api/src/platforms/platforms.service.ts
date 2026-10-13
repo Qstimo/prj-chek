@@ -85,8 +85,9 @@ export class PlatformsService {
         entityType: 'platform',
         entityId: platformId,
         projectId,
-        // Имя — из удалённой строки: после удаления взять его негде.
-        metadata: { name: removed.name },
+        // Имя и число выпусков — из удалённой строки: после удаления
+        // взять их негде, а запись без них ссылается на то, чего не найти.
+        metadata: { name: removed.name, releases: removed.releases },
       });
     });
   }

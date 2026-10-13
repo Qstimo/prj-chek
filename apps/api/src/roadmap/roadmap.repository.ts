@@ -87,6 +87,7 @@ export class RoadmapRepository {
     input: RoadmapVersionCreate,
   ): Promise<RoadmapVersionRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.requireDateFromReleases(tx, projectId, input);
 
     const existing = await tx
       .select({ position: roadmapVersions.position, label: roadmapVersions.label })
@@ -124,6 +125,7 @@ export class RoadmapRepository {
   ): Promise<RoadmapVersionRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
     await this.requireVersion(tx, projectId, versionId);
+    await this.requireDateFromReleases(tx, projectId, input);
 
     if (input.label !== undefined) {
       const [duplicate] = await tx
@@ -595,6 +597,44 @@ export class RoadmapRepository {
     }
 
     return { versions, byVersion, platforms, releases, byRelease, tags };
+  }
+
+  /**
+   * У проекта с платформами дата релиза принадлежит выпуску, не версии.
+   *
+   * Отвергается присутствие ключа, а не значение: `null` — такая же
+   * запись в колонку, как и дата, а колонка перестала быть ответом
+   * в тот момент, когда у проекта появилась первая платформа. Иначе
+   * любой клиент, прочитавший версию и отправивший её поля обратно,
+   * записал бы вычисленную дату в колонку (дизайн релизов, раздел 6).
+   *
+   * Проверка здесь, а не в схеме контракта: правило зависит от состояния
+   * проекта, а zod о базе ничего не знает.
+   *
+   * Случай «платформы завели позже, в колонке прежняя дата» остаётся без
+   * прямой починки сознательно: починка есть и ведёт туда, куда должна, —
+   * первый же выпущенный выпуск перекрывает хранимую дату.
+   */
+  private async requireDateFromReleases(
+    tx: Transaction,
+    projectId: string,
+    input: RoadmapVersionCreate | RoadmapVersionUpdate,
+  ): Promise<void> {
+    if (!('releasedDate' in input)) {
+      return;
+    }
+
+    const [platform] = await tx
+      .select({ id: projectPlatforms.id })
+      .from(projectPlatforms)
+      .where(eq(projectPlatforms.projectId, projectId))
+      .limit(1);
+
+    if (platform) {
+      throw new ConflictException(
+        'Дата релиза задаётся выпуском платформы: укажите её в строке платформы у версии.',
+      );
+    }
   }
 
   /** Версия обязана принадлежать проекту из адреса. */

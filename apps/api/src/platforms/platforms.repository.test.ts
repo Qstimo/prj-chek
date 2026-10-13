@@ -217,6 +217,40 @@ describe('репозиторий платформ', () => {
     expect(await testDb.rowsOf(projectPlatforms)).toHaveLength(0);
   });
 
+  it('сообщает, сколько выпусков унесло удаление', async () => {
+    // Выпуски — единственное место, где у проекта с платформами живут
+    // фактические даты релизов. Журнал обязан назвать потерю числом.
+    const platformId = await createPlatform('App Store', PlatformKind.Store);
+    const labels = ['v1.0', 'v1.1'];
+
+    for (const [index, label] of labels.entries()) {
+      const [version] = await testDb.db
+        .insert(roadmapVersions)
+        .values({ projectId, label, position: index + 1 })
+        .returning();
+      await testDb.db
+        .insert(versionPlatformReleases)
+        .values({ versionId: version!.id, platformId, state: PlatformReleaseState.Released });
+    }
+
+    const removed = await testDb.db.transaction((tx) =>
+      repository.remove(admin(), tx, projectId, platformId),
+    );
+
+    expect(removed.releases).toBe(2);
+  });
+
+  it('у платформы без выпусков число нулевое, а не пустое', async () => {
+    // Иначе запись журнала пришлось бы читать как «неизвестно сколько».
+    const platformId = await createPlatform('API');
+
+    const removed = await testDb.db.transaction((tx) =>
+      repository.remove(admin(), tx, projectId, platformId),
+    );
+
+    expect(removed.releases).toBe(0);
+  });
+
   it('не ставит магазин в окружение', async () => {
     const storeId = await createPlatform('App Store', PlatformKind.Store);
 
