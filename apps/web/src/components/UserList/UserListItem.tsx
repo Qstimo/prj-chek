@@ -1,7 +1,8 @@
 import type { UserRow } from '@cairn/shared';
 import Link from 'next/link';
 
-import { statusOf } from './utils';
+// Состояние человека формулируется один раз — в карточке, где он виден целиком.
+import { statusOf } from '../UserCard';
 
 /** Пропсы строки пользователя. */
 interface IProps {
