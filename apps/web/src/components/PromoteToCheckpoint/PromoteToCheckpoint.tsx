@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 
+import { Select } from '../Select';
 import type { IProps } from './types';
 
 /**
@@ -50,18 +51,13 @@ export function PromoteToCheckpoint({
         <label htmlFor="promote-version" className="block text-sm font-medium">
           Версия
         </label>
-        <select
-          id="promote-version"
-          value={versionId}
-          onChange={(event) => setVersionId(event.target.value)}
-          className="w-full rounded-md border border-border px-3 py-2"
-        >
+        <Select id="promote-version" value={versionId} onChange={setVersionId}>
           {versions.map((version) => (
             <option key={version.id} value={version.id}>
               {version.label}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <div className="space-y-1">

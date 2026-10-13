@@ -2,6 +2,7 @@
 
 import type { ProjectLifecycle } from '@cairn/shared';
 
+import { Select } from '../Select';
 import { FIELD_LABELS, LIFECYCLE_OPTIONS } from './constants';
 
 /** Пропсы поля состояния жизненного цикла. */
@@ -17,18 +18,17 @@ export function LifecycleField({ value, onChange }: IProps) {
       <label htmlFor="lifecycle" className="block text-sm font-medium">
         {FIELD_LABELS.lifecycle}
       </label>
-      <select
+      <Select
         id="lifecycle"
         value={value}
-        onChange={(event) => onChange(event.target.value as ProjectLifecycle)}
-        className="w-full rounded-md border border-border px-3 py-2"
+        onChange={(next) => onChange(next as ProjectLifecycle)}
       >
         {LIFECYCLE_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
-      </select>
+      </Select>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { PlatformKind, type PlatformCreate } from '@cairn/shared';
 import { useState } from 'react';
 
+import { Select, SelectWidth } from '../Select';
 import { PLATFORM_KIND_LABELS } from './constants';
 
 /** Пропсы формы своей платформы. */
@@ -50,18 +51,18 @@ export function CustomPlatformForm({ onAdd }: IProps) {
         <label htmlFor="platform-kind" className="block text-sm font-medium">
           Вид
         </label>
-        <select
+        <Select
           id="platform-kind"
           value={kind}
-          onChange={(event) => setKind(event.target.value as PlatformKind)}
-          className="rounded-md border border-border px-3 py-2"
+          onChange={(next) => setKind(next as PlatformKind)}
+          width={SelectWidth.Auto}
         >
           {Object.values(PlatformKind).map((value) => (
             <option key={value} value={value}>
               {PLATFORM_KIND_LABELS[value]}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <button type="button" onClick={add} className="rounded-md border px-3 py-2 text-sm">

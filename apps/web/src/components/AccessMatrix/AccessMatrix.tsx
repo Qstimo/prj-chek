@@ -2,6 +2,7 @@
 
 import type { AccessLevel } from '@cairn/shared';
 
+import { Select, SelectWidth } from '../Select';
 import { FULL_ACCESS_LABEL, LEVEL_OPTIONS, SECTION_LABELS } from './constants';
 import type { IProps } from './types';
 
@@ -62,24 +63,24 @@ export function AccessMatrix({ rows, onChange }: IProps) {
               ) : (
                 SECTION_LABELS.map(({ section, label }) => (
                   <td key={section} className="border-b border-border p-2">
-                    <select
-                      aria-label={`${row.subjectEmail ?? row.subjectLabel}, ${label}`}
+                    <Select
+                      label={`${row.subjectEmail ?? row.subjectLabel}, ${label}`}
                       value={row.levels[section] ?? ''}
-                      onChange={(event) =>
+                      width={SelectWidth.Auto}
+                      onChange={(next) =>
                         onChange({
                           subjectId: row.subjectId,
                           section,
-                          level: (event.target.value || null) as AccessLevel | null,
+                          level: (next || null) as AccessLevel | null,
                         })
                       }
-                      className="rounded-md border border-border px-2 py-1"
                     >
                       {LEVEL_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </td>
                 ))
               )}

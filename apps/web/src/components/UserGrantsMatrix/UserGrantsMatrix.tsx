@@ -3,6 +3,7 @@
 import type { AccessLevel } from '@cairn/shared';
 
 import { LEVEL_OPTIONS, SECTION_LABELS } from '../AccessMatrix/constants';
+import { Select, SelectWidth } from '../Select';
 import { AddProjectField } from './AddProjectField';
 import type { IProps } from './types';
 
@@ -44,23 +45,23 @@ export function UserGrantsMatrix({ rows, candidates, onChange, onAddProject }: I
                   </th>
                   {SECTION_LABELS.map(({ section, label }) => (
                     <td key={section} className="border-b border-border p-2">
-                      <select
-                        aria-label={`${row.projectName}, ${label}`}
+                      <Select
+                        label={`${row.projectName}, ${label}`}
                         value={row.levels[section] ?? ''}
-                        onChange={(event) =>
+                        width={SelectWidth.Auto}
+                        onChange={(next) =>
                           onChange(row.projectId, {
                             section,
-                            level: (event.target.value || null) as AccessLevel | null,
+                            level: (next || null) as AccessLevel | null,
                           })
                         }
-                        className="rounded-md border border-border px-2 py-1"
                       >
                         {LEVEL_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     </td>
                   ))}
                 </tr>

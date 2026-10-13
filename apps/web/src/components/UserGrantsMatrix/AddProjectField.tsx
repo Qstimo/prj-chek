@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { Select, SelectWidth } from '../Select';
 import type { ProjectCandidate } from './types';
 
 /** Пропсы выбора проекта для новой строки. */
@@ -24,11 +25,11 @@ export function AddProjectField({ candidates, onAdd }: IProps) {
       <label htmlFor="add-project" className="text-sm text-muted-foreground">
         Добавить проект
       </label>
-      <select
+      <Select
         id="add-project"
         value={selected}
-        onChange={(event) => setSelected(event.target.value)}
-        className="rounded-md border border-border px-2 py-1"
+        onChange={setSelected}
+        width={SelectWidth.Auto}
       >
         <option value="">выбрать…</option>
         {candidates.map((candidate) => (
@@ -36,7 +37,7 @@ export function AddProjectField({ candidates, onAdd }: IProps) {
             {candidate.name}
           </option>
         ))}
-      </select>
+      </Select>
 
       <button
         type="button"

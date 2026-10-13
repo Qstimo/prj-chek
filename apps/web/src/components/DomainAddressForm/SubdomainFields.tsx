@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 import { FormError } from '../FormError';
+import { Select } from '../Select';
 import type { IAddressOption } from './types';
 
 /** Пропсы выбора проекта и окружения для поддомена. */
@@ -41,14 +42,13 @@ export function SubdomainFields({
         <label htmlFor="address-project" className="block text-sm font-medium">
           Проект
         </label>
-        <select
+        <Select
           id="address-project"
           value={projectId}
-          onChange={(event) => {
-            onProjectChange(event.target.value);
+          onChange={(next) => {
+            onProjectChange(next);
             setEnvironmentId('');
           }}
-          className="w-full rounded-md border border-border bg-surface px-3 py-2"
         >
           <option value="">Выберите проект</option>
           {projects.map((project) => (
@@ -56,26 +56,21 @@ export function SubdomainFields({
               {project.name}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <div className="space-y-1">
         <label htmlFor="address-environment" className="block text-sm font-medium">
           Окружение
         </label>
-        <select
-          id="address-environment"
-          value={environmentId}
-          onChange={(event) => setEnvironmentId(event.target.value)}
-          className="w-full rounded-md border border-border bg-surface px-3 py-2"
-        >
+        <Select id="address-environment" value={environmentId} onChange={setEnvironmentId}>
           <option value="">Выберите окружение</option>
           {environments.map((environment) => (
             <option key={environment.id} value={environment.id}>
               {environment.name}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <FormError message={error} />

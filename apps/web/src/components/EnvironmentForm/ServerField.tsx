@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '../Select';
 import { FIELD_LABELS, SERVER_HINT } from './constants';
 import type { ServerOption } from './types';
 
@@ -35,19 +36,14 @@ export function ServerField({ value, valueName, servers, canAssign, onChange }: 
       <label htmlFor="serverId" className="block text-sm font-medium">
         {FIELD_LABELS.serverId}
       </label>
-      <select
-        id="serverId"
-        value={value ?? ''}
-        onChange={(event) => onChange(event.target.value || null)}
-        className="w-full rounded-md border border-border px-3 py-2"
-      >
+      <Select id="serverId" value={value ?? ''} onChange={(next) => onChange(next || null)}>
         <option value="">Не привязан</option>
         {servers.map((server) => (
           <option key={server.id} value={server.id}>
             {server.name}
           </option>
         ))}
-      </select>
+      </Select>
       <p className="text-xs text-muted-foreground">{SERVER_HINT}</p>
     </div>
   );
