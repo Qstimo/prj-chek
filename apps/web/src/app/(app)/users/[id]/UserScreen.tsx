@@ -10,6 +10,7 @@ import { UserCard } from '@/components/UserCard';
 
 import { SUPERADMIN_ONLY } from '../constants';
 import { EditUserPanel } from './EditUserPanel';
+import { UserGrantsPanel } from './UserGrantsPanel';
 
 /** Пропсы экрана учётной записи. */
 interface IProps {
@@ -59,6 +60,8 @@ export function UserScreen({ userId }: IProps) {
       />
 
       {issued && <IssuedLink link={issued} title="Пароль сброшен" />}
+
+      <UserGrantsPanel user={user.data} />
     </div>
   );
 }
