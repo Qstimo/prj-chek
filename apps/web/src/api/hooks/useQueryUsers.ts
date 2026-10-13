@@ -8,6 +8,7 @@ import { apiClient } from '../client';
 /** Ключи кэша пользователей. */
 export const USER_KEYS = {
   all: ['users'] as const,
+  one: (userId: string) => ['users', userId] as const,
 };
 
 /** Список пользователей. Доступен только суперадмину (спека 8). */
