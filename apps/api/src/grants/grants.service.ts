@@ -1,4 +1,10 @@
-import { AuditSubjectKind, type GrantMatrixRow, type GrantRevoke, type GrantSet } from '@cairn/shared';
+import {
+  AuditSubjectKind,
+  type GrantMatrixRow,
+  type GrantRevoke,
+  type GrantSet,
+  type UserGrantRow,
+} from '@cairn/shared';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 
@@ -27,6 +33,11 @@ export class GrantsService {
   /** Возвращает матрицу «субъект × секция» для проекта. */
   async matrix(projectId: string): Promise<GrantMatrixRow[]> {
     return this.repository.matrixForProject(projectId);
+  }
+
+  /** Возвращает матрицу «проект × секция» для субъекта. */
+  async matrixForSubject(subjectId: string): Promise<UserGrantRow[]> {
+    return this.repository.matrixForSubject(subjectId);
   }
 
   /** Устанавливает уровень доступа. */

@@ -162,6 +162,33 @@ describe('выдачи доступа по HTTP', () => {
     await request(app.getHttpServer()).get(`/projects/${projectId}/grants`).expect(401);
   });
 
+  it('отдаёт выдачи человека по проектам', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    await admin
+      .put(`/projects/${projectId}/grants`)
+      .send({ subjectId: contractorSubjectId, section: Section.Info, level: AccessLevel.Read });
+
+    const response = await admin.get(`/users/${contractorUserId}/grants`).expect(200);
+
+    expect(response.body).toHaveLength(1);
+    expect(response.body[0]).toMatchObject({ projectId, projectName: 'Проект' });
+  });
+
+  it('без выдач отдаёт пустой список', async () => {
+    const admin = await signIn('admin@cairn.local');
+
+    const response = await admin.get(`/users/${contractorUserId}/grants`).expect(200);
+
+    expect(response.body).toEqual([]);
+  });
+
+  it('не-суперадмину выдачи человека закрыты', async () => {
+    const user = await signIn('user@cairn.local');
+
+    await user.get(`/users/${contractorUserId}/grants`).expect(403);
+  });
+
   it('повторное назначение пишется как изменение', async () => {
     const admin = await signIn('admin@cairn.local');
     const body = { subjectId: contractorSubjectId, section: Section.Info };
