@@ -1,6 +1,6 @@
 import { AuditSubjectKind, InvitationKind, type UserRow } from '@cairn/shared';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { desc, eq, isNull } from 'drizzle-orm';
+import { desc, eq, isNull, type SQL } from 'drizzle-orm';
 
 import { AuditService } from '../audit/audit.service';
 import { AuditAction, type AuditActor } from '../audit/audit.types';
@@ -30,18 +30,38 @@ export class UsersService {
     private readonly audit: AuditService,
   ) {}
 
+  /** Возвращает список пользователей. */
+  async list(): Promise<UserRow[]> {
+    return this.rows();
+  }
+
+  /** Возвращает одного пользователя либо бросает «не найдено». */
+  async findById(userId: string): Promise<UserRow> {
+    const [row] = await this.rows(eq(users.id, userId));
+
+    if (!row) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return row;
+  }
+
   /**
-   * Возвращает список пользователей.
+   * Собирает представления пользователей.
+   *
+   * Имя приходит из `subjects.label`: отдельного поля имени у учётки нет,
+   * и журнал денормализует именно метку субъекта.
    *
    * Хэш пароля и секрет второго фактора не попадают в ответ: секреты
    * не должны появляться в списочных ответах (ТЗ 9).
    */
-  async list(): Promise<UserRow[]> {
-    const rows = await this.db
+  private async rows(where?: SQL): Promise<UserRow[]> {
+    const base = this.db
       .select({
         id: users.id,
         subjectId: users.subjectId,
         subjectKind: subjects.kind,
+        name: subjects.label,
         email: users.email,
         isSuperadmin: users.isSuperadmin,
         isTotpEnabled: users.isTotpEnabled,
@@ -50,15 +70,16 @@ export class UsersService {
         createdAt: users.createdAt,
       })
       .from(users)
-      .innerJoin(subjects, eq(subjects.id, users.subjectId))
-      .orderBy(users.createdAt);
+      .innerJoin(subjects, eq(subjects.id, users.subjectId));
 
+    const rows = await (where ? base.where(where) : base).orderBy(users.createdAt);
     const lastLinks = await this.lastLinkKinds();
 
     return rows.map((row) => ({
       id: row.id,
       subjectId: row.subjectId,
       subjectKind: row.subjectKind,
+      name: row.name,
       email: row.email,
       isSuperadmin: row.isSuperadmin,
       isTotpEnabled: row.isTotpEnabled,

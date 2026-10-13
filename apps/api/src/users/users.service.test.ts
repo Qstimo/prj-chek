@@ -104,6 +104,25 @@ describe('UsersService', () => {
 
       expect(rows.find((row) => row.id === target.userId)?.isRevoked).toBe(true);
     });
+
+    it('отдаёт имя из метки субъекта', async () => {
+      const rows = await service.list();
+
+      expect(rows.find((row) => row.id === target.userId)?.name).toBe('user@cairn.local');
+    });
+  });
+
+  describe('findById', () => {
+    it('возвращает одного пользователя', async () => {
+      const row = await service.findById(target.userId);
+
+      expect(row.email).toBe('user@cairn.local');
+    });
+
+    it('для неизвестного бросает «не найдено»', async () => {
+      // Идентификатор субъекта не является идентификатором учётки.
+      await expect(service.findById(target.subjectId)).rejects.toThrow(/не найден/i);
+    });
   });
 
   describe('revoke', () => {
