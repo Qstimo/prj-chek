@@ -34,13 +34,20 @@ export class GrantsService {
     const grantedBy = await this.userIdOf(actor);
 
     await this.db.transaction(async (tx) => {
-      await this.repository.set(tx, projectId, grantedBy, input);
+      const previous = await this.repository.set(tx, projectId, grantedBy, input);
 
       await this.audit.record(tx, actorOf(actor), {
-        action: AuditAction.GrantCreated,
+        // Прежний уровень в метаданных: иначе по журналу не отличить
+        // повышение от понижения.
+        action: previous === null ? AuditAction.GrantCreated : AuditAction.GrantUpdated,
         entityType: 'grant',
         projectId,
-        metadata: { subjectId: input.subjectId, section: input.section, level: input.level },
+        metadata: {
+          subjectId: input.subjectId,
+          section: input.section,
+          level: input.level,
+          ...(previous === null ? {} : { previousLevel: previous }),
+        },
       });
     });
   }

@@ -1,4 +1,5 @@
 import {
+  type AccessLevel,
   type GrantMatrixRow,
   type GrantRevoke,
   type GrantSet,
@@ -24,13 +25,30 @@ import { grants, projects, subjects } from '../db/schema';
 export class GrantsRepository {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
-  /** Устанавливает уровень доступа для пары «субъект × секция». */
+  /**
+   * Устанавливает уровень доступа для пары «субъект × секция».
+   *
+   * Возвращает прежний уровень либо `null`, если выдачи не было: журналу
+   * нужно отличать первое назначение от повышения и понижения.
+   */
   async set(
     tx: Executor,
     projectId: string,
     grantedBy: string,
     input: GrantSet,
-  ): Promise<void> {
+  ): Promise<AccessLevel | null> {
+    const [existing] = await tx
+      .select({ level: grants.level })
+      .from(grants)
+      .where(
+        and(
+          eq(grants.subjectId, input.subjectId),
+          eq(grants.projectId, projectId),
+          eq(grants.section, input.section),
+        ),
+      )
+      .limit(1);
+
     await tx
       .insert(grants)
       .values({
@@ -44,6 +62,8 @@ export class GrantsRepository {
         target: [grants.subjectId, grants.projectId, grants.section],
         set: { level: input.level, grantedBy, grantedAt: new Date() },
       });
+
+    return existing?.level ?? null;
   }
 
   /**

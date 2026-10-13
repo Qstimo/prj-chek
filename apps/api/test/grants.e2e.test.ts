@@ -9,7 +9,7 @@ import { AuthModule } from '../src/auth/auth.module';
 import { PasswordService } from '../src/auth/password.service';
 import { DATABASE } from '../src/db/db.module';
 import { GrantsModule } from '../src/grants/grants.module';
-import { grants, projects, subjects, users } from '../src/db/schema';
+import { auditLog, grants, projects, subjects, users } from '../src/db/schema';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
 
 describe('выдачи доступа по HTTP', () => {
@@ -17,6 +17,7 @@ describe('выдачи доступа по HTTP', () => {
   let app: INestApplication;
   let projectId: string;
   let contractorSubjectId: string;
+  let contractorUserId: string;
   let adminUserId: string;
 
   beforeAll(async () => {
@@ -62,9 +63,11 @@ describe('выдачи доступа по HTTP', () => {
       .values({ kind: SubjectKind.User, label: 'user@cairn.local' })
       .returning();
     contractorSubjectId = contractorSubject!.id;
-    await testDb.db
+    const [contractor] = await testDb.db
       .insert(users)
-      .values({ subjectId: contractorSubjectId, email: 'user@cairn.local', passwordHash });
+      .values({ subjectId: contractorSubjectId, email: 'user@cairn.local', passwordHash })
+      .returning();
+    contractorUserId = contractor!.id;
 
     const [project] = await testDb.db
       .insert(projects)
@@ -157,5 +160,18 @@ describe('выдачи доступа по HTTP', () => {
 
   it('без входа отвечает 401', async () => {
     await request(app.getHttpServer()).get(`/projects/${projectId}/grants`).expect(401);
+  });
+
+  it('повторное назначение пишется как изменение', async () => {
+    const admin = await signIn('admin@cairn.local');
+    const body = { subjectId: contractorSubjectId, section: Section.Info };
+
+    await admin.put(`/projects/${projectId}/grants`).send({ ...body, level: AccessLevel.Read });
+    await admin.put(`/projects/${projectId}/grants`).send({ ...body, level: AccessLevel.Write });
+
+    const entries = await testDb.db.select().from(auditLog);
+    const updated = entries.find((entry) => entry.action === 'grant.updated');
+
+    expect(updated?.metadata).toMatchObject({ previousLevel: AccessLevel.Read });
   });
 });

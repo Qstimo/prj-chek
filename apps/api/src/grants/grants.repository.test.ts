@@ -83,6 +83,27 @@ describe('GrantsRepository', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]?.level).toBe(AccessLevel.Write);
     });
+
+    it('сообщает прежний уровень', async () => {
+      // Без прежнего уровня по журналу не отличить выдачу от понижения.
+      await testDb.db.transaction(async (tx) => {
+        expect(
+          await repository.set(tx, projectId, grantedBy, {
+            subjectId,
+            section: Section.Info,
+            level: AccessLevel.Read,
+          }),
+        ).toBeNull();
+
+        expect(
+          await repository.set(tx, projectId, grantedBy, {
+            subjectId,
+            section: Section.Info,
+            level: AccessLevel.Write,
+          }),
+        ).toBe(AccessLevel.Read);
+      });
+    });
   });
 
   describe('revoke', () => {
