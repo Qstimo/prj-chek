@@ -29,6 +29,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'invitation.accepted': 'Приглашение принято',
   'password_reset.requested': 'Запрошен сброс пароля',
   'password_reset.completed': 'Пароль установлен',
+  'user.updated': 'Изменена учётная запись',
   'subject.revoked': 'Отозван доступ субъекту',
   'subject.restored': 'Доступ субъекта восстановлен',
   'superadmin.created': 'Создан суперадминистратор',

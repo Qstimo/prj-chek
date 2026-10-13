@@ -1,11 +1,13 @@
 import {
   AccessLevel,
   Section,
+  type CurrentSubjectResponse,
   type Platform,
   type ProjectDetail,
   type ProjectMetadata,
   type SectionLevels,
 } from '@cairn/shared';
+import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
 import { ApiError } from '@/api';
@@ -27,11 +29,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
   let project: ProjectMetadata | ProjectDetail;
   let sections: SectionLevels;
+  let subject: CurrentSubjectResponse;
 
   try {
-    [project, sections] = await Promise.all([
+    [project, sections, subject] = await Promise.all([
       apiServer<ProjectMetadata | ProjectDetail>(`/projects/${id}`),
       apiServer<SectionLevels>(`/projects/${id}/sections`),
+      apiServer<CurrentSubjectResponse>('/auth/me'),
     ]);
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 401) {
@@ -62,6 +66,17 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   return (
     <main className="space-y-6 pb-6">
       <ProjectSections project={project} platforms={platforms ?? []} />
+
+      {/* Навигация проекта не трогается: её список — это секции, единицы
+          выдачи доступа, а доступы единицей выдачи не являются. */}
+      {subject.isSuperadmin && (
+        <Link
+          href={`/projects/${id}/access`}
+          className="inline-block rounded-md border px-3 py-1 text-sm"
+        >
+          Доступы
+        </Link>
+      )}
 
       {/* Панель требует полный паспорт: у проекции метаданных нет полей
           формы, и сузить тип нужно здесь. `notFound()` недопустим —
