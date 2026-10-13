@@ -174,6 +174,43 @@ describe('UsersService', () => {
 
       expect(entry?.metadata).toMatchObject({ fields: ['name'], revokedSessions: 0 });
     });
+
+    it('перечисляет только изменившиеся поля', async () => {
+      // Форма присылает оба поля всегда: перечень из ключей запроса
+      // утверждал бы смену почты при обычном переименовании.
+      await service.update(actor(), target.userId, {
+        name: 'Анна',
+        email: 'user@cairn.local',
+      });
+
+      const [entry] = await testDb.db
+        .select({ metadata: auditLog.metadata })
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.UserUpdated));
+
+      expect(entry?.metadata).toMatchObject({ fields: ['name'], revokedSessions: 0 });
+    });
+
+    it('правка без изменений в журнал не идёт', async () => {
+      await service.update(actor(), target.userId, {
+        name: 'user@cairn.local',
+        email: 'user@cairn.local',
+      });
+
+      const entries = await testDb.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.UserUpdated));
+
+      expect(entries).toEqual([]);
+    });
+
+    it('своя почта занятой не считается', async () => {
+      // Повторная отправка той же почты — не попытка занять чужой адрес.
+      await expect(
+        service.update(actor(), target.userId, { email: 'user@cairn.local' }),
+      ).resolves.toMatchObject({ email: 'user@cairn.local' });
+    });
   });
 
   describe('revoke', () => {

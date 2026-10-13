@@ -104,31 +104,44 @@ export class UsersService {
    * логин, и держать вход, выданный на прежний адрес, незачем.
    */
   async update(actor: ManagingActor, userId: string, input: UserUpdate): Promise<UserRow> {
-    const user = await this.requireUser(userId);
+    const current = await this.findById(userId);
+
+    // Сравнение с текущим значением, а не перечень ключей запроса: форма
+    // присылает оба поля всегда, и журнал утверждал бы смену почты при
+    // обычном переименовании.
+    const name = input.name !== undefined && input.name !== current.name ? input.name : null;
+    const email = input.email !== undefined && input.email !== current.email ? input.email : null;
+
+    if (name === null && email === null) {
+      return current;
+    }
 
     await this.db.transaction(async (tx) => {
       let revokedSessions = 0;
 
-      if (input.name !== undefined) {
-        await tx.update(subjects).set({ label: input.name }).where(eq(subjects.id, user.subjectId));
+      if (name !== null) {
+        await tx.update(subjects).set({ label: name }).where(eq(subjects.id, current.subjectId));
       }
 
-      if (input.email !== undefined && input.email !== user.email) {
-        await this.requireFreeEmail(tx, input.email);
+      if (email !== null) {
+        await this.requireFreeEmail(tx, email);
 
         await tx
           .update(users)
-          .set({ email: input.email, updatedAt: new Date() })
+          .set({ email, updatedAt: new Date() })
           .where(eq(users.id, userId));
 
-        revokedSessions = await this.sessions.revokeAllForSubject(tx, user.subjectId);
+        revokedSessions = await this.sessions.revokeAllForSubject(tx, current.subjectId);
       }
 
       await this.audit.record(tx, this.actorFor(actor), {
         action: AuditAction.UserUpdated,
         entityType: 'user',
         entityId: userId,
-        metadata: { fields: Object.keys(input), revokedSessions },
+        metadata: {
+          fields: [...(name === null ? [] : ['name']), ...(email === null ? [] : ['email'])],
+          revokedSessions,
+        },
       });
     });
 
