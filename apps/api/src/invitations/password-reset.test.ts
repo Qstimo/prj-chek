@@ -189,4 +189,19 @@ describe('приём ссылки', () => {
   it('отвергает неизвестный токен', async () => {
     await expect(service.acceptLink('нет такого', 'очень длинный пароль', {})).rejects.toThrow();
   });
+
+  it('в журнале стоит имя, а не почта', async () => {
+    // Все остальные записи приходят с subjects.label: иначе одна учётка
+    // выглядела бы в журнале то именем, то почтой.
+    const link = await service.invite(actor(), 'Анна', 'anna@example.com');
+
+    await service.acceptLink(link.token, 'очень длинный пароль', {});
+
+    const [entry] = await testDb.db
+      .select({ label: auditLog.subjectLabel })
+      .from(auditLog)
+      .where(eq(auditLog.action, AuditAction.InvitationAccepted));
+
+    expect(entry?.label).toBe('Анна');
+  });
 });

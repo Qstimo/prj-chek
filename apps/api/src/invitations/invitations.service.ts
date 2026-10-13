@@ -157,11 +157,20 @@ export class InvitationsService {
     }
 
     return this.db.transaction(async (tx) => {
-      const [user] = await tx.select().from(users).where(eq(users.id, link.userId)).limit(1);
+      // Метка субъекта достаётся вместе с учёткой: журнал везде называет
+      // человека ею, и запись принятия ссылки не должна выбиваться.
+      const [found] = await tx
+        .select({ user: users, label: subjects.label })
+        .from(users)
+        .innerJoin(subjects, eq(subjects.id, users.subjectId))
+        .where(eq(users.id, link.userId))
+        .limit(1);
 
-      if (!user) {
+      if (!found) {
         throw new NotFoundException('Пользователь не найден');
       }
+
+      const user = found.user;
 
       await tx
         .update(users)
@@ -175,7 +184,7 @@ export class InvitationsService {
 
       await this.audit.record(
         tx,
-        { kind: AuditSubjectKind.User, id: user.subjectId, label: user.email },
+        { kind: AuditSubjectKind.User, id: user.subjectId, label: found.label },
         {
           action:
             link.kind === InvitationKind.PasswordReset
