@@ -53,6 +53,7 @@ export enum AuditAction {
   AgentTokenUpdated = 'agent_token.updated',
   AgentTokenRevoked = 'agent_token.revoked',
   AgentToolCalled = 'agent.tool_called',
+  UserUpdated = 'user.updated',
   GrantCreated = 'grant.created',
   GrantUpdated = 'grant.updated',
   GrantRevoked = 'grant.revoked',

@@ -1,12 +1,18 @@
-import { AuditSubjectKind, InvitationKind, type UserRow } from '@cairn/shared';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { AuditSubjectKind, InvitationKind, type UserRow, type UserUpdate } from '@cairn/shared';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { desc, eq, isNull, type SQL } from 'drizzle-orm';
 
 import { AuditService } from '../audit/audit.service';
 import { AuditAction, type AuditActor } from '../audit/audit.types';
 import { SessionsRepository } from '../auth/sessions.repository';
 import { DATABASE } from '../db/db.module';
-import type { Database } from '../db/db.types';
+import type { Database, Executor } from '../db/db.types';
 import { invitations, subjects, users } from '../db/schema';
 
 /** Суперадмин, выполняющий действие. */
@@ -88,6 +94,45 @@ export class UsersService {
       lastLinkKind: lastLinks.get(row.id) ?? null,
       createdAt: row.createdAt.toISOString(),
     }));
+  }
+
+  /**
+   * Правит имя и почту.
+   *
+   * Имя живёт в `subjects.label`: его показывает журнал, и второе поле
+   * имени разошлось бы с ним. Смена почты завершает сессии — сменился
+   * логин, и держать вход, выданный на прежний адрес, незачем.
+   */
+  async update(actor: ManagingActor, userId: string, input: UserUpdate): Promise<UserRow> {
+    const user = await this.requireUser(userId);
+
+    await this.db.transaction(async (tx) => {
+      let revokedSessions = 0;
+
+      if (input.name !== undefined) {
+        await tx.update(subjects).set({ label: input.name }).where(eq(subjects.id, user.subjectId));
+      }
+
+      if (input.email !== undefined && input.email !== user.email) {
+        await this.requireFreeEmail(tx, input.email);
+
+        await tx
+          .update(users)
+          .set({ email: input.email, updatedAt: new Date() })
+          .where(eq(users.id, userId));
+
+        revokedSessions = await this.sessions.revokeAllForSubject(tx, user.subjectId);
+      }
+
+      await this.audit.record(tx, this.actorFor(actor), {
+        action: AuditAction.UserUpdated,
+        entityType: 'user',
+        entityId: userId,
+        metadata: { fields: Object.keys(input), revokedSessions },
+      });
+    });
+
+    return this.findById(userId);
   }
 
   /** Отзывает субъект пользователя и завершает его сессии. */
@@ -192,6 +237,24 @@ export class UsersService {
     }
 
     return user.id;
+  }
+
+  /**
+   * Требует, чтобы адрес был свободен.
+   *
+   * Уникальный индекс всё равно не дал бы занять чужую почту; проверка
+   * нужна, чтобы отказ был понятным `409`, а не сбоем вставки.
+   */
+  private async requireFreeEmail(tx: Executor, email: string): Promise<void> {
+    const [existing] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (existing) {
+      throw new ConflictException('Этот адрес уже занят');
+    }
   }
 
   /** Находит пользователя либо бросает «не найдено». */

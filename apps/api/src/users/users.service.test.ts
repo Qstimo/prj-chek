@@ -125,6 +125,57 @@ describe('UsersService', () => {
     });
   });
 
+  describe('update', () => {
+    it('правит имя', async () => {
+      const row = await service.update(actor(), target.userId, { name: 'Анна' });
+
+      expect(row.name).toBe('Анна');
+    });
+
+    it('правит почту', async () => {
+      const row = await service.update(actor(), target.userId, { email: 'anna@example.com' });
+
+      expect(row.email).toBe('anna@example.com');
+    });
+
+    it('занятую почту отвергает', async () => {
+      await expect(
+        service.update(actor(), target.userId, { email: 'admin@cairn.local' }),
+      ).rejects.toThrow(/занят/i);
+    });
+
+    it('смена почты завершает сессии', async () => {
+      // Сменился логин: вход, выданный на прежний адрес, держать незачем.
+      await testDb.db.transaction(async (tx) => {
+        await sessions.create(tx, target.subjectId, {});
+      });
+
+      await service.update(actor(), target.userId, { email: 'anna@example.com' });
+
+      const [entry] = await testDb.db
+        .select({ metadata: auditLog.metadata })
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.UserUpdated));
+
+      expect(entry?.metadata).toMatchObject({ revokedSessions: 1 });
+    });
+
+    it('смена только имени сессии не трогает', async () => {
+      await testDb.db.transaction(async (tx) => {
+        await sessions.create(tx, target.subjectId, {});
+      });
+
+      await service.update(actor(), target.userId, { name: 'Анна' });
+
+      const [entry] = await testDb.db
+        .select({ metadata: auditLog.metadata })
+        .from(auditLog)
+        .where(eq(auditLog.action, AuditAction.UserUpdated));
+
+      expect(entry?.metadata).toMatchObject({ fields: ['name'], revokedSessions: 0 });
+    });
+  });
+
   describe('revoke', () => {
     it('помечает субъект отозванным', async () => {
       await service.revoke(actor(), target.userId);
