@@ -1,5 +1,6 @@
 import { InvitationKind, SubjectKind } from '@cairn/shared';
 import { ConflictException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AuditService } from '../audit/audit.service';
@@ -49,7 +50,7 @@ describe('InvitationsService.invite', () => {
 
   describe('неизвестный адрес', () => {
     it('создаёт субъект, пользователя и ссылку', async () => {
-      const link = await service.invite(actor(), 'new@cairn.local');
+      const link = await service.invite(actor(), 'Новый', 'new@cairn.local');
 
       expect(link.token).toBeTruthy();
       expect(await testDb.db.select().from(users)).toHaveLength(2);
@@ -57,13 +58,13 @@ describe('InvitationsService.invite', () => {
 
     it('создаёт субъект сразу, чтобы доступы можно было выдать заранее', async () => {
       // Матрица доступов должна быть полной до первого входа (спека 4.6).
-      await service.invite(actor(), 'new@cairn.local');
+      await service.invite(actor(), 'Новый', 'new@cairn.local');
 
       expect(await testDb.db.select().from(subjects)).toHaveLength(2);
     });
 
     it('не хранит токен открытым', async () => {
-      const link = await service.invite(actor(), 'new@cairn.local');
+      const link = await service.invite(actor(), 'Новый', 'new@cairn.local');
 
       const [stored] = await testDb.db.select().from(invitations);
 
@@ -72,7 +73,7 @@ describe('InvitationsService.invite', () => {
     });
 
     it('помечает ссылку как приглашение', async () => {
-      await service.invite(actor(), 'new@cairn.local');
+      await service.invite(actor(), 'Новый', 'new@cairn.local');
 
       const [stored] = await testDb.db.select().from(invitations);
 
@@ -80,18 +81,29 @@ describe('InvitationsService.invite', () => {
     });
 
     it('пишет создание в журнал', async () => {
-      await service.invite(actor(), 'new@cairn.local');
+      await service.invite(actor(), 'Новый', 'new@cairn.local');
 
       const [entry] = await testDb.db.select().from(auditLog);
 
       expect(entry?.action).toBe(AuditAction.InvitationCreated);
     });
+
+    it('заводит субъект с именем', async () => {
+      await service.invite(actor(), 'Анна', 'anna@example.com');
+
+      const [row] = await testDb.db
+        .select({ label: subjects.label })
+        .from(subjects)
+        .where(eq(subjects.label, 'Анна'));
+
+      expect(row).toBeDefined();
+    });
   });
 
   describe('адрес известен, пароль не задан', () => {
     it('переиспользует пользователя и выдаёт новую ссылку', async () => {
-      await service.invite(actor(), 'new@cairn.local');
-      await service.invite(actor(), 'new@cairn.local');
+      await service.invite(actor(), 'Новый', 'new@cairn.local');
+      await service.invite(actor(), 'Новый', 'new@cairn.local');
 
       expect(await testDb.db.select().from(users)).toHaveLength(2);
       expect(await testDb.db.select().from(invitations)).toHaveLength(2);
@@ -99,16 +111,16 @@ describe('InvitationsService.invite', () => {
 
     it('гасит предыдущую ссылку', async () => {
       // Иначе две живые ссылки на одну учётную запись расширяют поверхность атаки.
-      const first = await service.invite(actor(), 'new@cairn.local');
-      await service.invite(actor(), 'new@cairn.local');
+      const first = await service.invite(actor(), 'Новый', 'new@cairn.local');
+      await service.invite(actor(), 'Новый', 'new@cairn.local');
 
       expect(await service.findUsableLink(first.token)).toBeNull();
     });
 
     it('пишет повторную выдачу отдельным событием', async () => {
       // Спека 7.2 требует различать создание и повторную выдачу.
-      await service.invite(actor(), 'new@cairn.local');
-      await service.invite(actor(), 'new@cairn.local');
+      await service.invite(actor(), 'Новый', 'new@cairn.local');
+      await service.invite(actor(), 'Новый', 'new@cairn.local');
 
       const entries = await testDb.db.select().from(auditLog);
 
@@ -117,25 +129,36 @@ describe('InvitationsService.invite', () => {
         AuditAction.InvitationReissued,
       ]);
     });
+
+    it('обновляет имя при повторной выдаче ссылки', async () => {
+      // Форма одна: человек вписывает актуальные данные, и имя не должно
+      // застревать на том, что ввели в первый раз.
+      await service.invite(actor(), 'Анна', 'anna@example.com');
+      await service.invite(actor(), 'Анна Петрова', 'anna@example.com');
+
+      const labels = await testDb.db.select({ label: subjects.label }).from(subjects);
+
+      expect(labels.map((row) => row.label)).toContain('Анна Петрова');
+    });
   });
 
   describe('адрес известен, пользователь активен', () => {
     it('отклоняет приглашение', async () => {
       // Молчаливое превращение приглашения в сброс обнулило бы пароль
       // работающему человеку (спека 4.6).
-      const link = await service.invite(actor(), 'new@cairn.local');
+      const link = await service.invite(actor(), 'Новый', 'new@cairn.local');
       await service.acceptLink(link.token, 'очень длинный пароль', {});
 
-      await expect(service.invite(actor(), 'new@cairn.local')).rejects.toBeInstanceOf(
+      await expect(service.invite(actor(), 'Новый', 'new@cairn.local')).rejects.toBeInstanceOf(
         ConflictException,
       );
     });
 
     it('сообщает, что нужен сброс пароля', async () => {
-      const link = await service.invite(actor(), 'new@cairn.local');
+      const link = await service.invite(actor(), 'Новый', 'new@cairn.local');
       await service.acceptLink(link.token, 'очень длинный пароль', {});
 
-      await expect(service.invite(actor(), 'new@cairn.local')).rejects.toThrow(/сброс/i);
+      await expect(service.invite(actor(), 'Новый', 'new@cairn.local')).rejects.toThrow(/сброс/i);
     });
   });
 });

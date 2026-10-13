@@ -50,7 +50,7 @@ export class InvitationsService {
    * пароля — выдаётся новая ссылка вместо прежней; активный пользователь —
    * отказ с указанием на сброс пароля.
    */
-  async invite(actor: InvitingActor, email: string): Promise<IssuedLink> {
+  async invite(actor: InvitingActor, name: string, email: string): Promise<IssuedLink> {
     const normalized = email.toLowerCase();
 
     return this.db.transaction(async (tx) => {
@@ -62,7 +62,14 @@ export class InvitationsService {
         );
       }
 
-      const user = existing ?? (await this.createUser(tx, normalized));
+      const user = existing ?? (await this.createUser(tx, name, normalized));
+
+      // Повторное приглашение правит имя: форма одна, и человек вписывает
+      // в неё актуальные данные, а не те, что были в первый раз.
+      if (existing) {
+        await tx.update(subjects).set({ label: name }).where(eq(subjects.id, existing.subjectId));
+      }
+
       const link = await this.issueLink(tx, user.id, InvitationKind.Invitation, actor.userId);
 
       await this.audit.record(
@@ -187,11 +194,11 @@ export class InvitationsService {
     });
   }
 
-  /** Создаёт субъект и пользователя без пароля. */
-  private async createUser(tx: Executor, email: string): Promise<User> {
+  /** Создаёт субъект и пользователя без пароля. Имя — метка субъекта. */
+  private async createUser(tx: Executor, name: string, email: string): Promise<User> {
     const [subject] = await tx
       .insert(subjects)
-      .values({ kind: SubjectKind.User, label: email })
+      .values({ kind: SubjectKind.User, label: name })
       .returning();
 
     const [user] = await tx.insert(users).values({ subjectId: subject!.id, email }).returning();

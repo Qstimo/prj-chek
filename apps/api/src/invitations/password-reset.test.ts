@@ -155,7 +155,7 @@ describe('приём ссылки', () => {
   const actor = () => ({ id: admin.subjectId, label: 'admin@cairn.local', userId: admin.id });
 
   it('выдаёт сессию, если второй фактор не привязан', async () => {
-    const link = await service.invite(actor(), 'new@cairn.local');
+    const link = await service.invite(actor(), 'Новый', 'new@cairn.local');
 
     const { sessionToken } = await service.acceptLink(link.token, 'очень длинный пароль', {});
 
@@ -164,7 +164,7 @@ describe('приём ссылки', () => {
 
   it('не выдаёт сессию, если второй фактор привязан', async () => {
     // Иначе ссылка сброса стала бы обходом второго фактора (спека 4.6).
-    const link = await service.invite(actor(), 'new@cairn.local');
+    const link = await service.invite(actor(), 'Новый', 'new@cairn.local');
     await testDb.db.update(users).set({ isTotpEnabled: true }).where(eq(users.id, link.userId));
 
     const { sessionToken } = await service.acceptLink(link.token, 'очень длинный пароль', {});
@@ -173,14 +173,14 @@ describe('приём ссылки', () => {
   });
 
   it('гасит ссылку после использования', async () => {
-    const link = await service.invite(actor(), 'new@cairn.local');
+    const link = await service.invite(actor(), 'Новый', 'new@cairn.local');
     await service.acceptLink(link.token, 'очень длинный пароль', {});
 
     await expect(service.acceptLink(link.token, 'другой пароль', {})).rejects.toThrow();
   });
 
   it('отвергает истёкшую ссылку', async () => {
-    const link = await service.invite(actor(), 'new@cairn.local');
+    const link = await service.invite(actor(), 'Новый', 'new@cairn.local');
     await testDb.db.update(invitations).set({ expiresAt: new Date(0) });
 
     await expect(service.acceptLink(link.token, 'очень длинный пароль', {})).rejects.toThrow();

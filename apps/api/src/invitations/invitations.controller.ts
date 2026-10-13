@@ -45,6 +45,7 @@ export class InvitationsController {
     const userId = await this.users.userIdOfSubject(subject.id);
     const link = await this.invitations.invite(
       { id: subject.id, label: subject.label, userId },
+      body.name,
       body.email,
     );
 
