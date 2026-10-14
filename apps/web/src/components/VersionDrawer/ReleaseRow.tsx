@@ -45,11 +45,12 @@ export function ReleaseRow({ platform, cell, versionLabel, onChange }: IProps) {
     onChange?.(platform.id, {
       state,
       // Обычный случай — релиз случился сегодня; дату можно поправить
-      // в поле рядом.
+      // в поле рядом. У остальных состояний даты нет вовсе: поле
+      // скрывается, и оставленное под ним значение стало бы невидимой
+      // правдой, а сводка считает, что у того, что в пути, даты выхода
+      // ещё нет.
       releasedDate:
-        state === PlatformReleaseState.Released && !cell?.releasedDate
-          ? today()
-          : (cell?.releasedDate ?? ''),
+        state === PlatformReleaseState.Released ? cell?.releasedDate || today() : '',
       buildLabel: cell?.buildLabel ?? '',
     });
   }

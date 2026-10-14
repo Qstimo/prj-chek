@@ -562,6 +562,41 @@ describe('VersionDrawer', () => {
       );
     });
 
+    it('уход из «в релизе» забирает дату с собой', async () => {
+      // Поле скрывается, и оставленное под ним значение было бы невидимой
+      // правдой: сводка считает, что у того, что в пути, даты выхода ещё
+      // нет (дизайн релизов, раздел 7).
+      const actions = makeActions();
+      render(
+        <VersionDrawer
+          version={withRelease}
+          platforms={[STORE]}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+          actions={actions}
+        />,
+      );
+
+      await userEvent.selectOptions(
+        screen.getByLabelText('Состояние App Store'),
+        PlatformReleaseState.InReview,
+      );
+      await userEvent.click(saveButton());
+
+      expect(actions.onSaveVersion).toHaveBeenCalledWith({}, [
+        {
+          platformId: STORE.id,
+          kind: 'set',
+          input: {
+            state: PlatformReleaseState.InReview,
+            releasedDate: null,
+            buildLabel: '1.2 (45)',
+          },
+        },
+      ]);
+    });
+
     it('дата видна только у «в релизе»', async () => {
       // У отправленного на модерацию даты выхода ещё нет, и поле для неё
       // обещало бы знание, которого нет.
