@@ -157,6 +157,24 @@ describe('VersionDrawer', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Есть несохранённые изменения');
   });
 
+  it('пустое обозначение сохранять нечем', async () => {
+    // Схема требует непустое имя: без этой проверки кнопка звала бы
+    // сервер за отказом 400.
+    render(
+      <VersionDrawer
+        version={detail}
+        isCurrent={false}
+        isOpen
+        onClose={vi.fn()}
+        actions={makeActions()}
+      />,
+    );
+
+    await userEvent.clear(screen.getByLabelText('Обозначение'));
+
+    expect(saveButton()).toBeDisabled();
+  });
+
   it('сохранение отдаёт патч только изменённых полей', async () => {
     const actions = makeActions();
     render(

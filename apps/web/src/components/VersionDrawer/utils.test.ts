@@ -82,6 +82,16 @@ describe('versionPatchOf', () => {
     });
   });
 
+  it('обозначение уходит обрезанным', () => {
+    // Сервер обрезает его сам (`z.string().trim()`), и необрезанный
+    // черновик остался бы навсегда отличным от сохранённой версии:
+    // кнопка не погасла бы и после успешной записи.
+    expect(versionPatchOf(metadata, { ...draft, label: 'v1.0 ' }, false)).toEqual({});
+    expect(versionPatchOf(metadata, { ...draft, label: ' v1.1 ' }, false)).toEqual({
+      label: 'v1.1',
+    });
+  });
+
   it('пустая дата уходит как null', () => {
     const withDate = { ...metadata, plannedDate: '2026-04-01' };
 
@@ -178,6 +188,15 @@ describe('releaseOpsOf', () => {
       API.id,
       STORE.id,
     ]);
+  });
+
+  it('платформа, которой нет в черновике, не снимается', () => {
+    // Платформу могли завести в другой вкладке: она приходит и в список,
+    // и в выпуски версии, а в черновике панели ключа для неё нет.
+    // Отсутствие ключа — «не трогали», а не «сняли».
+    const draft = draftOf(detail, []);
+
+    expect(releaseOpsOf(detail, draft, [API])).toEqual([]);
   });
 
   it('на уровне метаданных операций не бывает', () => {

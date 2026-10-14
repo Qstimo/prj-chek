@@ -67,9 +67,13 @@ export function versionPatchOf(
   hasPlatforms: boolean,
 ): RoadmapVersionUpdate {
   const patch: RoadmapVersionUpdate = {};
+  // Обозначение обрезается здесь, а не на сервере: тот обрежет его сам
+  // (`z.string().trim()`), и необрезанный черновик остался бы навсегда
+  // отличным от сохранённой версии — кнопка не погасла бы после записи.
+  const label = draft.label.trim();
 
-  if (draft.label !== version.label) {
-    patch.label = draft.label;
+  if (label !== version.label) {
+    patch.label = label;
   }
 
   if (draft.state !== version.state) {
@@ -111,6 +115,13 @@ export function releaseOpsOf(
   const ops: ReleaseOp[] = [];
 
   for (const platform of platforms) {
+    // Ключа в черновике нет — платформу завели уже после того, как панель
+    // открылась. Это «не трогали», а не «сняли»: иначе панель предложила
+    // бы удалить чужой выпуск, разбудив кнопку сама.
+    if (!(platform.id in draft.releases)) {
+      continue;
+    }
+
     const before = version.releases.find((candidate) => candidate.platformId === platform.id);
     const after = draft.releases[platform.id] ?? null;
 

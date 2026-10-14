@@ -49,6 +49,9 @@ export function VersionDrawer({
   const patch = versionPatchOf(version, draft, platforms.length > 0);
   const ops = releaseOpsOf(version, draft, platforms);
   const isDirty = isDirtyOf(patch, ops);
+  // Предупреждение остаётся, а кнопка спит: несохранённое есть, но
+  // отправлять пустое обозначение незачем — схема его не примет.
+  const canSave = isDirty && draft.label.trim().length > 0;
 
   /** Esc, подложка и крестик идут сюда: перехват у всех трёх общий. */
   function requestClose(): void {
@@ -70,7 +73,7 @@ export function VersionDrawer({
       actions={
         actions && (
           <SaveButton
-            canSave={isDirty}
+            canSave={canSave}
             isSaving={actions.isSavingVersion}
             onSave={() => actions.onSaveVersion(patch, ops)}
           />
@@ -86,14 +89,19 @@ export function VersionDrawer({
       <FormError message={actions?.saveError} />
 
       {isConfirmingClose && (
-        <ConfirmDialog
-          label={CLOSE_CONFIRM_LABEL}
-          confirmLabel={CLOSE_CONFIRM_ACTION}
-          onConfirm={onClose}
-          onCancel={() => setIsConfirmingClose(false)}
-        >
-          Изменения в версии «{version.label}» будут потеряны.
-        </ConfirmDialog>
+        // Прилипает под шапкой: Esc нажимают и в конце панели с десятком
+        // чекпоинтов, а вопрос, появившийся выше области просмотра,
+        // выглядел бы как «ничего не произошло».
+        <div className="sticky top-16 z-10">
+          <ConfirmDialog
+            label={CLOSE_CONFIRM_LABEL}
+            confirmLabel={CLOSE_CONFIRM_ACTION}
+            onConfirm={onClose}
+            onCancel={() => setIsConfirmingClose(false)}
+          >
+            Изменения в версии «{version.label}» будут потеряны.
+          </ConfirmDialog>
+        </div>
       )}
 
       {actions ? (

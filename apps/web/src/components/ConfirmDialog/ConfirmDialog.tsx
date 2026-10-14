@@ -12,10 +12,19 @@ import type { IProps } from './types';
  * рядом с чем стоит, и перекрывать собой панель, из которой пришло,
  * ему незачем. Таким же устроены подтверждения в реестрах серверов
  * и доменов.
+ *
+ * Фокус блок не забирает: внутри фокус-ловушки Radix это срабатывает
+ * раньше, чем ловушка заканчивает свою работу. Там, где блок может
+ * оказаться за пределами прокрученной области, место ему отводит
+ * вызывающий — панель версии держит его прилипшим под шапкой.
  */
 export function ConfirmDialog({ label, confirmLabel, onConfirm, onCancel, children }: IProps) {
   return (
-    <div role="dialog" aria-label={label} className="rounded-md border border-border p-4">
+    <div
+      role="dialog"
+      aria-label={label}
+      className="rounded-md border border-border bg-background p-4"
+    >
       <p className="text-sm">{children}</p>
 
       <div className="mt-3 flex gap-2">

@@ -25,15 +25,18 @@ export function Drawer({
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
         <Dialog.Content
           aria-describedby={undefined}
-          className={`fixed inset-y-0 right-0 z-50 w-full ${WIDTH_CLASSES[width]} animate-drawer-in space-y-4 overflow-y-auto border-l border-border bg-background p-6`}
+          // Верхнего отступа у панели нет: его держит шапка. Прилипший
+          // элемент пинается к верху padding box, и `pt-6` оставил бы над
+          // шапкой полосу, через которую при прокрутке просвечивает текст.
+          className={`fixed inset-y-0 right-0 z-50 w-full ${WIDTH_CLASSES[width]} animate-drawer-in space-y-4 overflow-y-auto border-l border-border bg-background px-6 pb-6`}
         >
           {/*
             Шапка прилипает к верху: содержимое панели прокручивается,
             и уехавшая шапка унесла бы с собой и закрытие, и сохранение.
-            Отрицательные отступы растягивают её на `p-6` содержимого —
-            иначе из-под неё при прокрутке видно текст по краям.
+            Отрицательные поля по бокам растягивают её фон на отступы
+            панели, а верхний отступ она держит сама (см. выше).
           */}
-          <header className="sticky top-0 z-10 -mx-6 -mt-6 flex items-start justify-between gap-4 bg-background px-6 pb-4 pt-6">
+          <header className="sticky top-0 z-10 -mx-6 flex items-start justify-between gap-4 bg-background px-6 pb-4 pt-6">
             <Dialog.Title className="text-lg font-medium">{title}</Dialog.Title>
             <div className="flex items-center gap-2">
               {actions}
