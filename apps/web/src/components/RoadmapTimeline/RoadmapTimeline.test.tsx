@@ -101,6 +101,18 @@ describe('RoadmapTimeline', () => {
     expect(container.querySelector('[data-version="v1.0"][data-current="true"]')).toBeNull();
   });
 
+  it('одна версия не раздувает отметку на всю ширину', () => {
+    // Колонка делит ширину поровну, а разметка отметки масштабируется
+    // вместе с ней: единственная версия растягивала круг в семь раз.
+    // Шаг — потолок, а не ширина: на десятке версий колонки по-прежнему
+    // сжимаются.
+    const { container } = render(
+      <RoadmapTimeline versions={[versions[0]!]} currentIndex={0} />,
+    );
+
+    expect(container.querySelector('[data-column]')).toHaveClass('max-w-24');
+  });
+
   it('пустой роадмап объясняется словами', () => {
     render(<RoadmapTimeline versions={[]} currentIndex={null} />);
 

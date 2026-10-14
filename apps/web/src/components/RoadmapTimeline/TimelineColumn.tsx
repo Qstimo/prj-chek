@@ -43,16 +43,28 @@ export function TimelineColumn({ version, isCurrent, isFirst, isLast, onSelect }
     </>
   );
 
+  // `max-w-24` — это тот же `STEP`: шаг оси, а не ширина колонки. Без
+  // потолка единственная версия забирала всю ширину диаграммы, и разметка
+  // отметки масштабировалась вместе с ней — круг раздувался в семь раз.
+  // Снизу потолок ничего не держит: на десятке версий `flex-1` по-прежнему
+  // сжимает колонки, и отметки уменьшаются вместе с шагом.
+  const columnClassName = 'min-w-0 max-w-24 flex-1';
+
   if (!onSelect) {
-    return <div className="min-w-0 flex-1">{content}</div>;
+    return (
+      <div data-column className={columnClassName}>
+        {content}
+      </div>
+    );
   }
 
   return (
     <button
       type="button"
+      data-column
       aria-label={`Версия ${version.label}`}
       onClick={() => onSelect(version.id)}
-      className="min-w-0 flex-1 rounded-md"
+      className={`${columnClassName} rounded-md`}
     >
       {content}
     </button>
