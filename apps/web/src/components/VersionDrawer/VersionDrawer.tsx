@@ -131,7 +131,11 @@ export function VersionDrawer({
         <section className="space-y-2">
           <h3 className="text-sm font-medium">
             {CHECKPOINTS_TITLE}
-            <span className="ml-2 font-normal text-muted-foreground">— {CHECKPOINTS_HINT}</span>
+            {/* Напоминание — только тем, кто правит: на публичной странице
+                менять нечего, и «меняются сразу» было бы ложью. */}
+            {actions && (
+              <span className="ml-2 font-normal text-muted-foreground">— {CHECKPOINTS_HINT}</span>
+            )}
           </h3>
 
           <CheckpointList

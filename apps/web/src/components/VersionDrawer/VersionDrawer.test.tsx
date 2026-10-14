@@ -98,6 +98,9 @@ describe('VersionDrawer', () => {
     expect(screen.queryByLabelText('Обозначение')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Удалить версию' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Доставка')).toBeDisabled();
+    // Напоминание «меняются сразу» на публичной странице было бы ложью:
+    // менять там нечего.
+    expect(screen.queryByText(/меняются сразу/i)).not.toBeInTheDocument();
   });
 
   it('версия-метаданные — без блока чекпоинтов', () => {

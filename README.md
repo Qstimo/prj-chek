@@ -90,10 +90,15 @@ pnpm --filter @cairn/api cli create-superadmin admin@example.com
 
 ```bash
 pnpm --filter @cairn/api dev
-pnpm --filter @cairn/web dev
+CAIRN_ALLOW_INSECURE_NO_TOTP=1 pnpm --filter @cairn/web dev
 ```
 
 Интерфейс — http://localhost:3000
+
+Переменная задаётся в строке запуска, а не берётся из `.env`: Next читает
+`.env` рядом с приложением, а не в корне монорепо, и флаг до веб-процесса
+не доходит. Без него суперадмин без привязанного второго фактора упирается
+в `/security` и дальше не идёт (см. «Второй фактор»).
 
 ### Миграции
 
