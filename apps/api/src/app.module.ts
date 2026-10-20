@@ -11,10 +11,12 @@ import { DocsModule } from './docs/docs.module';
 import { EnvironmentsModule } from './environments/environments.module';
 import { GrantsModule } from './grants/grants.module';
 import { HealthModule } from './health/health.module';
+import { IncidentsModule } from './incidents/incidents.module';
 import { IntakeModule } from './intake/intake.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { PlatformsModule } from './platforms/platforms.module';
 import { ProjectsModule } from './projects/projects.module';
+import { PushModule } from './push/push.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
 import { StatusModule } from './status/status.module';
 import { DomainsModule } from './domains/domains.module';
@@ -39,6 +41,8 @@ import { VariablesModule } from './variables/variables.module';
     RoadmapModule,
     DocsModule,
     StatusModule,
+    IncidentsModule,
+    PushModule,
     IntakeModule,
     AgentsModule,
     GrantsModule,
