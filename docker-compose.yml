@@ -32,6 +32,12 @@ services:
       DATABASE_OWNER_URL: postgres://cairn_owner:${POSTGRES_PASSWORD:?}@postgres:5432/cairn
       CAIRN_ENCRYPTION_KEY: ${CAIRN_ENCRYPTION_KEY:?CAIRN_ENCRYPTION_KEY не задан}
       CAIRN_WEB_URL: ${CAIRN_WEB_URL:-http://localhost}
+      # Уведомления о падении. Без всех трёх ключей выключены целиком:
+      # пара генерируется `pnpm --filter @cairn/api cli generate-vapid-keys`.
+      CAIRN_VAPID_PUBLIC_KEY: ${CAIRN_VAPID_PUBLIC_KEY:-}
+      CAIRN_VAPID_PRIVATE_KEY: ${CAIRN_VAPID_PRIVATE_KEY:-}
+      CAIRN_VAPID_SUBJECT: ${CAIRN_VAPID_SUBJECT:-}
+      CAIRN_HEALTH_RECHECK_DELAY_SECONDS: ${CAIRN_HEALTH_RECHECK_DELAY_SECONDS:-30}
       NODE_ENV: production
     depends_on:
       postgres:
