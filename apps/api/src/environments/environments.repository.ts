@@ -441,29 +441,47 @@ export class EnvironmentsRepository {
     return grouped;
   }
 
-  /** Заменяет набор доменов окружения целиком. */
+  /**
+   * Приводит набор адресов окружения к заданному.
+   *
+   * Разницей по имени, а не пересозданием набора целиком: у адреса,
+   * оставшегося на месте, сохраняются и строка статуса, и инциденты.
+   * Пока набор пересоздавался, любая правка окружения — хоть
+   * переименование — стирала историю падений вместе с открытым
+   * инцидентом: следующий прогон открывал второй и присылал второе
+   * «не отвечает» о той же аварии, а индикатор до прогона уходил
+   * в «неизвестно».
+   */
   private async replaceDomains(
     tx: Transaction,
     environmentId: string,
     domains: string[],
   ): Promise<void> {
-    // Статусы проверок ссылаются на домены с restrict (каскады запрещены):
-    // без явной очистки замена доменов падала бы по внешнему ключу.
     const existing = await tx
-      .select({ id: environmentDomains.id })
+      .select({ id: environmentDomains.id, name: environmentDomains.name })
       .from(environmentDomains)
       .where(eq(environmentDomains.environmentId, environmentId));
 
-    if (existing.length > 0) {
-      const domainIds = existing.map((domain) => domain.id);
+    const wanted = new Set(domains);
+    const departed = existing.filter((domain) => !wanted.has(domain.name));
 
-      await tx.delete(domainStatuses).where(inArray(domainStatuses.domainId, domainIds));
-      await tx.delete(addressIncidents).where(inArray(addressIncidents.domainId, domainIds));
+    if (departed.length > 0) {
+      const departedIds = departed.map((domain) => domain.id);
+
+      // Статусы и инциденты ссылаются на адрес с restrict (каскады
+      // запрещены): без явной очистки удаление упёрлось бы во внешний ключ.
+      await tx.delete(domainStatuses).where(inArray(domainStatuses.domainId, departedIds));
+      await tx.delete(addressIncidents).where(inArray(addressIncidents.domainId, departedIds));
+      await tx.delete(environmentDomains).where(inArray(environmentDomains.id, departedIds));
     }
 
-    await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
+    const known = new Set(existing.map((domain) => domain.name));
 
-    await this.insertDomains(tx, environmentId, domains);
+    await this.insertDomains(
+      tx,
+      environmentId,
+      domains.filter((name) => !known.has(name)),
+    );
   }
 
   /**

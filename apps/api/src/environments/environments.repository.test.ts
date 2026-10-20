@@ -380,6 +380,76 @@ describe('репозиторий окружений', () => {
       expect(domains.map((domain) => domain.name)).toEqual(['api.example.com']);
     });
 
+    it('оставшийся адрес сохраняет свой идентификатор и инциденты', async () => {
+      // Пока набор адресов пересоздавался целиком, переименование
+      // окружения стирало историю падений и открытый инцидент: следующий
+      // прогон открывал второй и присылал второе «не отвечает» о той же
+      // аварии.
+      const id = await createProd();
+      const [before] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+      await testDb.db.insert(addressIncidents).values({ domainId: before!.id, cause: 'HTTP 500' });
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, {
+          name: 'Боевой',
+          domains: ['example.com'],
+        }),
+      );
+
+      const [after] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+      const incidents = await testDb.rowsOf(addressIncidents);
+
+      expect(after?.id).toBe(before!.id);
+      expect(incidents).toHaveLength(1);
+      expect(incidents[0]?.resolvedAt).toBeNull();
+    });
+
+    it('оставшийся адрес сохраняет и строку статуса', async () => {
+      // Иначе индикатор проекта уходил бы в «неизвестно» от любой правки
+      // окружения — до следующего прогона проверок.
+      const id = await createProd();
+      const [domain] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+      await testDb.db
+        .insert(domainStatuses)
+        .values({ domainId: domain!.id, health: HealthState.Up });
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { domains: ['example.com'] }),
+      );
+
+      expect(await testDb.db.select().from(domainStatuses)).toHaveLength(1);
+    });
+
+    it('ушедший адрес уносит свои инциденты, а пришедший заводится', async () => {
+      const id = await createProd();
+      const [before] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+      await testDb.db.insert(addressIncidents).values({ domainId: before!.id, cause: 'таймаут' });
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { domains: ['api.example.com'] }),
+      );
+
+      const after = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+
+      expect(after.map((domain) => domain.name)).toEqual(['api.example.com']);
+      expect(await testDb.rowsOf(addressIncidents)).toHaveLength(0);
+    });
+
     it('заменяет домены и после записанных инцидентов', async () => {
       // Инцидент ссылается на адрес с restrict, как и статус: без явной
       // очистки замена адресов падала бы по внешнему ключу.
