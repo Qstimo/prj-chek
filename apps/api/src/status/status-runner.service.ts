@@ -17,6 +17,7 @@ import { checkDomainExpiry } from './checkers/domain.checker';
 import { checkHealth, type HealthResult } from './checkers/health.checker';
 import { checkTls } from './checkers/tls.checker';
 import { INCIDENT_NOTIFIER, type IncidentNotifier } from './notifier';
+import { recheckDelayMsOf } from './recheck-delay';
 import { StatusRepository, type AddressTarget } from './status.repository';
 
 /** Набор проверщиков; в тестах подменяется подделками. */
@@ -25,6 +26,12 @@ export interface Checkers {
   checkTls: typeof checkTls;
   checkDomainExpiry: typeof checkDomainExpiry;
   resolveAddress: typeof resolveAddress;
+}
+
+/** Как запускать прогон. */
+export interface RunOptions {
+  /** Ручной запуск: человек ждёт ответа, и паузы переспроса не будет. */
+  isManual?: boolean;
 }
 
 /** Токен внедрения набора проверщиков. */
@@ -96,7 +103,7 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    * Последовательно: масштаб системы — десятки проектов, и простота
    * важнее скорости (ТЗ 9). Падение одного адреса не прерывает обход.
    */
-  async runAll(): Promise<void> {
+  async runAll(options: RunOptions = {}): Promise<void> {
     const targets = await this.repository.listTargets();
     const health = new Map<string, HealthResult>();
     const suspects: AddressTarget[] = [];
@@ -130,7 +137,7 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    await this.recheck(suspects, health);
+    await this.recheck(suspects, health, options.isManual ?? false);
     await this.adoptMachines();
     await this.settleIncidents(targets.addresses, health);
   }
@@ -146,12 +153,13 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   private async recheck(
     suspects: AddressTarget[],
     health: Map<string, HealthResult>,
+    isManual: boolean,
   ): Promise<void> {
     if (suspects.length === 0) {
       return;
     }
 
-    await this.pause();
+    await this.pause(isManual);
 
     for (const address of suspects) {
       try {
@@ -169,21 +177,18 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Пауза перед переспросом: `CAIRN_HEALTH_RECHECK_DELAY_SECONDS`.
-   *
-   * `0` означает «переспросить сразу, без паузы», а не «не
-   * переспрашивать»: так в тестах. Выключателя у переспроса нет — он
-   * дешёвый, и отказываться от него незачем.
-   */
-  private async pause(): Promise<void> {
-    const seconds = Number(process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS ?? '30');
+  /** Пауза перед переспросом; решение о её длине — в `recheckDelayMsOf`. */
+  private async pause(isManual: boolean): Promise<void> {
+    const delayMs = recheckDelayMsOf(process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS, isManual);
 
-    if (!Number.isFinite(seconds) || seconds <= 0) {
+    if (delayMs === 0) {
       return;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+    await new Promise<void>((resolve) => {
+      // Процесс не должен жить ради паузы — как и ради таймера прогона.
+      setTimeout(resolve, delayMs).unref();
+    });
   }
 
   /**

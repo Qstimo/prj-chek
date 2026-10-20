@@ -342,6 +342,25 @@ describe('runner статусов', () => {
     ]);
   });
 
+  it('ручной запуск переспрашивает, но паузы не берёт', async () => {
+    // Человек смотрит на кнопку «Проверить сейчас»: пауза в полминуты
+    // держала бы запрос браузера без всякой обратной связи.
+    await seedOneTarget();
+    process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS = '600';
+
+    const checkHealth = vi
+      .fn()
+      .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' });
+
+    try {
+      await runnerWith({ checkHealth }).runAll({ isManual: true });
+    } finally {
+      process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS = '0';
+    }
+
+    expect(checkHealth).toHaveBeenCalledTimes(2);
+  });
+
   it('отказ рассылки не валит прогон', async () => {
     // Статус важнее уведомления: инцидент обязан остаться записанным.
     await seedOneTarget();
