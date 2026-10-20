@@ -429,7 +429,7 @@ Expected: FAIL — модули не найдены
 `apps/api/src/db/schema/incidents.ts`:
 
 ```ts
-import { desc, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { index, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 import { environmentDomains } from './environments';
@@ -468,7 +468,10 @@ export const addressIncidents = pgTable(
       .where(sql`${table.resolvedAt} is null`),
     // Для чтения истории: частичный индекс выше видит только открытые
     // строки, а экран адреса читает все.
-    index('address_incidents_domain').on(table.domainId, desc(table.startedAt)),
+    // Убывающий столбец задаётся методом самого столбца: в колбэке
+    // дополнений drizzle даёт `ExtraConfigColumn` с `.desc()`, а функция
+    // `desc()` из `drizzle-orm` предназначена для `orderBy` запроса.
+    index('address_incidents_domain').on(table.domainId, table.startedAt.desc()),
   ],
 );
 
