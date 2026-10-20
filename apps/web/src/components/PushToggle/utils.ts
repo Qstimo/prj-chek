@@ -20,11 +20,19 @@ export function isPushSupported(): boolean {
  * в base64url — с «-» и «_» вместо «+» и «/» и без хвостового
  * выравнивания.
  */
-export function applicationServerKeyOf(publicKey: string): Uint8Array {
+export function applicationServerKeyOf(publicKey: string): Uint8Array<ArrayBuffer> {
   const padded = publicKey.padEnd(publicKey.length + ((4 - (publicKey.length % 4)) % 4), '=');
   const binary = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
+  // Буфер заводится явно: `Uint8Array.from` отдаёт вид над
+  // `ArrayBufferLike`, а `applicationServerKey` принимает только вид
+  // над настоящим `ArrayBuffer`.
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
 
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
 }
 
 /** Подписывает это устройство и отдаёт то, что нужно серверу. */
