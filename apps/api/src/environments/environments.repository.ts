@@ -24,6 +24,7 @@ import type { RequestSubject } from '../access/access.types';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
 import {
+  addressIncidents,
   domainStatuses,
   environmentDomains,
   environmentPlatforms,
@@ -248,12 +249,12 @@ export class EnvironmentsRepository {
       .where(eq(environmentDomains.environmentId, environmentId));
 
     if (domains.length > 0) {
-      await tx.delete(domainStatuses).where(
-        inArray(
-          domainStatuses.domainId,
-          domains.map((domain) => domain.id),
-        ),
-      );
+      const domainIds = domains.map((domain) => domain.id);
+
+      await tx.delete(domainStatuses).where(inArray(domainStatuses.domainId, domainIds));
+      // Инциденты — такие же производные данные, как статусы, и ссылка
+      // у них стоит на restrict.
+      await tx.delete(addressIncidents).where(inArray(addressIncidents.domainId, domainIds));
     }
 
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
@@ -351,8 +352,10 @@ export class EnvironmentsRepository {
       throw new NotFoundException('Адрес не найден');
     }
 
-    // Статусы проверок ссылаются на адрес с restrict (каскады запрещены).
+    // Статусы проверок и инциденты ссылаются на адрес с restrict
+    // (каскады запрещены).
     await tx.delete(domainStatuses).where(eq(domainStatuses.domainId, domain.id));
+    await tx.delete(addressIncidents).where(eq(addressIncidents.domainId, domain.id));
     await tx.delete(environmentDomains).where(eq(environmentDomains.id, domain.id));
 
     return this.touch(tx, environmentId);
@@ -452,12 +455,10 @@ export class EnvironmentsRepository {
       .where(eq(environmentDomains.environmentId, environmentId));
 
     if (existing.length > 0) {
-      await tx.delete(domainStatuses).where(
-        inArray(
-          domainStatuses.domainId,
-          existing.map((domain) => domain.id),
-        ),
-      );
+      const domainIds = existing.map((domain) => domain.id);
+
+      await tx.delete(domainStatuses).where(inArray(domainStatuses.domainId, domainIds));
+      await tx.delete(addressIncidents).where(inArray(addressIncidents.domainId, domainIds));
     }
 
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));

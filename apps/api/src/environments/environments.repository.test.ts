@@ -16,6 +16,7 @@ import { PlatformsRepository } from '../platforms/platforms.repository';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import {
+  addressIncidents,
   domainStatuses,
   domains,
   environmentDomains,
@@ -379,6 +380,23 @@ describe('репозиторий окружений', () => {
       expect(domains.map((domain) => domain.name)).toEqual(['api.example.com']);
     });
 
+    it('заменяет домены и после записанных инцидентов', async () => {
+      // Инцидент ссылается на адрес с restrict, как и статус: без явной
+      // очистки замена адресов падала бы по внешнему ключу.
+      const id = await createProd();
+      const [domain] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+      await testDb.db.insert(addressIncidents).values({ domainId: domain!.id, cause: 'таймаут' });
+
+      await testDb.db.transaction((tx) =>
+        repository.update(admin(), tx, projectId, id, { domains: [] }),
+      );
+
+      expect(await testDb.db.select().from(addressIncidents)).toHaveLength(0);
+    });
+
     it('заменяет домены и после прогона автопроверок', async () => {
       // Статус ссылается на домен с restrict: без явной очистки статусов
       // замена доменов падала бы по внешнему ключу (как в remove).
@@ -489,6 +507,21 @@ describe('репозиторий окружений', () => {
       await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id));
 
       expect(await testDb.db.select().from(domainStatuses)).toHaveLength(0);
+    });
+
+    it('удаляет окружение вместе с инцидентами его адресов', async () => {
+      // Инциденты — такие же производные данные, как статусы, и своё
+      // окружение переживать не должны.
+      const id = await createProd();
+      const [domain] = await testDb.db
+        .select()
+        .from(environmentDomains)
+        .where(eq(environmentDomains.environmentId, id));
+      await testDb.db.insert(addressIncidents).values({ domainId: domain!.id, cause: 'HTTP 500' });
+
+      await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id));
+
+      expect(await testDb.db.select().from(addressIncidents)).toHaveLength(0);
     });
 
     it('не удаляет окружение, у которого есть переменные', async () => {
@@ -710,6 +743,19 @@ describe('репозиторий окружений', () => {
 
       expect(environment.domains).toEqual([]);
       expect(await testDb.db.select().from(domainStatuses)).toHaveLength(0);
+    });
+
+    it('убирает адрес вместе с его инцидентами', async () => {
+      // Та же причина, что у статусов: ссылка стоит на restrict.
+      const id = await createStage();
+      const domain = await domainRowOf(id, 'stage.example.com');
+      await testDb.db.insert(addressIncidents).values({ domainId: domain.id, cause: 'таймаут' });
+
+      await testDb.db.transaction((tx) =>
+        repository.removeDomain(admin(), tx, projectId, id, domain.id),
+      );
+
+      expect(await testDb.db.select().from(addressIncidents)).toHaveLength(0);
     });
 
     it('оставляет корень в реестре после снятия адреса', async () => {
