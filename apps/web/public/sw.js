@@ -32,17 +32,21 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
-  // Уже открытое окно приложения переиспользуется: второй таб CAIRN
-  // человеку не нужен.
+  // Сравнивается путь, а не вхождение подстроки: адрес сводки — «/», и
+  // он входит в любой адрес, поэтому `includes` фокусировал первое же
+  // открытое окно CAIRN вместо страницы, на которую сам указывает.
+  const target = new URL(url, self.location.origin);
+
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
       for (const client of windows) {
-        if (client.url.includes(url) && 'focus' in client) {
+        if (new URL(client.url).pathname === target.pathname && 'focus' in client) {
           return client.focus();
         }
       }
 
-      return self.clients.openWindow(url);
+      // Нужной страницы нет ни в одном окне — открыть её.
+      return self.clients.openWindow(target.href);
     }),
   );
 });
