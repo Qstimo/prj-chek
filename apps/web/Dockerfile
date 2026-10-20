@@ -22,6 +22,11 @@ WORKDIR /app
 COPY --from=builder /app/apps/web/.next/standalone ./
 # Статику Next трассировка не переносит: её кладут рядом с сервером вручную.
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+# `public` трассировка не переносит по той же причине. Без этой строки
+# `/sw.js` отдаёт 404, регистрация service worker падает, и уведомления
+# невозможно включить — при зелёных тестах, потому что в разработке файл
+# отдаёт dev-сервер.
+COPY --from=builder /app/apps/web/public ./apps/web/public
 
 ENV NODE_ENV=production
 ENV PORT=3000
