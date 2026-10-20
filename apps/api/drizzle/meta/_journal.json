@@ -197,6 +197,20 @@
       "when": 1791401470306,
       "tag": "0027_release_platform_privileges",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792500335903,
+      "tag": "0028_fuzzy_blade",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792500336903,
+      "tag": "0029_incidents_push_privileges",
+      "breakpoints": true
     }
   ]
 }
