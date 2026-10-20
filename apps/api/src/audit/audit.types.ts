@@ -9,6 +9,8 @@ export enum AuditAction {
   TotpChallengeExhausted = 'totp.challenge_exhausted',
   TotpEnabled = 'totp.enabled',
   TotpReset = 'totp.reset',
+  PushSubscribed = 'push.subscribed',
+  PushUnsubscribed = 'push.unsubscribed',
   ProjectCreated = 'project.created',
   ProjectUpdated = 'project.updated',
   PlatformCreated = 'platform.created',
