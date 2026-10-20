@@ -29,12 +29,21 @@ export enum SendOutcome {
 /** Коды, означающие, что подписки больше не существует. */
 const GONE_CODES = [404, 410];
 
+/** Лог фабрики: она работает до появления экземпляра отправителя. */
+const factoryLogger = new Logger('PushTransport');
+
 /**
  * Боевой транспорт на `web-push`.
  *
  * `null`, когда ключи не заданы: уведомления выключаются целиком, как
  * прогон проверок при `CAIRN_STATUS_CHECK_INTERVAL_MINUTES=0`. Отдельного
  * флага «включить уведомления» нет — наличие ключей и есть флаг.
+ *
+ * Негодные ключи выключают уведомления так же, как незаданные, а не
+ * бросают: фабрика работает при инициализации Nest, и исключение здесь
+ * уводило бы контейнер API в перезапуск по кругу — из-за необязательной
+ * функции падал бы весь реестр. `setVapidDetails` разборчив: он требует
+ * `mailto:` либо `https:` в subject и ключи точной длины в base64url.
  */
 export function realTransport(): PushTransport | null {
   const publicKey = process.env.CAIRN_VAPID_PUBLIC_KEY;
@@ -45,7 +54,14 @@ export function realTransport(): PushTransport | null {
     return null;
   }
 
-  webpush.setVapidDetails(subject, publicKey, privateKey);
+  try {
+    webpush.setVapidDetails(subject, publicKey, privateKey);
+  } catch (cause) {
+    // Сами ключи в лог не пишутся: приватный — секрет.
+    factoryLogger.error(`Ключи уведомлений негодны, уведомления выключены: ${cause}`);
+
+    return null;
+  }
 
   return async (target, payload) => {
     await webpush.sendNotification(target, payload);
