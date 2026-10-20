@@ -1,5 +1,5 @@
 import type { PushSubscribeRequest } from '@cairn/shared';
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
 
 import { DATABASE } from '../db/db.module';
@@ -28,20 +28,37 @@ export interface StoredSubscription {
 export class PushRepository {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
-  /** Заводит подписку либо обновляет ключи существующей. */
+  /**
+   * Заводит подписку либо обновляет ключи своей существующей.
+   *
+   * Чужой адрес отвергается, а не переходит к новому владельцу: иначе
+   * подсунутый endpoint начал бы слать на чужое устройство имена моих
+   * проектов и адресов. Устройство, сменившее хозяина, браузер в любом
+   * случае переподпишет с новым адресом.
+   */
   async save(
     subjectId: string,
     input: PushSubscribeRequest,
     executor: Executor = this.db,
   ): Promise<void> {
+    const [existing] = await executor
+      .select({ subjectId: pushSubscriptions.subjectId })
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.endpoint, input.endpoint))
+      .limit(1);
+
+    if (existing && existing.subjectId !== subjectId) {
+      throw new ConflictException('Этот адрес подписки принадлежит другому субъекту');
+    }
+
     await executor
       .insert(pushSubscriptions)
       .values({ subjectId, ...input })
       .onConflictDoUpdate({
         target: pushSubscriptions.endpoint,
-        // Владелец тоже обновляется: устройство могли передать другому
-        // человеку, и адресатом должен стать он.
-        set: { subjectId, p256dh: input.p256dh, auth: input.auth },
+        // Свою подписку браузер пересоздаёт сам, когда служба меняет
+        // ключи: обновляются именно они.
+        set: { p256dh: input.p256dh, auth: input.auth },
       });
   }
 

@@ -4,7 +4,7 @@ import {
   type PushKeyResponse,
   type PushSubscribeRequest,
 } from '@cairn/shared';
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
@@ -49,6 +49,13 @@ export class PushService {
   /** Заводит подписку устройства и пишет действие в журнал. */
   async subscribe(subject: RequestSubject, input: PushSubscribeRequest): Promise<void> {
     requireHuman(subject);
+
+    // Дизайн §6: ключи не заданы — уведомления выключены целиком. Иначе
+    // в базе завелась бы строка и запись в журнале о канале, по которому
+    // ничего никогда не придёт.
+    if (this.publicKey().publicKey === null) {
+      throw new ConflictException('Уведомления выключены: ключи не заданы');
+    }
 
     await this.db.transaction(async (tx) => {
       await this.subscriptions.save(subject.id, input, tx);

@@ -56,6 +56,42 @@ function withVapid(
   }
 }
 
+/** То же, что {@link withVapid}, но для асинхронного тела. */
+async function withVapidAsync(
+  keys: { public?: string; private?: string; subject?: string },
+  body: () => Promise<void>,
+): Promise<void> {
+  const saved = {
+    public: process.env.CAIRN_VAPID_PUBLIC_KEY,
+    private: process.env.CAIRN_VAPID_PRIVATE_KEY,
+    subject: process.env.CAIRN_VAPID_SUBJECT,
+  };
+
+  const apply = (values: typeof saved) => {
+    const pairs: [string, string | undefined][] = [
+      ['CAIRN_VAPID_PUBLIC_KEY', values.public],
+      ['CAIRN_VAPID_PRIVATE_KEY', values.private],
+      ['CAIRN_VAPID_SUBJECT', values.subject],
+    ];
+
+    for (const [name, value] of pairs) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  };
+
+  apply({ public: keys.public, private: keys.private, subject: keys.subject });
+
+  try {
+    await body();
+  } finally {
+    apply(saved);
+  }
+}
+
 describe('служба подписок', () => {
   let testDb: TestDatabase;
   let service: PushService;
@@ -73,6 +109,11 @@ describe('служба подписок', () => {
 
   beforeEach(async () => {
     await testDb.truncate();
+    // Подписка требует включённых уведомлений: тесты её путей ставят
+    // ключи, а тест выключенного состояния снимает их сам.
+    process.env.CAIRN_VAPID_PUBLIC_KEY = 'ключ';
+    process.env.CAIRN_VAPID_PRIVATE_KEY = 'секрет';
+    process.env.CAIRN_VAPID_SUBJECT = 'mailto:admin@example.com';
 
     const [subject] = await testDb.db
       .insert(subjects)
@@ -139,6 +180,17 @@ describe('служба подписок', () => {
     // Браузера у него нет, а субъект в таблице подписок — есть,
     // и без проверки вида там завелась бы бессмысленная строка.
     await expect(service.subscribe(agentSubject(), SUBSCRIPTION)).rejects.toThrow();
+  });
+
+  it('при выключенных уведомлениях подписка отвергается', async () => {
+    // Дизайн §6: ключи не заданы — уведомления выключены целиком. Иначе
+    // в базе завелась бы строка и запись в журнале о канале, по которому
+    // ничего никогда не придёт.
+    await withVapidAsync({}, async () => {
+      await expect(service.subscribe(userSubject(), SUBSCRIPTION)).rejects.toThrow();
+    });
+
+    expect(await testDb.rowsOf(auditLog)).toHaveLength(0);
   });
 
   it('публичный ключ отдаётся, когда заданы все три переменные', () => {

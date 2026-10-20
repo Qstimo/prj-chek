@@ -65,6 +65,18 @@ describe('репозиторий подписок', () => {
     expect(stored[0]?.p256dh).toBe('новый');
   });
 
+  it('чужой адрес подписки не переходит к другому субъекту', async () => {
+    // Молчаливая передача владения означала бы, что чужое устройство
+    // начнёт получать имена моих проектов и адресов: endpoint секретный,
+    // но тихо менять адресата всё равно нельзя.
+    await repository.save(otherSubjectId, SUBSCRIPTION);
+
+    await expect(repository.save(subjectId, SUBSCRIPTION)).rejects.toThrow();
+
+    expect(await repository.forSubjects([otherSubjectId])).toHaveLength(1);
+    expect(await repository.forSubjects([subjectId])).toHaveLength(0);
+  });
+
   it('снимает только свою подписку', async () => {
     await repository.save(subjectId, SUBSCRIPTION);
 
