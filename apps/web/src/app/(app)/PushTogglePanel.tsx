@@ -5,11 +5,15 @@ import { useEffect, useState } from 'react';
 import { useMutationPushSubscribe, useMutationPushUnsubscribe, useQueryPushKey } from '@/api/hooks';
 import { PushToggle } from '@/components/PushToggle';
 import {
+  deviceEndpointOf,
+  dropDeviceSubscription,
   hasDeviceSubscription,
   isPushSupported,
   subscribeDevice,
-  unsubscribeDevice,
 } from '@/components/PushToggle/utils';
+
+/** Что сказать, когда причина отказа неизвестна. */
+const FAILURE_TEXT = 'Не удалось включить уведомления';
 
 /**
  * Подписка этого устройства на уведомления о падениях.
@@ -24,6 +28,7 @@ export function PushTogglePanel() {
   const unsubscribe = useMutationPushUnsubscribe();
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>('default');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isPushSupported()) {
@@ -49,14 +54,30 @@ export function PushTogglePanel() {
     setIsSubscribed(true);
   }
 
+  /** Сервер узнаёт об отписке раньше браузера: иначе повторить нечем. */
   async function disable(): Promise<void> {
-    const endpoint = await unsubscribeDevice();
+    const endpoint = await deviceEndpointOf();
 
     if (endpoint) {
       await unsubscribe.mutateAsync(endpoint);
     }
 
+    await dropDeviceSubscription();
     setIsSubscribed(false);
+  }
+
+  /**
+   * Зовёт действие и показывает отказ.
+   *
+   * Без этого `void enable()` глотал любое исключение: кнопка молча
+   * возвращалась в исходное состояние, а человек не знал, почему
+   * уведомления не включились.
+   */
+  function attempt(action: () => Promise<void>): void {
+    setError(null);
+    void action().catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : FAILURE_TEXT);
+    });
   }
 
   return (
@@ -66,8 +87,9 @@ export function PushTogglePanel() {
       isSubscribed={isSubscribed}
       isSupported={isPushSupported()}
       isBusy={subscribe.isPending || unsubscribe.isPending}
-      onSubscribe={() => void enable()}
-      onUnsubscribe={() => void disable()}
+      error={error}
+      onSubscribe={() => attempt(enable)}
+      onUnsubscribe={() => attempt(disable)}
     />
   );
 }

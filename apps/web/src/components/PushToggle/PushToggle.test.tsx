@@ -82,4 +82,24 @@ describe('кнопка уведомлений', () => {
 
     expect(screen.getByRole('button')).toBeDisabled();
   });
+  it('показывает, что подписка не удалась', () => {
+    // Молчаливый отказ оставлял человека в недоумении: кнопка
+    // возвращалась в исходное состояние без всякого объяснения.
+    render(
+      <PushToggle
+        publicKey="к"
+        permission="default"
+        isSubscribed={false}
+        error="Не удалось включить уведомления"
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Не удалось включить уведомления');
+  });
+
+  it('без ошибки сообщения нет', () => {
+    render(<PushToggle publicKey="к" permission="default" isSubscribed={false} />);
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });

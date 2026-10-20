@@ -47,20 +47,27 @@ export async function subscribeDevice(publicKey: string): Promise<PushSubscribeR
   return keysOf(subscription);
 }
 
-/** Снимает подписку устройства и отдаёт её адрес для снятия на сервере. */
-export async function unsubscribeDevice(): Promise<string | null> {
+/**
+ * Адрес подписки этого устройства, не снимая её.
+ *
+ * Отдельно от снятия намеренно: сервер должен узнать об отписке раньше
+ * браузера. Снимешь браузерную первой — при отказе запроса повторить
+ * будет нечем: адреса больше нет, а строка на сервере осталась, и
+ * субъект до первого отказа push-службы считается живым адресатом.
+ */
+export async function deviceEndpointOf(): Promise<string | null> {
   const registration = await navigator.serviceWorker.getRegistration(WORKER_PATH);
   const subscription = await registration?.pushManager.getSubscription();
 
-  if (!subscription) {
-    return null;
-  }
+  return subscription?.endpoint ?? null;
+}
 
-  const { endpoint } = subscription;
+/** Снимает подписку в самом браузере. Зовётся после ответа сервера. */
+export async function dropDeviceSubscription(): Promise<void> {
+  const registration = await navigator.serviceWorker.getRegistration(WORKER_PATH);
+  const subscription = await registration?.pushManager.getSubscription();
 
-  await subscription.unsubscribe();
-
-  return endpoint;
+  await subscription?.unsubscribe();
 }
 
 /** Есть ли у этого устройства подписка. */

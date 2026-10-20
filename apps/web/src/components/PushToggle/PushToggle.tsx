@@ -14,6 +14,7 @@ export function PushToggle({
   isSubscribed,
   isSupported = true,
   isBusy = false,
+  error = null,
   onSubscribe,
   onUnsubscribe,
 }: IProps) {
@@ -29,13 +30,21 @@ export function PushToggle({
   const label = isSubscribed ? UNSUBSCRIBE_LABEL : SUBSCRIBE_LABEL;
 
   return (
-    <button
-      type="button"
-      disabled={isBusy}
-      onClick={() => (isSubscribed ? onUnsubscribe?.() : onSubscribe?.())}
-      className="rounded-md border px-3 py-1 text-sm disabled:opacity-50"
-    >
-      {isBusy ? BUSY_LABEL : label}
-    </button>
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        disabled={isBusy}
+        onClick={() => (isSubscribed ? onUnsubscribe?.() : onSubscribe?.())}
+        className="rounded-md border px-3 py-1 text-sm disabled:opacity-50"
+      >
+        {isBusy ? BUSY_LABEL : label}
+      </button>
+
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

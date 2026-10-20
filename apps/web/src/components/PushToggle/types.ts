@@ -10,6 +10,8 @@ export interface IProps {
   isSupported?: boolean;
   /** Запрос в пути: повторное нажатие бессмысленно. */
   isBusy?: boolean;
+  /** Что сказать, когда прошлая попытка не удалась. */
+  error?: string | null;
   onSubscribe?: () => void;
   onUnsubscribe?: () => void;
 }
