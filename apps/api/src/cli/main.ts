@@ -6,6 +6,7 @@ import { writeSync } from 'node:fs';
 import { loadEnv } from '../env';
 import { CliModule } from './cli.module';
 import { CliCommands } from './commands';
+import { formatVapidKeys, generateVapidKeys } from './vapid';
 
 /**
  * Точка входа команд консоли.
@@ -25,7 +26,19 @@ async function main(): Promise<void> {
 
   const [command, email] = process.argv.slice(2);
 
-  if (!command || !email) {
+  if (!command) {
+    writeSync(2, USAGE);
+    process.exit(1);
+  }
+
+  // До контекста Nest: ключи считаются на месте, база для этого не нужна,
+  // и почты у команды нет — проверка на неё идёт ниже.
+  if (command === 'generate-vapid-keys') {
+    writeSync(1, formatVapidKeys(generateVapidKeys()));
+    process.exit(0);
+  }
+
+  if (!email) {
     writeSync(2, USAGE);
     process.exit(1);
   }
@@ -78,6 +91,7 @@ const USAGE = `Использование:
   pnpm --filter @cairn/api cli create-superadmin <email>
   pnpm --filter @cairn/api cli reset-password <email>
   pnpm --filter @cairn/api cli reset-totp <email>
+  pnpm --filter @cairn/api cli generate-vapid-keys
 `;
 
 void main();
