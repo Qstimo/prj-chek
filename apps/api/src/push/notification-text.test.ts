@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { IncidentEventKind, type IncidentEvent } from '../incidents/incidents.service';
-import { notificationOf } from './notification-text';
+import { notificationOf, stormNotificationOf } from './notification-text';
 
 const BASE: IncidentEvent = {
   kind: IncidentEventKind.Opened,
@@ -68,5 +68,36 @@ describe('текст уведомления', () => {
 
   it('ведёт на инфраструктуру проекта', () => {
     expect(notificationOf(BASE).url).toBe(`/projects/${BASE.projectId}/infrastructure`);
+  });
+});
+
+describe('сводное уведомление', () => {
+  it('падение многих адресов считает их и склоняет', () => {
+    expect(stormNotificationOf(IncidentEventKind.Opened, 12).title).toBe('Не отвечает 12 адресов');
+  });
+
+  it('склонение по числу', () => {
+    expect(stormNotificationOf(IncidentEventKind.Opened, 4).title).toBe('Не отвечает 4 адреса');
+    expect(stormNotificationOf(IncidentEventKind.Opened, 21).title).toBe('Не отвечает 21 адрес');
+  });
+
+  it('массовое восстановление тоже сводится', () => {
+    expect(stormNotificationOf(IncidentEventKind.Resolved, 7).title).toBe(
+      'Отвечают снова 7 адресов',
+    );
+  });
+
+  it('ведёт на сводку, где предупреждения уже перечислены', () => {
+    expect(stormNotificationOf(IncidentEventKind.Opened, 5).url).toBe('/');
+  });
+
+  it('метка одна на вид события: вторая сводка заменяет первую', () => {
+    // Иначе лоток забьётся сводками об одной и той же аварии.
+    expect(stormNotificationOf(IncidentEventKind.Opened, 5).tag).toBe(
+      stormNotificationOf(IncidentEventKind.Opened, 9).tag,
+    );
+    expect(stormNotificationOf(IncidentEventKind.Opened, 5).tag).not.toBe(
+      stormNotificationOf(IncidentEventKind.Resolved, 5).tag,
+    );
   });
 });

@@ -62,3 +62,20 @@ function durationOf(from: Date, to: Date): string {
 
   return `${hours} ${pluralOf(hours, ['час', 'часа', 'часов'])}`;
 }
+
+/** Сводное уведомление о шторме: сколько адресов и куда смотреть. */
+export function stormNotificationOf(kind: IncidentEventKind, count: number): NotificationText {
+  const addresses = `${count} ${pluralOf(count, ['адрес', 'адреса', 'адресов'])}`;
+
+  return {
+    title:
+      kind === IncidentEventKind.Resolved
+        ? `Отвечают снова ${addresses}`
+        : `Не отвечает ${addresses}`,
+    body: 'Подробности — на сводке проектов',
+    url: '/',
+    // Метка одна на вид события: вторая сводка об одной аварии заменяет
+    // первую, а не ложится рядом.
+    tag: `storm-${kind}`,
+  };
+}
