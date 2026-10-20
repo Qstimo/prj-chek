@@ -12,6 +12,7 @@ export * from './schemas/incident';
 export * from './schemas/intake';
 export * from './schemas/platform';
 export * from './schemas/project';
+export * from './schemas/push';
 export * from './schemas/roadmap';
 export * from './schemas/section-levels';
 export * from './schemas/server';
