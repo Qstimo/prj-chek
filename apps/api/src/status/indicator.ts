@@ -10,6 +10,8 @@ import {
   type StatusWarning,
 } from '@cairn/shared';
 
+import { pluralOf } from '../common/plural';
+
 /** Предупреждать о TLS за две недели. */
 export const TLS_WARN_DAYS = 14;
 
@@ -236,20 +238,5 @@ function daysUntil(isoDay: string, now: Date): number {
 
 /** Склоняет дни для текста о просрочке. */
 function daysAgoOf(days: number): string {
-  const lastTwo = days % 100;
-  const last = days % 10;
-
-  if (lastTwo >= 11 && lastTwo <= 14) {
-    return `${days} дней`;
-  }
-
-  if (last === 1) {
-    return `${days} день`;
-  }
-
-  if (last >= 2 && last <= 4) {
-    return `${days} дня`;
-  }
-
-  return `${days} дней`;
+  return `${days} ${pluralOf(days, ['день', 'дня', 'дней'])}`;
 }
