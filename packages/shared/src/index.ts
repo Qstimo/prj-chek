@@ -8,6 +8,7 @@ export * from './schemas/doc';
 export * from './schemas/domain';
 export * from './schemas/environment';
 export * from './schemas/grant';
+export * from './schemas/incident';
 export * from './schemas/intake';
 export * from './schemas/platform';
 export * from './schemas/project';
