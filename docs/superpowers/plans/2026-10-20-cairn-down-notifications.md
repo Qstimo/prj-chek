@@ -43,7 +43,8 @@ TDD: сначала падающий тест, затем реализация. 
 | `apps/api/src/incidents/incidents.repository.ts` | открыть, закрыть, прочитать инциденты |
 | `apps/api/src/incidents/incidents.service.ts` | сведение состояния адресов в события |
 | `apps/api/src/incidents/incidents.controller.ts` | `GET /projects/:id/incidents` |
-| `apps/api/src/push/notification-text.ts` | чистые тексты уведомлений |
+| `apps/api/src/push/notification-text.ts` | чистые тексты уведомлений, включая сводный |
+| `apps/api/src/push/constants.ts` | порог шторма |
 | `apps/api/src/push/push.repository.ts` | подписки устройств |
 | `apps/api/src/push/push.sender.ts` | транспорт и разбор отказов |
 | `apps/api/src/push/push.notifier.ts` | события → адресаты → тексты → отправка |
@@ -62,7 +63,7 @@ TDD: сначала падающий тест, затем реализация. 
 
 1. **Чанк 1** — контракт и база: схемы, таблицы, миграции, уборка при удалении.
 2. **Чанк 2** — инциденты: правило перехода, репозиторий, трёхфазный прогон.
-3. **Чанк 3** — пуши: текст, адресаты, транспорт, уведомитель.
+3. **Чанк 3** — пуши: текст, адресаты, транспорт, уведомитель, сводка при шторме.
 4. **Чанк 4** — ручки, журнал, генерация ключей.
 5. **Чанк 5** — веб: service worker, кнопка, история у адреса.
 6. **Чанк 6** — документация и полная проверка.
@@ -368,6 +369,17 @@ describe('инциденты адреса', () => {
     expect(index?.config.where).toBeDefined();
   });
 
+  it('история адреса читается по своему индексу', () => {
+    // Частичный уникальный покрывает только открытые строки, а история
+    // читается по всем: без этого индекса запрос пошёл бы сканом по
+    // таблице, которая намеренно не чистится.
+    const index = getTableConfig(addressIncidents).indexes.find(
+      (candidate) => candidate.config.name === 'address_incidents_domain',
+    );
+
+    expect(index?.config.unique).toBe(false);
+  });
+
   it('ссылка на адрес не каскадная: уборка явная', () => {
     // Каскадов в проекте нет: строки уносит репозиторий окружений явно,
     // в той же транзакции, что и строки статусов.
@@ -417,8 +429,8 @@ Expected: FAIL — модули не найдены
 `apps/api/src/db/schema/incidents.ts`:
 
 ```ts
-import { sql } from 'drizzle-orm';
-import { pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { desc, sql } from 'drizzle-orm';
+import { index, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 import { environmentDomains } from './environments';
 
@@ -454,6 +466,9 @@ export const addressIncidents = pgTable(
     uniqueIndex('address_incidents_open')
       .on(table.domainId)
       .where(sql`${table.resolvedAt} is null`),
+    // Для чтения истории: частичный индекс выше видит только открытые
+    // строки, а экран адреса читает все.
+    index('address_incidents_domain').on(table.domainId, desc(table.startedAt)),
   ],
 );
 
@@ -507,7 +522,7 @@ export * from './push';
 - [ ] **Step 4: Прогнать — должно пройти**
 
 Run: `cd apps/api && npx vitest run src/db/schema/incidents.test.ts src/db/schema/push.test.ts`
-Expected: PASS, 7 тестов
+Expected: PASS, 8 тестов
 
 - [ ] **Step 5: Коммит**
 
@@ -535,7 +550,8 @@ Run: `cat apps/api/drizzle/0028_*.sql`
 Обязательно должно быть:
 
 - `CREATE TABLE "address_incidents"` и `CREATE TABLE "push_subscriptions"`;
-- `CREATE UNIQUE INDEX "address_incidents_open" ON "address_incidents" ("domain_id") WHERE "address_incidents"."resolved_at" is null` — **условие `WHERE` обязательно**. Если генератор его потерял, допиши вручную: без условия индекс запретит второе падение адреса за всё время, а не второе одновременное.
+- `CREATE UNIQUE INDEX "address_incidents_open" ON "address_incidents" ("domain_id") WHERE "address_incidents"."resolved_at" is null` — **условие `WHERE` обязательно**. Если генератор его потерял, допиши вручную: без условия индекс запретит второе падение адреса за всё время, а не второе одновременное;
+- `CREATE INDEX "address_incidents_domain" ON "address_incidents" ("domain_id","started_at" DESC)` — обычный, не уникальный.
 
 - [ ] **Step 3: Написать миграцию привилегий**
 
@@ -827,6 +843,19 @@ describe('репозиторий инцидентов', () => {
     expect(address?.past).toHaveLength(1);
   });
 
+  it('предел истории применяется в запросе, а не после выборки', async () => {
+    // Иначе таблица, которая не чистится, будет выбираться целиком ради
+    // двадцати строк.
+    for (let attempt = 0; attempt < PAST_INCIDENTS_LIMIT + 3; attempt += 1) {
+      await repository.open(domainId, `отказ ${attempt}`);
+      await repository.resolve(domainId, new Date());
+    }
+
+    const [address] = await repository.forProject(superadmin, projectId);
+
+    expect(address?.past).toHaveLength(PAST_INCIDENTS_LIMIT);
+  });
+
   it('без доступа к инфраструктуре проект не раскрывается', async () => {
     // Отсутствие доступа — 404, а не 403: иначе ответ подтвердил бы,
     // что проект существует.
@@ -864,7 +893,7 @@ import {
   type ProjectIncidents,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
@@ -943,30 +972,37 @@ export class IncidentsRepository {
       return [];
     }
 
-    const rows = await this.db
-      .select()
-      .from(addressIncidents)
-      .where(
-        inArray(
-          addressIncidents.domainId,
-          addresses.map((address) => address.id),
-        ),
-      )
-      .orderBy(desc(addressIncidents.startedAt));
+    // Запрос на адрес, а не один общий: предел обязан применяться в
+    // запросе. Таблица намеренно не чистится, и выбирать её целиком,
+    // чтобы отдать двадцать строк, со временем станет дорого. Десятки
+    // адресов — тот масштаб, где простота важнее числа запросов.
+    return Promise.all(
+      addresses.map(async (address) => {
+        const [open] = await this.db
+          .select()
+          .from(addressIncidents)
+          .where(
+            and(eq(addressIncidents.domainId, address.id), isNull(addressIncidents.resolvedAt)),
+          )
+          .limit(1);
 
-    return addresses.map((address) => {
-      const own = rows.filter((row) => row.domainId === address.id);
+        const past = await this.db
+          .select()
+          .from(addressIncidents)
+          .where(
+            and(eq(addressIncidents.domainId, address.id), isNotNull(addressIncidents.resolvedAt)),
+          )
+          .orderBy(desc(addressIncidents.startedAt))
+          .limit(PAST_INCIDENTS_LIMIT);
 
-      return {
-        domainId: address.id,
-        name: address.name,
-        open: own.filter((row) => row.resolvedAt === null).map(viewOf)[0] ?? null,
-        past: own
-          .filter((row) => row.resolvedAt !== null)
-          .slice(0, PAST_INCIDENTS_LIMIT)
-          .map(viewOf),
-      };
-    });
+        return {
+          domainId: address.id,
+          name: address.name,
+          open: open ? viewOf(open) : null,
+          past: past.map(viewOf),
+        };
+      }),
+    );
   }
 }
 
@@ -985,7 +1021,7 @@ function viewOf(row: AddressIncidentRow): Incident {
 - [ ] **Step 4: Прогнать — должно пройти**
 
 Run: `cd apps/api && npx vitest run src/incidents/incidents.repository.test.ts`
-Expected: PASS, 8 тестов
+Expected: PASS, 9 тестов
 
 - [ ] **Step 5: Коммит**
 
@@ -1027,6 +1063,15 @@ describe('сведение инцидентов', () => {
     expect(events[0]?.kind).toBe(IncidentEventKind.Resolved);
     expect(events[0]?.startedAt).toBeInstanceOf(Date);
     expect(events[0]?.resolvedAt).toBeInstanceOf(Date);
+  });
+
+  it('закрытие несёт причину падения, а не пустоту', async () => {
+    // У ответившего адреса причины нет: она лежит в строке инцидента.
+    await service.reconcile([downState()]);
+
+    const events = await service.reconcile([upState()]);
+
+    expect(events[0]?.cause).toBe('HTTP 500');
   });
 
   it('событие несёт имя проекта и окружения для текста уведомления', async () => {
@@ -1149,9 +1194,13 @@ export class IncidentsService {
         const incident = await this.repository.resolve(state.domainId, now);
 
         if (incident) {
-          events.push(
-            eventOf(IncidentEventKind.Resolved, state, incident.startedAt, incident.resolvedAt),
-          );
+          // Причина берётся из строки инцидента, а не из состояния: у
+          // ответившего адреса причины нет по определению, и событие
+          // закрытия с пустой причиной противоречило бы описанию поля.
+          events.push({
+            ...eventOf(IncidentEventKind.Resolved, state, incident.startedAt, incident.resolvedAt),
+            cause: incident.cause,
+          });
         }
       } catch (cause) {
         this.logger.warn(`Инцидент адреса ${state.name} не записан: ${cause}`);
@@ -1186,7 +1235,7 @@ function eventOf(
 - [ ] **Step 4: Прогнать — должно пройти**
 
 Run: `cd apps/api && npx vitest run src/incidents/incidents.service.test.ts`
-Expected: PASS, 6 тестов
+Expected: PASS, 7 тестов
 
 - [ ] **Step 5: Коммит**
 
@@ -1294,6 +1343,10 @@ const addresses = await this.db
  * Отдельно от `upsertAddressStatus`, потому что переспрашивается один
  * health: TLS, разрешение имени и срок регистрации за полминуты не
  * меняются, а перезапись их пустыми затёрла бы работу первой фазы.
+ *
+ * Строки может не оказаться — первая фаза могла упасть до записи. Тогда
+ * обновление не затронет ничего, и это верно: итог переспроса всё равно
+ * лежит в памяти прогона, и инцидент будет сведён по нему.
  */
 async updateAddressHealth(domainId: string, input: AddressHealthInput): Promise<void> {
   await this.db
@@ -2476,6 +2529,245 @@ git add apps/api/src/push/push.notifier.ts apps/api/src/push/push.notifier.test.
 git commit -m "Рассылать уведомления об инцидентах по правам"
 ```
 
+### Task 16а: Сводное уведомление при шторме
+
+**Files:**
+- Create: `apps/api/src/push/constants.ts`
+- Modify: `apps/api/src/push/notification-text.ts`
+- Modify: `apps/api/src/push/notification-text.test.ts`
+- Modify: `apps/api/src/push/push.notifier.ts`
+- Modify: `apps/api/src/push/push.notifier.test.ts`
+
+Задача идёт под номером с буквой: она добавлена ревью после того, как план был расписан, и перенумеровывать двадцать шесть задач с их перекрёстными ссылками дороже, чем оставить `16а`.
+
+Зачем: упавшая машина роняет все адреса, которые на ней стоят, а первый прогон после простоя самого CAIRN открывает инцидент по каждому лежащему адресу сразу. Двадцать адресов — двадцать пушей подряд, и метки их не склеят: метка равна адресу. Это тот случай, после которого уведомления выключают в первый же день.
+
+- [ ] **Step 1: Написать падающий тест текста**
+
+В `apps/api/src/push/notification-text.test.ts`:
+
+```ts
+describe('сводное уведомление', () => {
+  it('падение многих адресов считает их и склоняет', () => {
+    const text = stormNotificationOf(IncidentEventKind.Opened, 12);
+
+    expect(text.title).toBe('Не отвечает 12 адресов');
+  });
+
+  it('склонение по числу', () => {
+    expect(stormNotificationOf(IncidentEventKind.Opened, 4).title).toBe('Не отвечает 4 адреса');
+    expect(stormNotificationOf(IncidentEventKind.Opened, 21).title).toBe('Не отвечает 21 адрес');
+  });
+
+  it('массовое восстановление тоже сводится', () => {
+    expect(stormNotificationOf(IncidentEventKind.Resolved, 7).title).toBe(
+      'Отвечают снова 7 адресов',
+    );
+  });
+
+  it('ведёт на сводку, где предупреждения уже перечислены', () => {
+    expect(stormNotificationOf(IncidentEventKind.Opened, 5).url).toBe('/');
+  });
+
+  it('метка одна на вид события: вторая сводка заменяет первую', () => {
+    // Иначе лоток забьётся сводками об одной и той же аварии.
+    expect(stormNotificationOf(IncidentEventKind.Opened, 5).tag).toBe(
+      stormNotificationOf(IncidentEventKind.Opened, 9).tag,
+    );
+    expect(stormNotificationOf(IncidentEventKind.Opened, 5).tag).not.toBe(
+      stormNotificationOf(IncidentEventKind.Resolved, 5).tag,
+    );
+  });
+});
+```
+
+- [ ] **Step 2: Написать падающий тест рассылки**
+
+В `apps/api/src/push/push.notifier.test.ts`:
+
+```ts
+describe('шторм', () => {
+  it('до порога включительно уведомления идут по одному', async () => {
+    await push.save(adminSubjectId, SUBSCRIPTION);
+
+    await notifier.notify(openedEvents(STORM_THRESHOLD));
+
+    expect(transport).toHaveBeenCalledTimes(STORM_THRESHOLD);
+  });
+
+  it('больше порога — одна сводка вместо многих уведомлений', async () => {
+    await push.save(adminSubjectId, SUBSCRIPTION);
+
+    await notifier.notify(openedEvents(STORM_THRESHOLD + 1));
+
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(transport.mock.calls[0]![1]).title).toContain('Не отвечает');
+  });
+
+  it('падения и восстановления сводятся порознь', async () => {
+    // Двенадцать упало и одно поднялось — сводка о падении и отдельное
+    // уведомление о восстановлении: смешивать их в одно число нельзя.
+    await push.save(adminSubjectId, SUBSCRIPTION);
+
+    await notifier.notify([...openedEvents(STORM_THRESHOLD + 1), resolvedEvent()]);
+
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it('число в сводке считается по видимым человеку проектам', async () => {
+    // Иначе текст раскрыл бы подрядчику масштаб аварии в чужих проектах.
+    await grant(contractorSubjectId, Section.Infrastructure, AccessLevel.Metadata);
+    await push.save(contractorSubjectId, SUBSCRIPTION);
+
+    await notifier.notify([
+      ...openedEvents(STORM_THRESHOLD + 1),
+      ...openedEventsOfOtherProject(5),
+    ]);
+
+    const payload = JSON.parse(transport.mock.calls[0]![1]);
+
+    expect(payload.title).toContain(String(STORM_THRESHOLD + 1));
+  });
+
+  it('кто не видит ни одного затронутого проекта, сводки не получает', async () => {
+    await push.save(contractorSubjectId, SUBSCRIPTION);
+
+    await notifier.notify(openedEvents(STORM_THRESHOLD + 1));
+
+    expect(transport).not.toHaveBeenCalled();
+  });
+});
+```
+
+- [ ] **Step 3: Прогнать и убедиться, что падают**
+
+Run: `cd apps/api && npx vitest run src/push/notification-text.test.ts src/push/push.notifier.test.ts`
+Expected: FAIL — `stormNotificationOf` и `STORM_THRESHOLD` не определены
+
+- [ ] **Step 4: Написать порог, текст и ветвление рассылки**
+
+`apps/api/src/push/constants.ts`:
+
+```ts
+/**
+ * Со скольких событий одного вида рассылка переходит на сводку.
+ *
+ * Константа, как и пороги предупреждений о сроках: простота важнее
+ * гибкости, настройка добавляема позже без миграций.
+ */
+export const STORM_THRESHOLD = 3;
+```
+
+В `notification-text.ts`:
+
+```ts
+/** Сводное уведомление о шторме: сколько адресов и куда смотреть. */
+export function stormNotificationOf(kind: IncidentEventKind, count: number): NotificationText {
+  const addresses = `${count} ${pluralOf(count, ['адрес', 'адреса', 'адресов'])}`;
+
+  return {
+    title:
+      kind === IncidentEventKind.Resolved
+        ? `Отвечают снова ${addresses}`
+        : `Не отвечает ${addresses}`,
+    body: 'Подробности — на сводке проектов',
+    url: '/',
+    // Метка одна на вид события: вторая сводка об одной аварии заменяет
+    // первую, а не ложится рядом.
+    tag: `storm-${kind}`,
+  };
+}
+```
+
+В `push.notifier.ts` метод `notify` делится по виду события, и каждый вид решает сам:
+
+```ts
+/** Рассылает события тем, кому виден статус их проекта. */
+async notify(events: IncidentEvent[]): Promise<void> {
+  // Виды разделены: двенадцать падений и одно восстановление — это
+  // сводка о падениях и отдельное уведомление о восстановлении.
+  // Сложить их в одно число значило бы соврать о каждом.
+  for (const kind of [IncidentEventKind.Opened, IncidentEventKind.Resolved]) {
+    const own = events.filter((event) => event.kind === kind);
+
+    if (own.length === 0) {
+      continue;
+    }
+
+    try {
+      if (own.length > STORM_THRESHOLD) {
+        await this.notifyStorm(kind, own);
+        continue;
+      }
+
+      for (const event of own) {
+        await this.notifyOne(event);
+      }
+    } catch (cause) {
+      this.logger.warn(`Рассылка о событиях вида ${kind} не удалась: ${cause}`);
+    }
+  }
+}
+
+/**
+ * Одна сводка вместо многих уведомлений.
+ *
+ * Адресаты считаются пересечением: человек получает сводку, только если
+ * видит «Инфраструктуру» хотя бы одного затронутого проекта, и число в
+ * тексте — по его проектам, а не по всем упавшим. Иначе текст раскрыл бы
+ * подрядчику масштаб аварии в чужих проектах.
+ */
+private async notifyStorm(kind: IncidentEventKind, events: IncidentEvent[]): Promise<void> {
+  const countBySubject = new Map<string, number>();
+  const projectIds = [...new Set(events.map((event) => event.projectId))];
+
+  for (const projectId of projectIds) {
+    const subjectIds = await this.access.subjectsWithLevel(
+      projectId,
+      Section.Infrastructure,
+      AccessLevel.Metadata,
+    );
+    const own = events.filter((event) => event.projectId === projectId).length;
+
+    for (const subjectId of subjectIds) {
+      countBySubject.set(subjectId, (countBySubject.get(subjectId) ?? 0) + own);
+    }
+  }
+
+  for (const [subjectId, count] of countBySubject) {
+    const payload = JSON.stringify(stormNotificationOf(kind, count));
+
+    // Подписки берутся по одному субъекту: текст у каждого свой, и
+    // общая выборка здесь ничего не сэкономила бы.
+    for (const target of await this.subscriptions.forSubjects([subjectId])) {
+      try {
+        const outcome = await this.sender.send(target, payload);
+
+        if (outcome === SendOutcome.Gone) {
+          await this.subscriptions.drop(target.id);
+        }
+      } catch (cause) {
+        this.logger.warn(`Подписка не обслужена: ${cause}`);
+      }
+    }
+  }
+}
+```
+
+**Осторожно:** `notifyOne` остаётся как есть и по-прежнему нужен — он обслуживает случай «событий мало». Общий блок уборки мёртвых подписок в двух методах повторяется; если он разойдётся, уборка перестанет работать в одной из ветвей. Вынеси его третьим приватным методом `deliver(targets, payload)` и зови из обоих.
+
+- [ ] **Step 5: Прогнать — должно пройти**
+
+Run: `cd apps/api && npx vitest run src/push/notification-text.test.ts src/push/push.notifier.test.ts`
+Expected: PASS — 13 тестов текста и 11 рассылки
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add apps/api/src/push
+git commit -m "Сводить шторм падений в одно уведомление"
+```
+
 ---
 
 ## Чанк 4: Ручки, журнал, ключи
@@ -2661,16 +2953,24 @@ describe('служба подписок', () => {
     await expect(service.subscribe(agentSubject, SUBSCRIPTION)).rejects.toThrow();
   });
 
-  it('публичный ключ отдаётся как есть', async () => {
-    process.env.CAIRN_VAPID_PUBLIC_KEY = 'ключ';
-
-    expect(service.publicKey()).toEqual({ publicKey: 'ключ' });
+  it('публичный ключ отдаётся, когда заданы все три переменные', async () => {
+    withVapid({ public: 'ключ', private: 'секрет', subject: 'mailto:a@b' }, () => {
+      expect(service.publicKey()).toEqual({ publicKey: 'ключ' });
+    });
   });
 
   it('без ключа уведомления объявлены выключенными', async () => {
-    delete process.env.CAIRN_VAPID_PUBLIC_KEY;
+    withVapid({}, () => {
+      expect(service.publicKey()).toEqual({ publicKey: null });
+    });
+  });
 
-    expect(service.publicKey()).toEqual({ publicKey: null });
+  it('публичный ключ без остальных двух — тоже выключено', async () => {
+    // Иначе интерфейс покажет кнопку, человек подпишется, а отправка
+    // молча ничего не сделает: транспорт без всех трёх не собирается.
+    withVapid({ public: 'ключ' }, () => {
+      expect(service.publicKey()).toEqual({ publicKey: null });
+    });
   });
 });
 ```
@@ -2723,9 +3023,22 @@ export class PushService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Публичный VAPID-ключ. `null` — уведомления выключены. */
+  /**
+   * Публичный VAPID-ключ. `null` — уведомления выключены.
+   *
+   * Проверяются все три переменные, а не одна публичная: транспорт без
+   * `CAIRN_VAPID_SUBJECT` не собирается, и отдать ключ значило бы
+   * показать кнопку, по которой человек подпишется, а отправка молча
+   * ничего не сделает.
+   */
   publicKey(): PushKeyResponse {
-    return { publicKey: process.env.CAIRN_VAPID_PUBLIC_KEY ?? null };
+    const isConfigured = Boolean(
+      process.env.CAIRN_VAPID_PUBLIC_KEY &&
+        process.env.CAIRN_VAPID_PRIVATE_KEY &&
+        process.env.CAIRN_VAPID_SUBJECT,
+    );
+
+    return { publicKey: isConfigured ? process.env.CAIRN_VAPID_PUBLIC_KEY! : null };
   }
 
   /** Заводит подписку устройства и пишет действие в журнал. */
@@ -2828,10 +3141,48 @@ export class PushController {
 
 Точное имя и способ применения `ZodValidationPipe` взять из любого существующего контроллера с телом запроса — например `apps/api/src/environments/environments.controller.ts`.
 
+**Переменные окружения в тестах восстанавливать обязательно.** Хелпер `withVapid` ставит три переменные, вызывает тело и возвращает прежние значения в `finally`. Без него соседние тесты файла получат чужой ключ, и `PushSender` соберёт транспорт там, где его быть не должно:
+
+```ts
+/** Ставит переменные VAPID на время вызова и возвращает прежние. */
+function withVapid(
+  keys: { public?: string; private?: string; subject?: string },
+  body: () => void,
+): void {
+  const saved = {
+    public: process.env.CAIRN_VAPID_PUBLIC_KEY,
+    private: process.env.CAIRN_VAPID_PRIVATE_KEY,
+    subject: process.env.CAIRN_VAPID_SUBJECT,
+  };
+
+  const apply = (values: typeof saved) => {
+    for (const [name, value] of [
+      ['CAIRN_VAPID_PUBLIC_KEY', values.public],
+      ['CAIRN_VAPID_PRIVATE_KEY', values.private],
+      ['CAIRN_VAPID_SUBJECT', values.subject],
+    ] as const) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  };
+
+  apply({ public: keys.public, private: keys.private, subject: keys.subject });
+
+  try {
+    body();
+  } finally {
+    apply(saved);
+  }
+}
+```
+
 - [ ] **Step 4: Прогнать — должно пройти**
 
 Run: `cd apps/api && npx vitest run src/push/push.service.test.ts`
-Expected: PASS, 6 тестов
+Expected: PASS, 7 тестов
 
 - [ ] **Step 5: Коммит**
 
@@ -3376,7 +3727,7 @@ git commit -m "Показать историю падений у адреса"
 
 - [ ] **Step 2: Обновить состояние репозитория в CLAUDE.md**
 
-Дописать в раздел «Состояние репозитория» абзацем: падение адреса стало инцидентом (отрезком времени с частичным уникальным индексом «один открытый на адрес»), прогон переспрашивает упавшие адреса одной паузой на прогон, события открытия и закрытия уходят веб-пушами тем, кому видна «Инфраструктура» проекта, подписка — на устройство и со следом в журнале, история падений видна у адреса.
+Дописать в раздел «Состояние репозитория» абзацем: падение адреса стало инцидентом (отрезком времени с частичным уникальным индексом «один открытый на адрес»), прогон переспрашивает упавшие адреса одной паузой на прогон, события открытия и закрытия уходят веб-пушами тем, кому видна «Инфраструктура» проекта, больше трёх событий одного вида сводятся в одно уведомление, подписка — на устройство и со следом в журнале, история падений видна у адреса.
 
 В разделе «Архитектурные инварианты», в пункте про автоматический статус, дописать: уведомление о падении посылается по подтверждённому переходу, а не по каждой проверке; адресаты считаются выдачами, а не отдельным списком; канал ретранслируется push-службой браузера — полезная нагрузка шифрована, факт отправки ей виден.
 
@@ -3415,6 +3766,10 @@ CAIRN_STATUS_CHECK_INTERVAL_MINUTES=1 CAIRN_HEALTH_RECHECK_DELAY_SECONDS=5 pnpm 
 ```
 
 Expected: через минуту-полторы приходит пуш «адрес не отвечает»; нажатие ведёт на экран инфраструктуры проекта; у адреса видно «не отвечает с …»; второй прогон второго пуша не присылает.
+
+Отдельно проверить шторм: завести четыре заведомо мёртвых адреса и дождаться прогона.
+
+Expected: один пуш «Не отвечает 4 адреса» со ссылкой на сводку, а не четыре отдельных; при этом на экране инфраструктуры инциденты открыты у всех четырёх.
 
 - [ ] **Step 5: Итоговый коммит**
 
