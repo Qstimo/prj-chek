@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutationRunChecks, useQueryProjectStatus } from '@/api/hooks';
+import { useMutationRunChecks, useQueryIncidents, useQueryProjectStatus } from '@/api/hooks';
 import { StatusByEnvironment } from '@/components/StatusByEnvironment';
 import { StatusIndicator } from '@/components/StatusIndicator';
 import { WarningsPanel } from '@/components/WarningsPanel';
@@ -16,6 +16,7 @@ interface IProps {
 export function InfrastructureStatusPanel({ projectId, isSuperadmin }: IProps) {
   const status = useQueryProjectStatus(projectId);
   const runChecks = useMutationRunChecks();
+  const incidents = useQueryIncidents(projectId);
 
   if (status.isPending || status.isError || !status.data) {
     return null;
@@ -45,6 +46,7 @@ export function InfrastructureStatusPanel({ projectId, isSuperadmin }: IProps) {
       <StatusByEnvironment
         environments={status.data.environments}
         addresses={status.data.domains}
+        incidents={incidents.data}
       />
     </section>
   );

@@ -1,5 +1,7 @@
 import { HealthState } from '@cairn/shared';
 
+import { AddressIncidents } from '@/components/AddressIncidents';
+
 import type { IAddressProps } from './types';
 
 /**
@@ -8,7 +10,7 @@ import type { IAddressProps } from './types';
  * Три проверки рядом намеренно: они об одном имени, и разносить их по
  * разным спискам значило бы снова предлагать человеку сводить их глазами.
  */
-export function AddressStatusLine({ address }: IAddressProps) {
+export function AddressStatusLine({ address, incidents }: IAddressProps) {
   return (
     <>
       <span className="font-medium">{address.name}</span>
@@ -22,6 +24,8 @@ export function AddressStatusLine({ address }: IAddressProps) {
       {placementTextOf(address) && (
         <p className="text-xs text-muted-foreground">{placementTextOf(address)}</p>
       )}
+
+      <AddressIncidents incidents={incidents} />
     </>
   );
 }
