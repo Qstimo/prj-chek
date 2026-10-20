@@ -40,7 +40,13 @@ export function useMutationRunChecks() {
   return useMutation({
     mutationFn: () => apiClient('/status/run', { method: 'POST' }),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['status'] });
+      // Прогон меняет и статусы, и инциденты: без второго сброса
+      // индикатор краснел, а «не отвечает с 14:20» у адреса оставалось
+      // от состояния до проверки.
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['status'] }),
+        client.invalidateQueries({ queryKey: ['incidents'] }),
+      ]);
     },
   });
 }
