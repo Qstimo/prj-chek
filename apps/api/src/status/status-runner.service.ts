@@ -7,13 +7,17 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 
+import { HealthState, ProjectLifecycle } from '@cairn/shared';
+
+import { IncidentsService } from '../incidents/incidents.service';
 import { ServersRepository } from '../servers/servers.repository';
 import { decideMachine } from '../servers/server-discovery';
 import { resolveAddress } from './checkers/address.checker';
 import { checkDomainExpiry } from './checkers/domain.checker';
-import { checkHealth } from './checkers/health.checker';
+import { checkHealth, type HealthResult } from './checkers/health.checker';
 import { checkTls } from './checkers/tls.checker';
-import { StatusRepository } from './status.repository';
+import { INCIDENT_NOTIFIER, type IncidentNotifier } from './notifier';
+import { StatusRepository, type AddressTarget } from './status.repository';
 
 /** Набор проверщиков; в тестах подменяется подделками. */
 export interface Checkers {
@@ -51,6 +55,10 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
     private readonly repository: StatusRepository,
     private readonly servers: ServersRepository,
     @Optional() @Inject(STATUS_CHECKERS) private readonly checkers: Checkers = REAL_CHECKERS,
+    private readonly incidents: IncidentsService,
+    @Optional()
+    @Inject(INCIDENT_NOTIFIER)
+    private readonly notifier: IncidentNotifier | null = null,
   ) {}
 
   onModuleInit(): void {
@@ -74,7 +82,12 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Обходит адреса окружений и пишет результаты.
+   * Обходит адреса, переспрашивает упавшие и сводит инциденты.
+   *
+   * Три фазы вместо одной: проверить, подтвердить, записать. Переспрос
+   * нужен затем, что результат проверки теперь не только красит
+   * индикатор, но и будит человека, — а цена ложной тревоги много выше
+   * цены неверного цвета на четверть часа.
    *
    * Цель одна — адрес: все три проверки идут по одному и тому же имени,
    * и результат ложится одной строкой. Пока проверки шли порознь, они
@@ -85,18 +98,26 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    */
   async runAll(): Promise<void> {
     const targets = await this.repository.listTargets();
+    const health = new Map<string, HealthResult>();
+    const suspects: AddressTarget[] = [];
 
     for (const address of targets.addresses) {
       try {
-        const health = await this.checkers.checkHealth(address.name, address.healthCheckPath);
+        const result = await this.checkers.checkHealth(address.name, address.healthCheckPath);
         const resolved = await this.checkers.resolveAddress(address.name);
         const tls = await this.checkers.checkTls(address.name);
         const registry = await this.checkers.checkDomainExpiry(address.name);
 
+        health.set(address.id, result);
+
+        if (result.health === HealthState.Down) {
+          suspects.push(address);
+        }
+
         await this.repository.upsertAddressStatus(address.id, {
-          health: health.health,
-          latencyMs: health.latencyMs,
-          healthError: health.error,
+          health: result.health,
+          latencyMs: result.latencyMs,
+          healthError: result.error,
           resolvedIp: resolved.ip,
           resolveError: resolved.error,
           tlsValidTo: tls.validTo,
@@ -109,7 +130,100 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    await this.recheck(suspects, health);
     await this.adoptMachines();
+    await this.settleIncidents(targets.addresses, health);
+  }
+
+  /**
+   * Переспрашивает упавшие адреса после одной общей паузы.
+   *
+   * Пауза одна на прогон, а не на адрес: десять лежащих адресов не
+   * должны растягивать обход на пять минут. Переспрашивается только
+   * health — TLS, разрешение имени и срок регистрации за полминуты не
+   * меняются и будить человека не повод.
+   */
+  private async recheck(
+    suspects: AddressTarget[],
+    health: Map<string, HealthResult>,
+  ): Promise<void> {
+    if (suspects.length === 0) {
+      return;
+    }
+
+    await this.pause();
+
+    for (const address of suspects) {
+      try {
+        const result = await this.checkers.checkHealth(address.name, address.healthCheckPath);
+
+        health.set(address.id, result);
+        await this.repository.updateAddressHealth(address.id, {
+          health: result.health,
+          latencyMs: result.latencyMs,
+          healthError: result.error,
+        });
+      } catch (cause) {
+        this.logger.warn(`Переспрос адреса ${address.name} упал: ${cause}`);
+      }
+    }
+  }
+
+  /**
+   * Пауза перед переспросом: `CAIRN_HEALTH_RECHECK_DELAY_SECONDS`.
+   *
+   * `0` означает «переспросить сразу, без паузы», а не «не
+   * переспрашивать»: так в тестах. Выключателя у переспроса нет — он
+   * дешёвый, и отказываться от него незачем.
+   */
+  private async pause(): Promise<void> {
+    const seconds = Number(process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS ?? '30');
+
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+  }
+
+  /**
+   * Сводит инциденты и отдаёт события на рассылку.
+   *
+   * По всем адресам, а не только по подозреваемым: инцидент закрывает
+   * как раз тот адрес, который ответил и в подозреваемых не был.
+   *
+   * Сначала запись, потом рассылка: падение процесса между ними теряет
+   * пуш, но не теряет инцидент, — а человек увидит падение на экране.
+   * Обратный порядок оставил бы уведомление без того, на что в нём
+   * нажимают.
+   */
+  private async settleIncidents(
+    addresses: AddressTarget[],
+    health: Map<string, HealthResult>,
+  ): Promise<void> {
+    const events = await this.incidents.reconcile(
+      addresses.map((address) => ({
+        domainId: address.id,
+        name: address.name,
+        projectId: address.projectId,
+        projectName: address.projectName,
+        environmentName: address.environmentName,
+        isPaused: address.lifecycle === ProjectLifecycle.Paused,
+        health: health.get(address.id)?.health ?? null,
+        healthError: health.get(address.id)?.error ?? null,
+      })),
+    );
+
+    if (events.length === 0 || !this.notifier) {
+      return;
+    }
+
+    try {
+      // Отказ рассылки не должен валить прогон: статус важнее уведомления.
+      await this.notifier.notify(events);
+    } catch (cause) {
+      this.logger.warn(`Рассылка уведомлений упала: ${cause}`);
+    }
   }
 
   /**
