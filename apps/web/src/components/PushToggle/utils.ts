@@ -35,9 +35,19 @@ export function applicationServerKeyOf(publicKey: string): Uint8Array<ArrayBuffe
   return bytes;
 }
 
-/** Подписывает это устройство и отдаёт то, что нужно серверу. */
+/**
+ * Подписывает это устройство и отдаёт то, что нужно серверу.
+ *
+ * Подписка берётся с `ready`, а не с результата `register`: регистрация
+ * возвращается до активации worker, и на незнакомом устройстве браузер
+ * отвечал на первое же нажатие «Subscription failed - no active Service
+ * Worker». Уведомления включались со второго нажатия, когда worker
+ * успевал ожить, — и человек видел английскую ошибку вместо подписки.
+ */
 export async function subscribeDevice(publicKey: string): Promise<PushSubscribeRequest> {
-  const registration = await navigator.serviceWorker.register(WORKER_PATH);
+  await navigator.serviceWorker.register(WORKER_PATH);
+
+  const registration = await navigator.serviceWorker.ready;
   const subscription = await registration.pushManager.subscribe({
     // Без этого браузер не отдаст подписку: показ уведомления обязателен.
     userVisibleOnly: true,
