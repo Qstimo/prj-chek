@@ -7,6 +7,67 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
+# Длина ключа VAPID в байтах; пусто, если это не base64url без «=».
+# web-push разборчив ровно так: алфавит url-safe и точная длина после разбора,
+# — и негодный ключ он отвергает уже при старте API, молча выключая уведомления.
+vapid_key_size() {
+  local key="$1"
+  case "$key" in
+    ''|*[!A-Za-z0-9_-]*) return 0 ;;
+  esac
+
+  # base64 -d не знает url-safe алфавита и требует выравнивания по четырём.
+  local standard="${key//-/+}"
+  standard="${standard//_//}"
+  while [ $(( ${#standard} % 4 )) -ne 0 ]; do
+    standard="$standard="
+  done
+
+  printf '%s' "$standard" | base64 -d 2>/dev/null | wc -c || true
+}
+
+# Ключи уведомлений о падении. Их отсутствие — рабочая настройка: уведомления
+# выключаются целиком, и проверка только предупреждает. Останавливает она
+# другое — пару, заданную наполовину или негодную: приложение такой ключ тоже
+# отвергает, но снаружи это выглядит не ошибкой, а пропавшей кнопкой подписки.
+preflight_vapid() {
+  local scheme="$1"
+  local public_key private_key subject
+  public_key="$(env_value CAIRN_VAPID_PUBLIC_KEY)"
+  private_key="$(env_value CAIRN_VAPID_PRIVATE_KEY)"
+  subject="$(env_value CAIRN_VAPID_SUBJECT)"
+
+  if [ -z "$public_key$private_key$subject" ]; then
+    warn 'ключи VAPID не заданы — уведомления о падении выключены и кнопка подписки не появится; пара генерируется: pnpm --filter @cairn/api cli generate-vapid-keys'
+    return 0
+  fi
+
+  local missing=()
+  local key
+  for key in CAIRN_VAPID_PUBLIC_KEY CAIRN_VAPID_PRIVATE_KEY CAIRN_VAPID_SUBJECT; do
+    [ -n "$(env_value "$key")" ] || missing+=("$key")
+  done
+  [ ${#missing[@]} -eq 0 ] || fail "уведомления настроены наполовину — в .env не заданы: ${missing[*]}"
+
+  case "$subject" in
+    mailto:?*|https://?*) ;;
+    *) fail "CAIRN_VAPID_SUBJECT ($subject) должен быть вида mailto:… или https://… — другой web-push отвергает" ;;
+  esac
+
+  [ "$(vapid_key_size "$public_key")" = "65" ] \
+    || fail 'CAIRN_VAPID_PUBLIC_KEY не является 65 байтами в base64url — сгенерируй пару заново: pnpm --filter @cairn/api cli generate-vapid-keys'
+  [ "$(vapid_key_size "$private_key")" = "32" ] \
+    || fail 'CAIRN_VAPID_PRIVATE_KEY не является 32 байтами в base64url — сгенерируй пару заново: pnpm --filter @cairn/api cli generate-vapid-keys'
+
+  # Подписка требует защищённого контекста: по HTTP браузер не даёт ни service
+  # worker, ни Push API, и заданные ключи остаются без применения.
+  if [ "$scheme" = "https" ]; then
+    ok 'ключи уведомлений в правильном виде'
+  else
+    warn "ключи уведомлений заданы, но CAIRN_SCHEME=${scheme:-http} — по HTTP браузер не даст подписаться, уведомления работать не будут"
+  fi
+}
+
 preflight_run() {
   info 'Проверка окружения'
 
@@ -71,6 +132,8 @@ preflight_run() {
     warn "CAIRN_SCHEME=$scheme — система будет работать без TLS"
   fi
   ok "адрес системы: $web_url"
+
+  preflight_vapid "$scheme"
 
   # Сборка Next — самая прожорливая часть: на машине без запаса памяти она
   # молча падает по OOM, и причина выглядит как непонятная ошибка компилятора.
