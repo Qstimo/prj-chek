@@ -1,6 +1,7 @@
 import {
   AccessLevel,
   HealthState,
+  ProjectLifecycle,
   Section,
   type DomainStatus,
   type EnvironmentStatus,
@@ -45,11 +46,24 @@ export interface AddressStatusInput {
   registryError: string | null;
 }
 
-/** Адрес окружения как цель обхода: имя и путь ручки приложения. */
+/** Адрес окружения как цель обхода: имя, путь ручки и чей он. */
 export interface AddressTarget {
   id: string;
   name: string;
   healthCheckPath: string | null;
+  /** Проект адреса: по нему считаются адресаты уведомления. */
+  projectId: string;
+  projectName: string;
+  environmentName: string;
+  /** Жизненный цикл проекта: приостановленный инцидентов не открывает. */
+  lifecycle: ProjectLifecycle;
+}
+
+/** Итог переспроса: только здоровье, сроки переспрашивать незачем. */
+export interface AddressHealthInput {
+  health: HealthState;
+  latencyMs: number | null;
+  healthError: string | null;
 }
 
 /** Окружение со своими адресами: цель второго прохода прогона. */
@@ -86,10 +100,32 @@ export class StatusRepository {
   }
 
   /**
+   * Пишет итог переспроса: только здоровье.
+   *
+   * Отдельно от `upsertAddressStatus`, потому что переспрашивается один
+   * health: TLS, разрешение имени и срок регистрации за полминуты не
+   * меняются, а перезапись их пустыми затёрла бы работу первой фазы.
+   *
+   * Строки может не оказаться — первая фаза могла упасть до записи. Тогда
+   * обновление не затронет ничего, и это верно: итог переспроса всё равно
+   * лежит в памяти прогона, и инцидент будет сведён по нему.
+   */
+  async updateAddressHealth(domainId: string, input: AddressHealthInput): Promise<void> {
+    await this.db
+      .update(domainStatuses)
+      .set({ ...input, checkedAt: new Date() })
+      .where(eq(domainStatuses.domainId, domainId));
+  }
+
+  /**
    * Цели проверок — адреса окружений.
    *
    * Одна цель вместо двух списков: у окружения нет адреса помимо доменов,
    * и путь проверки идёт вместе с именем, по которому её делать.
+   *
+   * Проект приезжает вместе с адресом: сведение инцидентов решает по его
+   * жизненному циклу, а текст уведомления называет проект и окружение, —
+   * отдельный запрос за теми же полями был бы лишним.
    */
   async listTargets(): Promise<{ addresses: AddressTarget[] }> {
     const addresses = await this.db
@@ -97,9 +133,14 @@ export class StatusRepository {
         id: environmentDomains.id,
         name: environmentDomains.name,
         healthCheckPath: environments.healthCheckPath,
+        projectId: projects.id,
+        projectName: projects.name,
+        environmentName: environments.name,
+        lifecycle: projects.lifecycle,
       })
       .from(environmentDomains)
       .innerJoin(environments, eq(environments.id, environmentDomains.environmentId))
+      .innerJoin(projects, eq(projects.id, environments.projectId))
       .orderBy(asc(environmentDomains.name));
 
     return { addresses };

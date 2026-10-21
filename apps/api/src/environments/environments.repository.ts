@@ -24,6 +24,7 @@ import type { RequestSubject } from '../access/access.types';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
 import {
+  addressIncidents,
   domainStatuses,
   environmentDomains,
   environmentPlatforms,
@@ -248,12 +249,12 @@ export class EnvironmentsRepository {
       .where(eq(environmentDomains.environmentId, environmentId));
 
     if (domains.length > 0) {
-      await tx.delete(domainStatuses).where(
-        inArray(
-          domainStatuses.domainId,
-          domains.map((domain) => domain.id),
-        ),
-      );
+      const domainIds = domains.map((domain) => domain.id);
+
+      await tx.delete(domainStatuses).where(inArray(domainStatuses.domainId, domainIds));
+      // Инциденты — такие же производные данные, как статусы, и ссылка
+      // у них стоит на restrict.
+      await tx.delete(addressIncidents).where(inArray(addressIncidents.domainId, domainIds));
     }
 
     await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
@@ -351,8 +352,10 @@ export class EnvironmentsRepository {
       throw new NotFoundException('Адрес не найден');
     }
 
-    // Статусы проверок ссылаются на адрес с restrict (каскады запрещены).
+    // Статусы проверок и инциденты ссылаются на адрес с restrict
+    // (каскады запрещены).
     await tx.delete(domainStatuses).where(eq(domainStatuses.domainId, domain.id));
+    await tx.delete(addressIncidents).where(eq(addressIncidents.domainId, domain.id));
     await tx.delete(environmentDomains).where(eq(environmentDomains.id, domain.id));
 
     return this.touch(tx, environmentId);
@@ -438,31 +441,47 @@ export class EnvironmentsRepository {
     return grouped;
   }
 
-  /** Заменяет набор доменов окружения целиком. */
+  /**
+   * Приводит набор адресов окружения к заданному.
+   *
+   * Разницей по имени, а не пересозданием набора целиком: у адреса,
+   * оставшегося на месте, сохраняются и строка статуса, и инциденты.
+   * Пока набор пересоздавался, любая правка окружения — хоть
+   * переименование — стирала историю падений вместе с открытым
+   * инцидентом: следующий прогон открывал второй и присылал второе
+   * «не отвечает» о той же аварии, а индикатор до прогона уходил
+   * в «неизвестно».
+   */
   private async replaceDomains(
     tx: Transaction,
     environmentId: string,
     domains: string[],
   ): Promise<void> {
-    // Статусы проверок ссылаются на домены с restrict (каскады запрещены):
-    // без явной очистки замена доменов падала бы по внешнему ключу.
     const existing = await tx
-      .select({ id: environmentDomains.id })
+      .select({ id: environmentDomains.id, name: environmentDomains.name })
       .from(environmentDomains)
       .where(eq(environmentDomains.environmentId, environmentId));
 
-    if (existing.length > 0) {
-      await tx.delete(domainStatuses).where(
-        inArray(
-          domainStatuses.domainId,
-          existing.map((domain) => domain.id),
-        ),
-      );
+    const wanted = new Set(domains);
+    const departed = existing.filter((domain) => !wanted.has(domain.name));
+
+    if (departed.length > 0) {
+      const departedIds = departed.map((domain) => domain.id);
+
+      // Статусы и инциденты ссылаются на адрес с restrict (каскады
+      // запрещены): без явной очистки удаление упёрлось бы во внешний ключ.
+      await tx.delete(domainStatuses).where(inArray(domainStatuses.domainId, departedIds));
+      await tx.delete(addressIncidents).where(inArray(addressIncidents.domainId, departedIds));
+      await tx.delete(environmentDomains).where(inArray(environmentDomains.id, departedIds));
     }
 
-    await tx.delete(environmentDomains).where(eq(environmentDomains.environmentId, environmentId));
+    const known = new Set(existing.map((domain) => domain.name));
 
-    await this.insertDomains(tx, environmentId, domains);
+    await this.insertDomains(
+      tx,
+      environmentId,
+      domains.filter((name) => !known.has(name)),
+    );
   }
 
   /**

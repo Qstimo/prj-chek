@@ -6,6 +6,7 @@ import { apiServer } from '@/api/server';
 import { ProjectList } from '@/components/ProjectList';
 
 import { CreateProjectPanel } from './CreateProjectPanel';
+import { PushTogglePanel } from './PushTogglePanel';
 import { WarningsPanel, WarningTone } from '@/components/WarningsPanel';
 import { splitWarningsByUrgency } from '@/utils';
 
@@ -38,7 +39,10 @@ export default async function HomePage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-6">
-      <h1 className="text-2xl font-semibold">Проекты</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold">Проекты</h1>
+        <PushTogglePanel />
+      </div>
 
       <WarningsPanel title="Не отвечает" tone={WarningTone.Critical} warnings={critical} />
       <WarningsPanel title="Требует внимания" warnings={attention} />

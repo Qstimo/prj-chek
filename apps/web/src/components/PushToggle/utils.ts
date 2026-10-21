@@ -1,0 +1,103 @@
+import type { PushSubscribeRequest } from '@cairn/shared';
+
+/** Путь service worker: область видимости должна быть корневой. */
+const WORKER_PATH = '/sw.js';
+
+/** Есть ли в браузере всё, что нужно для подписки. */
+export function isPushSupported(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    'serviceWorker' in navigator &&
+    typeof window !== 'undefined' &&
+    'PushManager' in window
+  );
+}
+
+/**
+ * Переводит публичный ключ из base64url в байты.
+ *
+ * `applicationServerKey` принимает только байты, а ключ приходит строкой
+ * в base64url — с «-» и «_» вместо «+» и «/» и без хвостового
+ * выравнивания.
+ */
+export function applicationServerKeyOf(publicKey: string): Uint8Array<ArrayBuffer> {
+  const padded = publicKey.padEnd(publicKey.length + ((4 - (publicKey.length % 4)) % 4), '=');
+  const binary = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
+  // Буфер заводится явно: `Uint8Array.from` отдаёт вид над
+  // `ArrayBufferLike`, а `applicationServerKey` принимает только вид
+  // над настоящим `ArrayBuffer`.
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+/**
+ * Подписывает это устройство и отдаёт то, что нужно серверу.
+ *
+ * Подписка берётся с `ready`, а не с результата `register`: регистрация
+ * возвращается до активации worker, и на незнакомом устройстве браузер
+ * отвечал на первое же нажатие «Subscription failed - no active Service
+ * Worker». Уведомления включались со второго нажатия, когда worker
+ * успевал ожить, — и человек видел английскую ошибку вместо подписки.
+ */
+export async function subscribeDevice(publicKey: string): Promise<PushSubscribeRequest> {
+  await navigator.serviceWorker.register(WORKER_PATH);
+
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.subscribe({
+    // Без этого браузер не отдаст подписку: показ уведомления обязателен.
+    userVisibleOnly: true,
+    applicationServerKey: applicationServerKeyOf(publicKey),
+  });
+
+  return keysOf(subscription);
+}
+
+/**
+ * Адрес подписки этого устройства, не снимая её.
+ *
+ * Отдельно от снятия намеренно: сервер должен узнать об отписке раньше
+ * браузера. Снимешь браузерную первой — при отказе запроса повторить
+ * будет нечем: адреса больше нет, а строка на сервере осталась, и
+ * субъект до первого отказа push-службы считается живым адресатом.
+ */
+export async function deviceEndpointOf(): Promise<string | null> {
+  const registration = await navigator.serviceWorker.getRegistration(WORKER_PATH);
+  const subscription = await registration?.pushManager.getSubscription();
+
+  return subscription?.endpoint ?? null;
+}
+
+/** Снимает подписку в самом браузере. Зовётся после ответа сервера. */
+export async function dropDeviceSubscription(): Promise<void> {
+  const registration = await navigator.serviceWorker.getRegistration(WORKER_PATH);
+  const subscription = await registration?.pushManager.getSubscription();
+
+  await subscription?.unsubscribe();
+}
+
+/** Есть ли у этого устройства подписка. */
+export async function hasDeviceSubscription(): Promise<boolean> {
+  if (!isPushSupported()) {
+    return false;
+  }
+
+  const registration = await navigator.serviceWorker.getRegistration(WORKER_PATH);
+
+  return Boolean(await registration?.pushManager.getSubscription());
+}
+
+/** Вынимает из подписки браузера то, что хранит сервер. */
+function keysOf(subscription: PushSubscription): PushSubscribeRequest {
+  const json = subscription.toJSON();
+
+  return {
+    endpoint: subscription.endpoint,
+    p256dh: json.keys?.p256dh ?? '',
+    auth: json.keys?.auth ?? '',
+  };
+}

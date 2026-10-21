@@ -2,6 +2,7 @@ import {
   AccessLevel,
   EnvironmentKind,
   HealthState,
+  ProjectLifecycle,
   Section,
   StatusIndicator,
   StatusWarningKind,
@@ -150,8 +151,50 @@ describe('репозиторий статусов', () => {
     const targets = await repository.listTargets();
 
     expect(targets.addresses).toEqual([
-      { id: domainId, name: 'example.com', healthCheckPath: '/api/health' },
+      {
+        id: domainId,
+        name: 'example.com',
+        healthCheckPath: '/api/health',
+        projectId,
+        projectName: 'Проект',
+        environmentName: 'Прод',
+        lifecycle: ProjectLifecycle.Development,
+      },
     ]);
+  });
+
+  it('цель обхода несёт проект, окружение и жизненный цикл', async () => {
+    // Сведение инцидентов решает по проекту (пауза) и пишет в уведомление
+    // имена проекта и окружения: второй запрос за ними был бы лишним.
+    const { addresses } = await repository.listTargets();
+
+    expect(addresses[0]).toMatchObject({
+      projectId,
+      projectName: 'Проект',
+      environmentName: 'Прод',
+      lifecycle: ProjectLifecycle.Development,
+    });
+  });
+
+  it('переспрос правит только здоровье, не затирая сроки', async () => {
+    // Переспрашивается один health: TLS и срок регистрации за полминуты
+    // не меняются, а перезапись их пустыми затёрла бы первую фазу.
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ tlsValidTo: new Date('2027-01-01T00:00:00.000Z') }),
+    );
+
+    await repository.updateAddressHealth(domainId, {
+      health: HealthState.Down,
+      latencyMs: null,
+      healthError: 'таймаут',
+    });
+
+    const [row] = await testDb.db.select().from(domainStatuses);
+
+    expect(row?.health).toBe(HealthState.Down);
+    expect(row?.healthError).toBe('таймаут');
+    expect(row?.tlsValidTo).not.toBeNull();
   });
 
   it('пишет три проверки одной строкой', async () => {

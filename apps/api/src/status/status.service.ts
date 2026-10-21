@@ -37,9 +37,11 @@ export class StatusService {
    * Ручной запуск всех проверок.
    *
    * В отличие от фонового цикла — действие субъекта, и потому в журнале.
+   * Помечается ручным: человек ждёт ответа, и паузу переспроса прогон
+   * в этом случае не берёт.
    */
   async runNow(subject: RequestSubject): Promise<void> {
-    await this.runner.runAll();
+    await this.runner.runAll({ isManual: true });
 
     await this.db.transaction(async (tx) => {
       await this.audit.record(tx, actorOf(subject), {

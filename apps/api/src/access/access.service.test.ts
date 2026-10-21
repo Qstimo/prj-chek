@@ -1,4 +1,5 @@
 import { AccessLevel, Section, SubjectKind } from '@cairn/shared';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessService } from './access.service';
@@ -11,6 +12,8 @@ describe('AccessService.resolveLevel', () => {
   let service: AccessService;
   let projectId: string;
   let subjectId: string;
+  let adminSubjectId: string;
+  let otherProjectId: string;
   let grantedBy: string;
 
   beforeAll(async () => {
@@ -35,9 +38,10 @@ describe('AccessService.resolveLevel', () => {
       .insert(subjects)
       .values({ kind: SubjectKind.User, label: 'админ' })
       .returning();
+    adminSubjectId = adminSubject!.id;
     const [admin] = await testDb.db
       .insert(users)
-      .values({ subjectId: adminSubject!.id, email: 'admin@cairn.local', isSuperadmin: true })
+      .values({ subjectId: adminSubjectId, email: 'admin@cairn.local', isSuperadmin: true })
       .returning();
     grantedBy = admin!.id;
 
@@ -46,7 +50,18 @@ describe('AccessService.resolveLevel', () => {
       .values({ slug: 'proekt', name: 'Проект' })
       .returning();
     projectId = project!.id;
+
+    const [other] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'drugoy', name: 'Другой' })
+      .returning();
+    otherProjectId = other!.id;
   });
+
+  /** Выдаёт подрядчику уровень на секции проекта. */
+  async function grant(section: Section, level: AccessLevel): Promise<void> {
+    await testDb.db.insert(grants).values({ subjectId, projectId, section, level, grantedBy });
+  }
 
   function asSubject(overrides: Partial<RequestSubject> = {}): RequestSubject {
     return {
@@ -118,5 +133,54 @@ describe('AccessService.resolveLevel', () => {
     );
 
     expect(level).toBeNull();
+  });
+  describe('субъекты с уровнем на секции', () => {
+    const infra = (minimum: AccessLevel) =>
+      service.subjectsWithLevel(projectId, Section.Infrastructure, minimum);
+
+    it('выдача на инфраструктуре попадает в список', async () => {
+      await grant(Section.Infrastructure, AccessLevel.Metadata);
+
+      expect(await infra(AccessLevel.Metadata)).toContain(subjectId);
+    });
+
+    it('выдача на другой секции в список не попадает', async () => {
+      await grant(Section.Roadmap, AccessLevel.Write);
+
+      expect(await infra(AccessLevel.Metadata)).not.toContain(subjectId);
+    });
+
+    it('суперадмин попадает без всякой выдачи', async () => {
+      expect(await infra(AccessLevel.Metadata)).toContain(adminSubjectId);
+    });
+
+    it('отозванный субъект не попадает, даже будучи суперадмином', async () => {
+      // Отзыв сильнее суперадминства — иначе отозвать администратора
+      // было бы нечем.
+      await testDb.db
+        .update(subjects)
+        .set({ revokedAt: new Date() })
+        .where(eq(subjects.id, adminSubjectId));
+
+      expect(await infra(AccessLevel.Metadata)).not.toContain(adminSubjectId);
+    });
+
+    it('уровень ниже требуемого не попадает', async () => {
+      await grant(Section.Infrastructure, AccessLevel.Metadata);
+
+      expect(await infra(AccessLevel.Write)).not.toContain(subjectId);
+    });
+
+    it('чужой проект своих подписчиков не отдаёт', async () => {
+      await grant(Section.Infrastructure, AccessLevel.Read);
+
+      expect(
+        await service.subjectsWithLevel(
+          otherProjectId,
+          Section.Infrastructure,
+          AccessLevel.Metadata,
+        ),
+      ).not.toContain(subjectId);
+    });
   });
 });

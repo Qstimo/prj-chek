@@ -8,7 +8,7 @@ import type { IProps } from './types';
  * работу сводить их глазами. Здесь под каждым окружением идут его адреса,
  * и именно строка адреса отвечает на вопрос «что сломалось».
  */
-export function StatusByEnvironment({ environments, addresses }: IProps) {
+export function StatusByEnvironment({ environments, addresses, incidents = [] }: IProps) {
   return (
     <ul className="space-y-2 text-sm">
       {environments.map((environment) => {
@@ -27,7 +27,12 @@ export function StatusByEnvironment({ environments, addresses }: IProps) {
               <ul className="space-y-0.5 pl-4">
                 {own.map((address) => (
                   <li key={address.domainId} aria-label={address.name}>
-                    <AddressStatusLine address={address} />
+                    <AddressStatusLine
+                      address={address}
+                      incidents={incidents.find(
+                        (candidate) => candidate.domainId === address.domainId,
+                      )}
+                    />
                   </li>
                 ))}
               </ul>

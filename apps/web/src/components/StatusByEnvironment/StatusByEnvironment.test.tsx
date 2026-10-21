@@ -115,4 +115,30 @@ describe('StatusByEnvironment', () => {
 
     expect(screen.queryByText(/stage\.example\.com/)).not.toBeInTheDocument();
   });
+  it('историю падений показывает у своего адреса', () => {
+    // Инциденты приходят отдельным запросом и сводятся по адресу: без
+    // этого история могла бы оказаться под чужой строкой.
+    render(
+      <StatusByEnvironment
+        environments={[prod]}
+        addresses={[address()]}
+        incidents={[
+          {
+            domainId: address().domainId,
+            name: address().name,
+            open: {
+              id: '00000000-0000-0000-0000-00000000000a',
+              domainId: address().domainId,
+              startedAt: '2026-10-20T14:20:00.000Z',
+              resolvedAt: null,
+              cause: 'HTTP 500',
+            },
+            past: [],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText(/не отвечает с/)).toBeInTheDocument();
+  });
 });

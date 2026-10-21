@@ -1,10 +1,10 @@
 import { AccessLevel, Section, type SectionLevels } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor } from '../db/db.types';
-import { grants, projects } from '../db/schema';
+import { grants, projects, subjects, users } from '../db/schema';
 import { InsufficientLevelError, SectionNotVisibleError } from './access.errors';
 import type { RequestSubject } from './access.types';
 
@@ -117,6 +117,53 @@ export class AccessService {
       .where(and(eq(grants.subjectId, subject.id), eq(grants.projectId, projectId)));
 
     return Object.fromEntries(rows.map((row) => [row.section, row.level]));
+  }
+
+  /**
+   * Субъекты, которым секция проекта видна не ниже указанного уровня.
+   *
+   * Обратное направление к {@link levelsForProject}: тот отвечает «что
+   * видит этот субъект», этот — «кто видит это». Нужен рассылке
+   * уведомлений, и именно он делает ненужным второй список адресатов:
+   * право видеть статус и есть право узнать о падении.
+   *
+   * Суперадмины попадают без выдачи, отозванные не попадают вовсе.
+   */
+  async subjectsWithLevel(
+    projectId: string,
+    section: Section,
+    minimum: AccessLevel,
+    executor: Executor = this.db,
+  ): Promise<string[]> {
+    const allowed = Object.values(AccessLevel).filter(
+      (level) => LEVEL_ORDER[level] >= LEVEL_ORDER[minimum],
+    );
+
+    const granted = await executor
+      .selectDistinct({ subjectId: grants.subjectId })
+      .from(grants)
+      .innerJoin(subjects, eq(subjects.id, grants.subjectId))
+      .where(
+        and(
+          eq(grants.projectId, projectId),
+          eq(grants.section, section),
+          inArray(grants.level, allowed),
+          isNull(subjects.revokedAt),
+        ),
+      );
+
+    const superadmins = await executor
+      .select({ subjectId: users.subjectId })
+      .from(users)
+      .innerJoin(subjects, eq(subjects.id, users.subjectId))
+      .where(and(eq(users.isSuperadmin, true), isNull(subjects.revokedAt)));
+
+    return [
+      ...new Set([
+        ...granted.map((row) => row.subjectId),
+        ...superadmins.map((row) => row.subjectId),
+      ]),
+    ];
   }
 
   /**

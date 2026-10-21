@@ -1,4 +1,4 @@
-import { EnvironmentKind, HealthState, SubjectKind } from '@cairn/shared';
+import { EnvironmentKind, HealthState, ProjectLifecycle, SubjectKind } from '@cairn/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,6 +7,7 @@ import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
 import {
+  addressIncidents,
   auditLog,
   domainStatuses,
   domains,
@@ -18,8 +19,11 @@ import {
   users,
 } from '../db/schema';
 import { ServersRepository } from '../servers/servers.repository';
+import { IncidentsRepository } from '../incidents/incidents.repository';
+import { IncidentEventKind, IncidentsService } from '../incidents/incidents.service';
+import type { IncidentNotifier } from './notifier';
 import { StatusRepository } from './status.repository';
-import { StatusRunnerService } from './status-runner.service';
+import { type Checkers, StatusRunnerService } from './status-runner.service';
 import { StatusService } from './status.service';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
@@ -27,6 +31,7 @@ describe('runner статусов', () => {
   let testDb: TestDatabase;
   let repository: StatusRepository;
   let servers: ServersRepository;
+  let incidents: IncidentsService;
   let projectId: string;
   let subjectId: string;
 
@@ -35,6 +40,11 @@ describe('runner статусов', () => {
     repository = new StatusRepository(testDb.db, new AccessService(testDb.db));
     // Субъекта реестр серверов не принимает — так решено этапом 9.
     servers = new ServersRepository(testDb.db);
+    incidents = new IncidentsService(new IncidentsRepository(testDb.db, new AccessService(testDb.db)));
+
+    // Пауза переспроса по умолчанию — полминуты: без обнуления каждый
+    // тест прогона ждал бы её вживую.
+    process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS = '0';
   });
 
   afterAll(async () => {
@@ -88,6 +98,26 @@ describe('runner статусов', () => {
     ]);
   }
 
+  /**
+   * Один адрес вместо двух: тесты переспроса считают вызовы health, и
+   * второй адрес сделал бы числа нечитаемыми.
+   */
+  async function seedOneTarget(): Promise<void> {
+    const [environment] = await testDb.db
+      .insert(environments)
+      .values({
+        projectId,
+        name: 'Прод',
+        kind: EnvironmentKind.Production,
+        healthCheckPath: '/api/health',
+      })
+      .returning();
+    const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
+    await testDb.db
+      .insert(environmentDomains)
+      .values({ environmentId: environment!.id, domainId: root!.id, name: 'example.com' });
+  }
+
   /** Проверщики, отвечающие без отказов. */
   function healthyCheckers() {
     return {
@@ -104,11 +134,30 @@ describe('runner статусов', () => {
     };
   }
 
+  /**
+   * Прогон с заданными проверщиками и, при надобности, уведомителем.
+   *
+   * Проверщики накладываются на здоровый набор: тесту почти всегда нужен
+   * один подменённый, а не все четыре.
+   */
+  function runnerWith(
+    overrides: Partial<Checkers> = {},
+    notifier: IncidentNotifier | null = null,
+  ): StatusRunnerService {
+    return new StatusRunnerService(
+      repository,
+      servers,
+      { ...healthyCheckers(), ...overrides },
+      incidents,
+      notifier,
+    );
+  }
+
   it('по каждому адресу делает все три проверки', async () => {
     await seedTargets();
 
     const checkers = healthyCheckers();
-    const runner = new StatusRunnerService(repository, servers, checkers);
+    const runner = runnerWith(checkers);
 
     await runner.runAll();
 
@@ -120,7 +169,7 @@ describe('runner статусов', () => {
   it('прогон пишет три проверки одной строкой на адрес', async () => {
     await seedTargets();
 
-    const runner = new StatusRunnerService(repository, servers, healthyCheckers());
+    const runner = runnerWith(healthyCheckers());
 
     await runner.runAll();
 
@@ -139,7 +188,7 @@ describe('runner статусов', () => {
 
     const checkers = healthyCheckers();
 
-    await new StatusRunnerService(repository, servers, checkers).runAll();
+    await runnerWith(checkers).runAll();
 
     expect(checkers.checkHealth).toHaveBeenCalledWith('example.com', null);
   });
@@ -149,7 +198,7 @@ describe('runner статусов', () => {
 
     const checkers = healthyCheckers();
 
-    await new StatusRunnerService(repository, servers, checkers).runAll();
+    await runnerWith(checkers).runAll();
 
     expect(checkers.resolveAddress).toHaveBeenCalledWith('stage.example.com');
 
@@ -165,7 +214,7 @@ describe('runner статусов', () => {
     // Человек вписал адрес — большего от него не требуется.
     await seedTargets();
 
-    await new StatusRunnerService(repository, servers, healthyCheckers()).runAll();
+    await runnerWith(healthyCheckers()).runAll();
 
     const [machine] = await testDb.db.select().from(serversTable);
     const [environment] = await testDb.db.select().from(environments);
@@ -177,8 +226,8 @@ describe('runner статусов', () => {
   it('повторный прогон не плодит вторую машину', async () => {
     await seedTargets();
 
-    await new StatusRunnerService(repository, servers, healthyCheckers()).runAll();
-    await new StatusRunnerService(repository, servers, healthyCheckers()).runAll();
+    await runnerWith(healthyCheckers()).runAll();
+    await runnerWith(healthyCheckers()).runAll();
 
     expect(await testDb.db.select().from(serversTable)).toHaveLength(1);
   });
@@ -191,7 +240,7 @@ describe('runner статусов', () => {
     // даже нарушение этого контракта.
     checkers.checkHealth.mockRejectedValueOnce(new Error('взорвалось'));
 
-    await new StatusRunnerService(repository, servers, checkers).runAll();
+    await runnerWith(checkers).runAll();
 
     const rows = await testDb.db.select().from(domainStatuses);
 
@@ -200,7 +249,7 @@ describe('runner статусов', () => {
   });
 
   it('ручной запуск пишет в журнал, фоновый — нет', async () => {
-    const runner = new StatusRunnerService(repository, servers, {
+    const runner = runnerWith({
       checkHealth: vi.fn(),
       checkTls: vi.fn(),
       checkDomainExpiry: vi.fn(),
@@ -217,5 +266,131 @@ describe('runner статусов', () => {
     expect(
       await testDb.db.select().from(auditLog).where(eq(auditLog.action, AuditAction.StatusCheckRun)),
     ).toHaveLength(1);
+  });
+  it('одиночный отказ переспрашивается и инцидента не даёт', async () => {
+    // Сетевая икота не должна будить человека: спрашиваем ещё раз.
+    await seedOneTarget();
+
+    const checkHealth = vi
+      .fn()
+      .mockResolvedValueOnce({ health: HealthState.Down, latencyMs: 0, error: 'таймаут' })
+      .mockResolvedValueOnce({ health: HealthState.Up, latencyMs: 12, error: null });
+
+    await runnerWith({ checkHealth }).runAll();
+
+    expect(checkHealth).toHaveBeenCalledTimes(2);
+    expect(await testDb.rowsOf(addressIncidents)).toHaveLength(0);
+  });
+
+  it('подтверждённый отказ открывает инцидент', async () => {
+    await seedOneTarget();
+
+    const checkHealth = vi
+      .fn()
+      .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' });
+
+    await runnerWith({ checkHealth }).runAll();
+
+    const [incident] = await testDb.rowsOf(addressIncidents);
+
+    expect(incident?.cause).toBe('HTTP 500');
+  });
+
+  it('переспрос не затирает сроки первой фазы', async () => {
+    await seedOneTarget();
+
+    await runnerWith({
+      checkHealth: vi
+        .fn()
+        .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'таймаут' }),
+    }).runAll();
+
+    const [status] = await testDb.db.select().from(domainStatuses);
+
+    expect(status?.health).toBe(HealthState.Down);
+    expect(status?.tlsValidTo).not.toBeNull();
+  });
+
+  it('живой адрес не переспрашивается', async () => {
+    await seedOneTarget();
+
+    const checkHealth = vi
+      .fn()
+      .mockResolvedValue({ health: HealthState.Up, latencyMs: 10, error: null });
+
+    await runnerWith({ checkHealth }).runAll();
+
+    expect(checkHealth).toHaveBeenCalledTimes(1);
+  });
+
+  it('события уходят уведомителю', async () => {
+    await seedOneTarget();
+
+    const notify = vi.fn();
+
+    await runnerWith(
+      {
+        checkHealth: vi
+          .fn()
+          .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: null }),
+      },
+      { notify },
+    ).runAll();
+
+    expect(notify).toHaveBeenCalledWith([
+      expect.objectContaining({ kind: IncidentEventKind.Opened, address: 'example.com' }),
+    ]);
+  });
+
+  it('ручной запуск переспрашивает, но паузы не берёт', async () => {
+    // Человек смотрит на кнопку «Проверить сейчас»: пауза в полминуты
+    // держала бы запрос браузера без всякой обратной связи.
+    await seedOneTarget();
+    process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS = '600';
+
+    const checkHealth = vi
+      .fn()
+      .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' });
+
+    try {
+      await runnerWith({ checkHealth }).runAll({ isManual: true });
+    } finally {
+      process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS = '0';
+    }
+
+    expect(checkHealth).toHaveBeenCalledTimes(2);
+  });
+
+  it('отказ рассылки не валит прогон', async () => {
+    // Статус важнее уведомления: инцидент обязан остаться записанным.
+    await seedOneTarget();
+
+    await runnerWith(
+      {
+        checkHealth: vi
+          .fn()
+          .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' }),
+      },
+      { notify: vi.fn().mockRejectedValue(new Error('push-служба молчит')) },
+    ).runAll();
+
+    expect(await testDb.rowsOf(addressIncidents)).toHaveLength(1);
+  });
+
+  it('приостановленный проект инцидента не открывает', async () => {
+    // ТЗ 6: намеренно отключённый проект не выглядит аварийным.
+    await seedOneTarget();
+    await testDb.db
+      .update(projects)
+      .set({ lifecycle: ProjectLifecycle.Paused })
+      .where(eq(projects.id, projectId));
+
+    await runnerWith({
+      checkHealth: vi
+        .fn()
+        .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' }),
+    }).runAll();
+
+    expect(await testDb.rowsOf(addressIncidents)).toHaveLength(0);
   });
 });
