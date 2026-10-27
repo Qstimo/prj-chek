@@ -1,6 +1,6 @@
 'use client';
 
-import type { ProjectMetadata } from '@cairn/shared';
+import type { ProjectListItem } from '@cairn/shared';
 import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
@@ -11,10 +11,10 @@ export const PROJECT_KEYS = {
   detail: (id: string) => ['projects', id] as const,
 };
 
-/** Список видимых проектов. */
+/** Список видимых проектов (строки сводки). */
 export function useQueryProjects() {
   return useQuery({
     queryKey: PROJECT_KEYS.all,
-    queryFn: () => apiClient<ProjectMetadata[]>('/projects'),
+    queryFn: () => apiClient<ProjectListItem[]>('/projects'),
   });
 }

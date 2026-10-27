@@ -3,6 +3,7 @@ import {
   projectUpdateSchema,
   type ProjectCreate,
   type ProjectDetail,
+  type ProjectListItem,
   type ProjectMetadata,
   type ProjectUpdate,
   type SectionLevels,
@@ -21,9 +22,9 @@ import { ProjectsService } from './projects.service';
 export class ProjectsController {
   constructor(private readonly projects: ProjectsService) {}
 
-  /** Список видимых проектов в проекции метаданных. */
+  /** Список видимых проектов — строки сводки с обзором по секциям. */
   @Get()
-  async list(@CurrentSubject() subject: RequestSubject): Promise<ProjectMetadata[]> {
+  async list(@CurrentSubject() subject: RequestSubject): Promise<ProjectListItem[]> {
     return this.projects.list(subject);
   }
 

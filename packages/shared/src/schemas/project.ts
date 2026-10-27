@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { ProjectLifecycle } from '../enums';
-import { platformCreateSchema } from './platform';
+import { platformCreateSchema, platformRefSchema } from './platform';
 
 /**
  * Проект на уровне метаданных: видно, что он есть, и его состояние (ТЗ 4.3).
@@ -16,6 +16,24 @@ export const projectMetadataSchema = z.object({
   slug: z.string(),
   name: z.string(),
   lifecycle: z.nativeEnum(ProjectLifecycle),
+});
+
+/**
+ * Строка сводки проектов: метаданные плюс обзор по уровню секций.
+ *
+ * Не полный паспорт (его отдаёт detail) и не статус (его отдаёт
+ * `/status/summary`). Поля Info/Infra пустеют при отсутствии выдачи
+ * так же, как при отсутствии данных — секция не светится.
+ */
+export const projectListItemSchema = projectMetadataSchema.extend({
+  /** Дата паспорта; только при Info ≥ Read. */
+  updatedAt: z.string().nullable(),
+  /** Платформы паспорта; пустой массив без Info ≥ Metadata. */
+  platforms: z.array(platformRefSchema),
+  /** Первый домен прод-окружения (name ASC); без Infra ≥ Metadata — null. */
+  productionDomain: z.string().nullable(),
+  /** Имя машины прода; без Infra ≥ Read — null. */
+  productionServerName: z.string().nullable(),
 });
 
 /** Проект на уровне чтения: все поля паспорта. */
@@ -67,6 +85,9 @@ export const projectCreateSchema = projectUpdateSchema.extend({
 
 /** Проект на уровне метаданных. */
 export type ProjectMetadata = z.infer<typeof projectMetadataSchema>;
+
+/** Строка сводки проектов. */
+export type ProjectListItem = z.infer<typeof projectListItemSchema>;
 
 /** Проект на уровне чтения. */
 export type ProjectDetail = z.infer<typeof projectDetailSchema>;

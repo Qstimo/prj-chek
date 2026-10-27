@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { PlatformKind } from '../enums';
-import { projectCreateSchema, projectUpdateSchema } from './project';
+import { PlatformKind, ProjectLifecycle } from '../enums';
+import {
+  projectCreateSchema,
+  projectListItemSchema,
+  projectUpdateSchema,
+} from './project';
 
 describe('платформы проекта', () => {
   it('платформы принимаются при создании и отвергаются в правке', () => {
@@ -18,5 +22,22 @@ describe('платформы проекта', () => {
     expect(() =>
       projectUpdateSchema.parse({ platforms: [{ kind: PlatformKind.Server, name: 'API' }] }),
     ).toThrow();
+  });
+});
+
+describe('projectListItemSchema', () => {
+  it('принимает обзор с nullable-полями секций', () => {
+    expect(
+      projectListItemSchema.parse({
+        id: '11111111-1111-1111-1111-111111111111',
+        slug: 'kassa',
+        name: 'Касса',
+        lifecycle: ProjectLifecycle.Active,
+        updatedAt: null,
+        platforms: [],
+        productionDomain: null,
+        productionServerName: null,
+      }),
+    ).toMatchObject({ updatedAt: null, platforms: [] });
   });
 });

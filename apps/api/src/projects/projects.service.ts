@@ -2,6 +2,7 @@ import {
   AuditSubjectKind,
   type ProjectCreate,
   type ProjectDetail,
+  type ProjectListItem,
   type ProjectMetadata,
   type ProjectUpdate,
   type SectionLevels,
@@ -51,8 +52,8 @@ export class ProjectsService {
     return levels;
   }
 
-  /** Возвращает список видимых субъекту проектов. */
-  async list(subject: RequestSubject): Promise<ProjectMetadata[]> {
+  /** Возвращает список видимых субъекту проектов (строки сводки). */
+  async list(subject: RequestSubject): Promise<ProjectListItem[]> {
     return this.repository.findVisible(subject);
   }
 

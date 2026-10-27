@@ -1,11 +1,28 @@
-import { AccessLevel, ProjectLifecycle, Section, SubjectKind } from '@cairn/shared';
+import {
+  AccessLevel,
+  EnvironmentKind,
+  PlatformKind,
+  ProjectLifecycle,
+  Section,
+  SubjectKind,
+} from '@cairn/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessService } from '../access/access.service';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import { ProjectsRepository } from './projects.repository';
-import { grants, projects, subjects, users } from '../db/schema';
+import {
+  domains,
+  environmentDomains,
+  environments,
+  grants,
+  projectPlatforms,
+  projects,
+  servers,
+  subjects,
+  users,
+} from '../db/schema';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
 describe('ProjectsRepository', () => {
@@ -92,17 +109,140 @@ describe('ProjectsRepository', () => {
       expect(await repository.findVisible(subject())).toEqual([]);
     });
 
-    it('возвращает проекты с выдачей в проекции метаданных', async () => {
+    it('возвращает обзор без паспорта и без полей чужих секций', async () => {
       await grant(AccessLevel.Metadata);
 
       const visible = await repository.findVisible(subject());
 
       expect(visible).toHaveLength(1);
       expect(visible[0]).not.toHaveProperty('purpose');
+      expect(visible[0]).toMatchObject({
+        updatedAt: null,
+        platforms: [],
+        productionDomain: null,
+        productionServerName: null,
+      });
     });
 
     it('суперадмину возвращает все проекты', async () => {
       expect(await repository.findVisible(subject({ isSuperadmin: true }))).toHaveLength(1);
+    });
+
+    it('отдаёт updatedAt и платформы при достаточном Info', async () => {
+      await grant(AccessLevel.Read);
+      await testDb.db.insert(projectPlatforms).values([
+        { projectId, kind: PlatformKind.Server, name: 'API', position: 2 },
+        { projectId, kind: PlatformKind.Store, name: 'RuStore', position: 1 },
+      ]);
+
+      const [item] = await repository.findVisible(subject());
+
+      expect(item?.updatedAt).toEqual(expect.any(String));
+      expect(item?.platforms.map((platform) => platform.name)).toEqual(['RuStore', 'API']);
+    });
+
+    it('выбирает прод-домен и сервер по name ASC', async () => {
+      await testDb.db.insert(grants).values([
+        {
+          subjectId,
+          projectId,
+          section: Section.Info,
+          level: AccessLevel.Metadata,
+          grantedBy,
+        },
+        {
+          subjectId,
+          projectId,
+          section: Section.Infrastructure,
+          level: AccessLevel.Read,
+          grantedBy,
+        },
+      ]);
+
+      const [server] = await testDb.db
+        .insert(servers)
+        .values({ name: 'edge-1' })
+        .returning();
+      const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
+
+      const [beta] = await testDb.db
+        .insert(environments)
+        .values({
+          projectId,
+          name: 'Бета-прод',
+          kind: EnvironmentKind.Production,
+          serverId: server!.id,
+        })
+        .returning();
+      const [alpha] = await testDb.db
+        .insert(environments)
+        .values({
+          projectId,
+          name: 'Альфа-прод',
+          kind: EnvironmentKind.Production,
+          serverId: server!.id,
+        })
+        .returning();
+
+      await testDb.db.insert(environmentDomains).values([
+        { environmentId: alpha!.id, domainId: root!.id, name: 'www.example.com' },
+        { environmentId: alpha!.id, domainId: root!.id, name: 'api.example.com' },
+        { environmentId: beta!.id, domainId: root!.id, name: 'beta.example.com' },
+      ]);
+
+      const [item] = await repository.findVisible(subject());
+
+      // Альфа раньше Беты; api раньше www.
+      expect(item).toMatchObject({
+        productionDomain: 'api.example.com',
+        productionServerName: 'edge-1',
+      });
+    });
+
+    it('при Infra Metadata отдаёт домен и прячет имя сервера', async () => {
+      await testDb.db.insert(grants).values({
+        subjectId,
+        projectId,
+        section: Section.Infrastructure,
+        level: AccessLevel.Metadata,
+        grantedBy,
+      });
+
+      const [server] = await testDb.db
+        .insert(servers)
+        .values({ name: 'edge-1' })
+        .returning();
+      const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
+      const [prod] = await testDb.db
+        .insert(environments)
+        .values({
+          projectId,
+          name: 'Прод',
+          kind: EnvironmentKind.Production,
+          serverId: server!.id,
+        })
+        .returning();
+      await testDb.db.insert(environmentDomains).values({
+        environmentId: prod!.id,
+        domainId: root!.id,
+        name: 'example.com',
+      });
+
+      const [item] = await repository.findVisible(subject());
+
+      expect(item).toMatchObject({
+        productionDomain: 'example.com',
+        productionServerName: null,
+      });
+    });
+
+    it('сортирует проекты по имени', async () => {
+      await testDb.db.insert(projects).values({ slug: 'beta', name: 'Бета' });
+      await testDb.db.insert(projects).values({ slug: 'alpha', name: 'Альфа' });
+
+      const visible = await repository.findVisible(subject({ isSuperadmin: true }));
+
+      expect(visible.map((row) => row.name)).toEqual(['Альфа', 'Бета', 'Проект']);
     });
   });
 

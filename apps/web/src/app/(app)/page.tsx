@@ -1,4 +1,4 @@
-import type { CurrentSubjectResponse, ProjectMetadata, StatusSummaryRow } from '@cairn/shared';
+import type { CurrentSubjectResponse, ProjectListItem, StatusSummaryRow } from '@cairn/shared';
 import { redirect } from 'next/navigation';
 
 import { ApiError } from '@/api';
@@ -12,12 +12,12 @@ import { splitWarningsByUrgency } from '@/utils';
 
 /** Сводка проектов. */
 export default async function HomePage() {
-  let projects: ProjectMetadata[];
+  let projects: ProjectListItem[];
   let subject: CurrentSubjectResponse;
 
   try {
     [projects, subject] = await Promise.all([
-      apiServer<ProjectMetadata[]>('/projects'),
+      apiServer<ProjectListItem[]>('/projects'),
       apiServer<CurrentSubjectResponse>('/auth/me'),
     ]);
   } catch (cause) {

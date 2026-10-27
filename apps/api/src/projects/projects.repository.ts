@@ -1,20 +1,31 @@
 import {
   AccessLevel,
+  EnvironmentKind,
   Section,
+  type PlatformRef,
   type ProjectCreate,
   type ProjectDetail,
+  type ProjectListItem,
   type ProjectMetadata,
   type ProjectUpdate,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import { AccessService } from '../access/access.service';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor } from '../db/db.types';
-import { projects, type Project } from '../db/schema';
+import {
+  environmentDomains,
+  environments,
+  projectPlatforms,
+  projects,
+  servers,
+  type Project,
+} from '../db/schema';
+import { projectListItemProjection } from './project-list.projection';
 import { projectProjection } from './project.projection';
 import { generateSlug } from './slug';
 
@@ -61,22 +72,40 @@ export class ProjectsRepository {
   }
 
   /**
-   * Возвращает список видимых субъекту проектов в проекции метаданных.
+   * Возвращает видимые субъекту проекты как строки сводки.
    *
-   * Проекция всегда метаданных, даже если уровень выше: список — это обзор,
-   * подробности показывает карточка проекта. Отдавать в списке полный
-   * паспорт значило бы гонять лишние данные при каждом открытии сводки.
+   * Обзорные поля Info/Infra наполняются по уровню секции; полный паспорт
+   * по-прежнему только у detail. Статус сюда не входит — его отдаёт
+   * `/status/summary`. Обогащение батчами, без N+1 по проектам.
    */
-  async findVisible(subject: RequestSubject): Promise<ProjectMetadata[]> {
+  async findVisible(subject: RequestSubject): Promise<ProjectListItem[]> {
     const ids = await this.access.visibleProjectIds(subject);
 
     if (ids.length === 0) {
       return [];
     }
 
-    const rows = await this.db.select().from(projects).where(inArray(projects.id, ids));
+    const rows = await this.db
+      .select()
+      .from(projects)
+      .where(inArray(projects.id, ids))
+      .orderBy(asc(projects.name));
 
-    return rows.map((row) => projectProjection(row, AccessLevel.Metadata) as ProjectMetadata);
+    const levelsByProject = await this.access.levelsForProjects(subject, ids);
+    const platformsByProject = await this.platformsByProject(ids);
+    const productionByProject = await this.productionOverviewByProject(ids);
+
+    return rows.map((row) => {
+      const production = productionByProject.get(row.id);
+
+      return projectListItemProjection(
+        row,
+        levelsByProject.get(row.id) ?? {},
+        platformsByProject.get(row.id) ?? [],
+        production?.domain ?? null,
+        production?.serverName ?? null,
+      );
+    });
   }
 
   /**
@@ -126,6 +155,113 @@ export class ProjectsRepository {
     }
 
     return updated;
+  }
+
+  /** Платформы видимых проектов, сгруппированные и упорядоченные по position. */
+  private async platformsByProject(projectIds: string[]): Promise<Map<string, PlatformRef[]>> {
+    const rows = await this.db
+      .select({
+        id: projectPlatforms.id,
+        projectId: projectPlatforms.projectId,
+        kind: projectPlatforms.kind,
+        name: projectPlatforms.name,
+      })
+      .from(projectPlatforms)
+      .where(inArray(projectPlatforms.projectId, projectIds))
+      .orderBy(asc(projectPlatforms.position));
+
+    const result = new Map<string, PlatformRef[]>();
+
+    for (const row of rows) {
+      const list = result.get(row.projectId) ?? [];
+      list.push({ id: row.id, kind: row.kind, name: row.name });
+      result.set(row.projectId, list);
+    }
+
+    return result;
+  }
+
+  /**
+   * Прод-обзор по проектам: одно production-окружение (name ASC),
+   * первый домен (name ASC), имя машины.
+   */
+  private async productionOverviewByProject(
+    projectIds: string[],
+  ): Promise<Map<string, { domain: string | null; serverName: string | null }>> {
+    const envRows = await this.db
+      .select({
+        id: environments.id,
+        projectId: environments.projectId,
+        serverId: environments.serverId,
+        name: environments.name,
+      })
+      .from(environments)
+      .where(
+        and(
+          inArray(environments.projectId, projectIds),
+          eq(environments.kind, EnvironmentKind.Production),
+        ),
+      )
+      .orderBy(asc(environments.name));
+
+    const chosenEnv = new Map<string, (typeof envRows)[number]>();
+
+    for (const row of envRows) {
+      if (!chosenEnv.has(row.projectId)) {
+        chosenEnv.set(row.projectId, row);
+      }
+    }
+
+    const envIds = [...chosenEnv.values()].map((row) => row.id);
+    const domainByEnv = new Map<string, string>();
+
+    if (envIds.length > 0) {
+      const domainRows = await this.db
+        .select({
+          environmentId: environmentDomains.environmentId,
+          name: environmentDomains.name,
+        })
+        .from(environmentDomains)
+        .where(inArray(environmentDomains.environmentId, envIds))
+        .orderBy(asc(environmentDomains.name));
+
+      for (const row of domainRows) {
+        if (!domainByEnv.has(row.environmentId)) {
+          domainByEnv.set(row.environmentId, row.name);
+        }
+      }
+    }
+
+    const serverIds = [
+      ...new Set(
+        [...chosenEnv.values()]
+          .map((row) => row.serverId)
+          .filter((serverId): serverId is string => serverId !== null),
+      ),
+    ];
+    const serverNameById = new Map<string, string>();
+
+    if (serverIds.length > 0) {
+      const serverRows = await this.db
+        .select({ id: servers.id, name: servers.name })
+        .from(servers)
+        .where(inArray(servers.id, serverIds));
+
+      for (const row of serverRows) {
+        serverNameById.set(row.id, row.name);
+      }
+    }
+
+    const result = new Map<string, { domain: string | null; serverName: string | null }>();
+
+    for (const [projectId, env] of chosenEnv) {
+      result.set(projectId, {
+        domain: domainByEnv.get(env.id) ?? null,
+        serverName: env.serverId ? (serverNameById.get(env.serverId) ?? null) : null,
+      });
+    }
+
+    return result;
   }
 
   /** Подбирает свободный слаг, дополняя базовый числовым суффиксом. */

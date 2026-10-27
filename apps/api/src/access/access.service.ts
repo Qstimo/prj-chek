@@ -101,22 +101,56 @@ export class AccessService {
     projectId: string,
     executor: Executor = this.db,
   ): Promise<SectionLevels> {
-    if (subject.isRevoked) {
-      return {};
+    const map = await this.levelsForProjects(subject, [projectId], executor);
+
+    return map.get(projectId) ?? {};
+  }
+
+  /**
+   * Уровни по секциям для набора проектов — одним запросом.
+   *
+   * Нужен сводке: обогащать каждый проект своим `levelsForProject`
+   * значило бы N+1 на каждый открытый реестр.
+   */
+  async levelsForProjects(
+    subject: RequestSubject,
+    projectIds: string[],
+    executor: Executor = this.db,
+  ): Promise<Map<string, SectionLevels>> {
+    const result = new Map<string, SectionLevels>();
+
+    if (subject.isRevoked || projectIds.length === 0) {
+      return result;
     }
 
     if (subject.isSuperadmin) {
-      return Object.fromEntries(
+      const full = Object.fromEntries(
         Object.values(Section).map((section) => [section, AccessLevel.Write]),
-      );
+      ) as SectionLevels;
+
+      for (const projectId of projectIds) {
+        result.set(projectId, full);
+      }
+
+      return result;
     }
 
     const rows = await executor
-      .select({ section: grants.section, level: grants.level })
+      .select({
+        projectId: grants.projectId,
+        section: grants.section,
+        level: grants.level,
+      })
       .from(grants)
-      .where(and(eq(grants.subjectId, subject.id), eq(grants.projectId, projectId)));
+      .where(and(eq(grants.subjectId, subject.id), inArray(grants.projectId, projectIds)));
 
-    return Object.fromEntries(rows.map((row) => [row.section, row.level]));
+    for (const row of rows) {
+      const current = result.get(row.projectId) ?? {};
+      current[row.section] = row.level;
+      result.set(row.projectId, current);
+    }
+
+    return result;
   }
 
   /**
