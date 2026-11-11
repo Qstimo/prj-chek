@@ -100,15 +100,34 @@ services:
       # http по умолчанию: на localhost автоматический HTTPS дал бы
       # самоподписанный сертификат и ошибку в браузере.
       CAIRN_SCHEME: ${CAIRN_SCHEME:-http}
+      # Поддомен соседнего приложения «100 дней до». Непустое значение по
+      # умолчанию: пустой адрес сайта Caddy принял бы за блок глобальных
+      # настроек и упал бы на `handle`.
+      HD_NEIGHBOR_SITE: ${HD_NEIGHBOR_SITE:-hundred-days.localhost}
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
+    networks:
+      # Своя сеть перечислена явно: как только у службы появляется список
+      # сетей, compose перестаёт подключать её к сети проекта сам, и прокси
+      # потерял бы из виду web и api.
+      - default
+      - hd-edge
     depends_on:
       web:
         condition: service_healthy
       api:
         condition: service_healthy
     restart: unless-stopped
+
+networks:
+  # Общая сеть с соседним стеком «100 дней до»: он подключается к ней как к
+  # внешней и получает в ней имя hundred-days, а наружу не публикует ничего.
+  #
+  # Создаёт сеть этот стек, а не сосед, и это направление выбрано нарочно:
+  # CAIRN не должен падать из-за того, что соседа ещё не развернули.
+  hd-edge:
+    name: hundred-days-edge
 
 volumes:
   postgres-data:
