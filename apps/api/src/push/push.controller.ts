@@ -1,6 +1,9 @@
 import {
+  pushCheckSchema,
   pushSubscribeSchema,
   pushUnsubscribeSchema,
+  type PushCheckRequest,
+  type PushCheckResponse,
   type PushKeyResponse,
   type PushSubscribeRequest,
   type PushUnsubscribeRequest,
@@ -33,6 +36,21 @@ export class PushController {
     @Body(new ZodValidationPipe(pushSubscribeSchema)) body: PushSubscribeRequest,
   ): Promise<void> {
     await this.push.subscribe(subject, body);
+  }
+
+  /**
+   * Числится ли адрес за этим субъектом.
+   *
+   * `POST` на чтение намеренно: адрес подписки не должен попадать ни в
+   * URL, ни в логи обращений — то же правило, что у снятия.
+   */
+  @Post('subscriptions/status')
+  @HttpCode(200)
+  async status(
+    @CurrentSubject() subject: RequestSubject,
+    @Body(new ZodValidationPipe(pushCheckSchema)) body: PushCheckRequest,
+  ): Promise<PushCheckResponse> {
+    return { isMine: await this.push.isMine(subject, body.endpoint) };
   }
 
   /** Снимает подписку этого устройства. Адрес в теле, не в URL. */

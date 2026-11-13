@@ -66,6 +66,21 @@ export class PushService {
     });
   }
 
+  /**
+   * Числится ли адрес этого устройства за субъектом.
+   *
+   * Источник правды для кнопки. Браузерная подписка переживает неудавшийся
+   * запрос к серверу, и спрашивать о состоянии браузер значило бы навсегда
+   * показывать «включено» человеку, которому ничего не придёт.
+   *
+   * В журнал не пишется: это чтение своего же состояния, а не действие.
+   */
+  async isMine(subject: RequestSubject, endpoint: string): Promise<boolean> {
+    requireHuman(subject);
+
+    return this.subscriptions.isMine(subject.id, endpoint);
+  }
+
   /** Снимает подписку устройства и пишет действие в журнал. */
   async unsubscribe(subject: RequestSubject, endpoint: string): Promise<void> {
     requireHuman(subject);

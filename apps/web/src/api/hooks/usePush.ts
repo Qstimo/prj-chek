@@ -1,6 +1,6 @@
 'use client';
 
-import type { PushKeyResponse, PushSubscribeRequest } from '@cairn/shared';
+import type { PushCheckResponse, PushKeyResponse, PushSubscribeRequest } from '@cairn/shared';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
@@ -28,6 +28,22 @@ export function useMutationPushSubscribe() {
   return useMutation({
     mutationFn: (body: PushSubscribeRequest) =>
       apiClient('/push/subscriptions', { method: 'POST', body }),
+  });
+}
+
+/**
+ * Спрашивает сервер, числится ли адрес устройства за текущим субъектом.
+ *
+ * `POST`, а не `GET`: адрес подписки не должен попадать в URL и логи.
+ * Мутация, а не запрос, по той же причине — кэшировать тут нечего.
+ */
+export function useMutationPushCheck() {
+  return useMutation({
+    mutationFn: (endpoint: string) =>
+      apiClient<PushCheckResponse>('/push/subscriptions/status', {
+        method: 'POST',
+        body: { endpoint },
+      }),
   });
 }
 
