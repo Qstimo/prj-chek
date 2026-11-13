@@ -76,6 +76,10 @@ export function DocsScreen({ projectId }: IProps) {
 
       {(isCreating || (isEditing && selectedContent)) && (
         <DocPageForm
+          // Ключ перемонтирует форму при смене правимой страницы: она держит
+          // значения в состоянии и с пропом не ресинхронизируется, а иначе
+          // черновик одной страницы ушёл бы в правку другой.
+          key={isEditing ? selectedId : 'new'}
           initial={
             isEditing && selectedContent
               ? { title: selectedContent.title, content: selectedContent.content }
