@@ -110,6 +110,18 @@ export class PlatformsRepository {
       return [];
     }
 
+    // Повтор внутри самого списка: подсказку и своё имя легко добавить
+    // дважды, а отказ здесь должен быть таким же внятным, как в `create`.
+    const names = new Set<string>();
+
+    for (const input of inputs) {
+      if (names.has(input.name)) {
+        throw new ConflictException('Платформа с таким именем уже есть в проекте.');
+      }
+
+      names.add(input.name);
+    }
+
     return tx
       .insert(projectPlatforms)
       .values(
