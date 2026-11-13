@@ -25,6 +25,13 @@ export const addressIncidentsSchema = z.object({
   open: incidentSchema.nullable(),
   /** Закрытые, свежие первыми. Глубина ограничена сервером. */
   past: z.array(incidentSchema),
+  /**
+   * Сколько падений было всего.
+   *
+   * Отдельным числом, а не длиной `past`: список усечён, и счёт по нему
+   * застывал бы на пределе выдачи, выглядя при этом достоверным.
+   */
+  pastTotal: z.number().int().nonnegative(),
 });
 
 /** Инциденты адресов проекта. */

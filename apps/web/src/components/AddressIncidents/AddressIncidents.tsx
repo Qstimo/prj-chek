@@ -21,7 +21,8 @@ export function AddressIncidents({ incidents }: IProps) {
 
       {incidents.past.length > 0 && (
         <details>
-          <summary className="cursor-pointer">{fallCountTextOf(incidents.past.length)}</summary>
+          {/* Счёт — из `pastTotal`, а не из длины списка: список усечён сервером. */}
+          <summary className="cursor-pointer">{fallCountTextOf(incidents.pastTotal)}</summary>
           <ul className="space-y-0.5 pl-4">
             {incidents.past.map((incident) => (
               <li key={incident.id}>
@@ -30,6 +31,9 @@ export function AddressIncidents({ incidents }: IProps) {
               </li>
             ))}
           </ul>
+          {incidents.pastTotal > incidents.past.length && (
+            <p className="pl-4">Показаны последние {incidents.past.length}.</p>
+          )}
         </details>
       )}
     </div>

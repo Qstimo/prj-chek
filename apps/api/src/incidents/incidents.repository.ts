@@ -1,6 +1,6 @@
 import { AccessLevel, Section, type Incident, type ProjectIncidents } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
@@ -98,11 +98,19 @@ export class IncidentsRepository {
           .orderBy(desc(addressIncidents.startedAt))
           .limit(PAST_INCIDENTS_LIMIT);
 
+        const [counted] = await this.db
+          .select({ total: count() })
+          .from(addressIncidents)
+          .where(
+            and(eq(addressIncidents.domainId, address.id), isNotNull(addressIncidents.resolvedAt)),
+          );
+
         return {
           domainId: address.id,
           name: address.name,
           open: open ? viewOf(open) : null,
           past: past.map(viewOf),
+          pastTotal: counted?.total ?? 0,
         };
       }),
     );

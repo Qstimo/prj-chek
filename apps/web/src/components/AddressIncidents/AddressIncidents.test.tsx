@@ -10,6 +10,7 @@ const EMPTY: AddressIncidentsData = {
   name: 'project.ru',
   open: null,
   past: [],
+  pastTotal: 0,
 };
 
 const OPEN_INCIDENT: Incident = {
@@ -47,21 +48,38 @@ describe('инциденты адреса', () => {
   });
 
   it('закрытые инциденты считаются числом', () => {
-    render(<AddressIncidents incidents={{ ...EMPTY, past: [PAST_INCIDENT, PAST_INCIDENT] }} />);
+    render(
+      <AddressIncidents
+        incidents={{ ...EMPTY, past: [PAST_INCIDENT, PAST_INCIDENT], pastTotal: 2 }}
+      />,
+    );
 
     expect(screen.getByText(/падал 2 раза/)).toBeInTheDocument();
   });
 
   it('один закрытый инцидент склоняется правильно', () => {
-    render(<AddressIncidents incidents={{ ...EMPTY, past: [PAST_INCIDENT] }} />);
+    render(<AddressIncidents incidents={{ ...EMPTY, past: [PAST_INCIDENT], pastTotal: 1 }} />);
 
     expect(screen.getByText(/падал 1 раз/)).toBeInTheDocument();
   });
 
   it('список закрытых раскрывается', async () => {
-    render(<AddressIncidents incidents={{ ...EMPTY, past: [PAST_INCIDENT] }} />);
+    render(<AddressIncidents incidents={{ ...EMPTY, past: [PAST_INCIDENT], pastTotal: 1 }} />);
     await userEvent.click(screen.getByText(/падал/));
 
     expect(screen.getByText(/40 минут/)).toBeInTheDocument();
+  });
+
+  it('считает все падения, а не только показанные: список усечён сервером', () => {
+    render(<AddressIncidents incidents={{ ...EMPTY, past: [PAST_INCIDENT], pastTotal: 57 }} />);
+
+    expect(screen.getByText(/падал 57 раз/)).toBeInTheDocument();
+  });
+
+  it('говорит, что список усечён', async () => {
+    render(<AddressIncidents incidents={{ ...EMPTY, past: [PAST_INCIDENT], pastTotal: 57 }} />);
+    await userEvent.click(screen.getByText(/падал/));
+
+    expect(screen.getByText('Показаны последние 1.')).toBeInTheDocument();
   });
 });
