@@ -34,7 +34,13 @@ export function useMutationUpdateVariable(projectId: string, environmentId: stri
     mutationFn: ({ id, input }: { id: string; input: VariableUpdate }) =>
       apiClient(`${baseUrl(projectId, environmentId)}/${id}`, { method: 'PATCH', body: input }),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['variables', projectId] });
+      // Правка со значением создаёт новую версию, поэтому гасятся оба
+      // среза: без второго открытая панель истории продолжала бы
+      // показывать список без только что созданной версии.
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['variables', projectId] }),
+        client.invalidateQueries({ queryKey: ['variable-versions', projectId] }),
+      ]);
     },
   });
 }
