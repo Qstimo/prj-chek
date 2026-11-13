@@ -233,3 +233,15 @@ const LEVEL_ORDER: Record<AccessLevel, number> = {
   [AccessLevel.Read]: 2,
   [AccessLevel.Write]: 3,
 };
+
+/**
+ * Дотягивает ли уровень до требуемого.
+ *
+ * Живёт рядом с порядком уровней: проекции сравнивают уровни там же, где
+ * решают, какое поле погасить, и второй экземпляр порядка разошёлся бы с
+ * этим. Отсутствие уровня — это «нет доступа», и до минимума оно не
+ * дотягивает никогда.
+ */
+export function meets(level: AccessLevel | undefined, minimum: AccessLevel): boolean {
+  return level !== undefined && LEVEL_ORDER[level] >= LEVEL_ORDER[minimum];
+}
