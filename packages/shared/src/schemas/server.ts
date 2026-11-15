@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { EnvironmentKind, HealthState, ProjectLifecycle, StatusIndicator } from '../enums';
+import { DAY_PATTERN, NO_SUCH_DAY, isCalendarDay } from './day-date';
 import { statusWarningSchema } from './status';
 
 /**
@@ -18,7 +19,10 @@ export const SERVER_WARN_DAYS = 14;
  * У срока оплаты нет часа: хранение его отметкой времени породило бы
  * вопрос о часовом поясе при сравнении с «сегодня».
  */
-export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ожидается дата');
+export const isoDateSchema = z
+  .string()
+  .regex(DAY_PATTERN, 'Ожидается дата')
+  .refine(isCalendarDay, NO_SUCH_DAY);
 
 /** Поля для создания сервера. Обязательно только имя — реестр заполняется постепенно. */
 export const serverCreateSchema = z.object({

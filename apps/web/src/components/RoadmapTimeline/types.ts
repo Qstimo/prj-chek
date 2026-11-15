@@ -10,6 +10,20 @@ export interface TimelineVersion {
   progress: RoadmapProgress;
 }
 
+/**
+ * Укладка полосы.
+ *
+ * `strip` — лента отметок по горизонтали, `list` — вертикальный список
+ * строк. Выбирается числом версий, а не человеком: форму диктует объём.
+ */
+export type TimelineForm = 'strip' | 'list';
+
+/** Видимая часть набора версий и сколько осталось за окном. */
+export interface TimelineWindow<T> {
+  items: T[];
+  hidden: number;
+}
+
 /** Пропсы диаграммы роадмапа. */
 export interface IProps {
   /** Версии по порядку последовательности. */

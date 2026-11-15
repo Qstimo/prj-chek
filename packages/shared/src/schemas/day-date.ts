@@ -1,5 +1,31 @@
 import { z } from 'zod';
 
+/** Форма записи дня: четыре цифры года, две месяца, две числа. */
+export const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Текст отказа, когда такого дня нет в календаре. */
+export const NO_SUCH_DAY = 'Такого дня не существует';
+
+/**
+ * Есть ли такой день в календаре.
+ *
+ * Формы мало: колонки в базе имеют тип `date`, и `2026-02-30` доходил до
+ * PostgreSQL, превращая негодный ввод в падение сервера. Из интерфейса
+ * такое не набрать — там `input type="date"`, — но контракт открыт и для
+ * приёмного канала, и для прямых обращений к API.
+ *
+ * Разбор через `Date.UTC` и сверка обратно: часовой пояс машины на день
+ * без времени влиять не должен.
+ */
+export function isCalendarDay(day: string): boolean {
+  const [year, month, date] = day.split('-').map(Number) as [number, number, number];
+  const at = new Date(Date.UTC(year, month - 1, date));
+
+  return (
+    at.getUTCFullYear() === year && at.getUTCMonth() === month - 1 && at.getUTCDate() === date
+  );
+}
+
 /**
  * Дата-день без времени: план, факт релиза, выход на платформе.
  *
@@ -9,9 +35,11 @@ import { z } from 'zod';
  * `isoDateSchema` в `server.ts` — тот же регексп, и свести их можно:
  * `dayDateSchema = isoDateSchema.nullable()`. В этой работе не сводим —
  * у них разные тексты ошибки, и правка текста в формах серверов выходит
- * за её объём. Долг осознанный, а не незамеченный.
+ * за её объём. Долг осознанный, а не незамеченный; проверку календаря обе
+ * схемы берут отсюда, поэтому в этой части разойтись уже не могут.
  */
 export const dayDateSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ожидается дата ГГГГ-ММ-ДД')
+  .regex(DAY_PATTERN, 'Ожидается дата ГГГГ-ММ-ДД')
+  .refine(isCalendarDay, NO_SUCH_DAY)
   .nullable();

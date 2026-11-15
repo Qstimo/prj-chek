@@ -134,6 +134,7 @@ describe('StatusByEnvironment', () => {
               cause: 'HTTP 500',
             },
             past: [],
+            pastTotal: 0,
           },
         ]}
       />,

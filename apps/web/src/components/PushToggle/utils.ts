@@ -80,16 +80,10 @@ export async function dropDeviceSubscription(): Promise<void> {
   await subscription?.unsubscribe();
 }
 
-/** Есть ли у этого устройства подписка. */
-export async function hasDeviceSubscription(): Promise<boolean> {
-  if (!isPushSupported()) {
-    return false;
-  }
-
-  const registration = await navigator.serviceWorker.getRegistration(WORKER_PATH);
-
-  return Boolean(await registration?.pushManager.getSubscription());
-}
+// Функции «есть ли подписка у браузера» здесь намеренно нет: на вопрос
+// «подписан ли я» отвечает сервер. Браузерная подписка переживает
+// неудавшийся запрос, и ответ браузера разошёлся бы с тем, кому на самом
+// деле придёт уведомление.
 
 /** Вынимает из подписки браузера то, что хранит сервер. */
 function keysOf(subscription: PushSubscription): PushSubscribeRequest {

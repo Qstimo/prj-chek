@@ -94,6 +94,10 @@ export function VariablesScreen({ projectId, environmentId }: IProps) {
 
       {(isCreating || editing) && (
         <VariableForm
+          // Ключ перемонтирует форму при смене правимой переменной: она
+          // держит значения в состоянии и с пропом не ресинхронизируется,
+          // а без перемонтирования набранный секрет уехал бы в чужую строку.
+          key={editingId ?? 'new'}
           initial={editing ? { key: editing.key, description: editing.description } : undefined}
           isEditing={Boolean(editing)}
           isSubmitting={create.isPending || update.isPending}
@@ -117,6 +121,10 @@ export function VariablesScreen({ projectId, environmentId }: IProps) {
 
       {historyId && (
         <VariableHistoryPanel
+          // По той же причине: строки версий нумерованы от единицы у каждой
+          // переменной, и без перемонтирования раскрытое значение одной
+          // показалось бы под версией другой.
+          key={historyId}
           projectId={projectId}
           environmentId={environmentId}
           variableId={historyId}

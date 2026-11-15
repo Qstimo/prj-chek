@@ -96,6 +96,10 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
 
       {(isCreating || editing) && (
         <ChronicleForm
+          // Ключ перемонтирует форму при смене правимой записи: она держит
+          // значения в состоянии и с пропом не ресинхронизируется, а правки
+          // записей хроники не версионируются — затёртое не вернуть.
+          key={editingId ?? 'new'}
           initial={formValuesOf(editing)}
           isSubmitting={create.isPending || update.isPending}
           error={describeApiError(create.error ?? update.error)}

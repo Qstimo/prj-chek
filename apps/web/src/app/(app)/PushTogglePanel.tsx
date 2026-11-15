@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from 'react';
 
-import { useMutationPushSubscribe, useMutationPushUnsubscribe, useQueryPushKey } from '@/api/hooks';
+import {
+  useMutationPushCheck,
+  useMutationPushSubscribe,
+  useMutationPushUnsubscribe,
+  useQueryPushKey,
+} from '@/api/hooks';
 import { PushToggle } from '@/components/PushToggle';
 import {
   deviceEndpointOf,
   dropDeviceSubscription,
-  hasDeviceSubscription,
   isPushSupported,
   subscribeDevice,
 } from '@/components/PushToggle/utils';
@@ -26,18 +30,42 @@ export function PushTogglePanel() {
   const key = useQueryPushKey();
   const subscribe = useMutationPushSubscribe();
   const unsubscribe = useMutationPushUnsubscribe();
+  const check = useMutationPushCheck();
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [error, setError] = useState<string | null>(null);
 
+  const checkMine = check.mutateAsync;
+
+  /**
+   * Состояние кнопки спрашивается у сервера, а не у браузера.
+   *
+   * Браузерная подписка переживает неудавшийся `POST`: сеть моргнула,
+   * сервер ответил отказом — а `pushManager` подписку уже создал. Поверив
+   * браузеру, кнопка навсегда показывала бы «включено» человеку, строки
+   * которого в базе нет и которому ни одно падение не придёт.
+   */
   useEffect(() => {
     if (!isPushSupported()) {
       return;
     }
 
     setPermission(Notification.permission);
-    void hasDeviceSubscription().then(setIsSubscribed);
-  }, []);
+
+    void (async () => {
+      const endpoint = await deviceEndpointOf();
+
+      if (!endpoint) {
+        setIsSubscribed(false);
+
+        return;
+      }
+
+      const { isMine } = await checkMine(endpoint);
+
+      setIsSubscribed(isMine);
+    })();
+  }, [checkMine]);
 
   const publicKey = key.data?.publicKey ?? null;
 
@@ -50,7 +78,23 @@ export function PushTogglePanel() {
       return;
     }
 
-    await subscribe.mutateAsync(await subscribeDevice(publicKey));
+    // Подписка, оставшаяся от неудавшейся попытки или от прежнего хозяина
+    // профиля, снимается до новой: `pushManager.subscribe` с тем же ключом
+    // вернул бы тот же адрес, а сервер отвергает чужой адрес отказом.
+    await dropDeviceSubscription();
+
+    const device = await subscribeDevice(publicKey);
+
+    try {
+      await subscribe.mutateAsync(device);
+    } catch (cause) {
+      // Сервер подписку не принял — в браузере её тоже быть не должно,
+      // иначе после перезагрузки кнопка соврёт «включено».
+      await dropDeviceSubscription();
+
+      throw cause;
+    }
+
     setIsSubscribed(true);
   }
 

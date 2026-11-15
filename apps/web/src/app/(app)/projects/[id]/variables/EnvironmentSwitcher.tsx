@@ -63,7 +63,12 @@ export function EnvironmentSwitcher({ projectId }: IProps) {
         ))}
       </nav>
 
-      <VariablesScreen projectId={projectId} environmentId={activeId} />
+      {/*
+        Ключ перемонтирует экран при смене окружения: иначе кэш запросов
+        не даёт поддереву размонтироваться, и выгруженный `.env` одного
+        окружения остаётся на экране другого.
+      */}
+      <VariablesScreen key={activeId} projectId={projectId} environmentId={activeId} />
     </div>
   );
 }

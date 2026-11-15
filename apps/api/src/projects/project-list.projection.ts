@@ -6,18 +6,8 @@ import {
   type SectionLevels,
 } from '@cairn/shared';
 
+import { meets } from '../access/access.service';
 import type { Project } from '../db/schema';
-
-/** Порядок уровней для сравнения. */
-const LEVEL_ORDER: Record<AccessLevel, number> = {
-  [AccessLevel.Metadata]: 1,
-  [AccessLevel.Read]: 2,
-  [AccessLevel.Write]: 3,
-};
-
-function meets(level: AccessLevel | undefined, minimum: AccessLevel): boolean {
-  return level !== undefined && LEVEL_ORDER[level] >= LEVEL_ORDER[minimum];
-}
 
 /**
  * Собирает строку сводки из проекта и заранее отобранных обзорных полей.

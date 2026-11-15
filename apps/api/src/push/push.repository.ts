@@ -71,6 +71,24 @@ export class PushRepository {
       );
   }
 
+  /**
+   * Числится ли этот адрес за субъектом.
+   *
+   * Отвечает «да/нет», а не отдаёт адрес: владение `endpoint` позволяет
+   * слать пуши в браузер, поэтому наружу он не уходит ни в каком ответе.
+   */
+  async isMine(subjectId: string, endpoint: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: pushSubscriptions.id })
+      .from(pushSubscriptions)
+      .where(
+        and(eq(pushSubscriptions.subjectId, subjectId), eq(pushSubscriptions.endpoint, endpoint)),
+      )
+      .limit(1);
+
+    return row !== undefined;
+  }
+
   /** Подписки перечисленных субъектов. Пустой список — пустой ответ. */
   async forSubjects(subjectIds: string[]): Promise<StoredSubscription[]> {
     if (subjectIds.length === 0) {
