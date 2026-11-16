@@ -65,6 +65,21 @@ describe('настройки предложителя', () => {
     expect(settings.baseUrl).toBe(EXTERNAL_BASE_URL);
   });
 
+  it('пустой адрес от compose не отменяет умолчания внешнего адаптера', () => {
+    // Compose передаёт `${VAR:-}` пустой строкой, а не отсутствующей
+    // переменной: `docker compose config` показывает `BASE_URL: ""`.
+    // Пустая строка не nullish, и `??` её не ловит — порт в контейнере
+    // оказался бы выключен при вписанном ключе.
+    process.env.CAIRN_TASK_SUGGESTER = 'external';
+    process.env.CAIRN_TASK_SUGGESTER_BASE_URL = '';
+    process.env.CAIRN_TASK_SUGGESTER_API_KEY = 'ключ';
+
+    const settings = suggesterSettings();
+
+    expect(settings.baseUrl).toBe(EXTERNAL_BASE_URL);
+    expect(settings.isEnabled).toBe(true);
+  });
+
   it('локальный адаптер без адреса выключен', () => {
     process.env.CAIRN_TASK_SUGGESTER = 'local';
     process.env.CAIRN_TASK_SUGGESTER_BASE_URL = '';

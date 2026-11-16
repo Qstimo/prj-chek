@@ -72,10 +72,15 @@ export function suggesterSettings(): SuggesterSettings {
   // Умолчание адреса есть только у внешнего адаптера: подставить его
   // локальному значило бы тихо отправить текст наружу при `local` без
   // адреса — подмена названной границы передачи данных.
-  const baseUrl = (
-    process.env[SUGGESTER_BASE_URL_ENV] ??
-    (kind === TaskSuggesterKind.External ? EXTERNAL_BASE_URL : '')
-  ).trim();
+  //
+  // `nonEmptyOf`, а не `??`: compose передаёт необъявленную переменную
+  // пустой строкой, а не отсутствующей (`${VAR:-}` в `api.environment`),
+  // и пустая строка не nullish. На `??` порт в контейнере оказался бы
+  // выключен при вписанном ключе — то есть ровно там, где он настроен.
+  const baseUrl = nonEmptyOf(
+    process.env[SUGGESTER_BASE_URL_ENV],
+    kind === TaskSuggesterKind.External ? EXTERNAL_BASE_URL : '',
+  );
   const apiKey = (process.env[SUGGESTER_API_KEY_ENV] ?? '').trim();
   const needsKey = kind === TaskSuggesterKind.External;
 
