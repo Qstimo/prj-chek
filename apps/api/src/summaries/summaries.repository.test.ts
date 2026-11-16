@@ -320,6 +320,13 @@ describe('репозиторий саммари', () => {
       expect(detail.suggester).toMatchObject({ name: 'external', model: 'gpt-4o-mini' });
     });
 
+    it('у прежней отметки число отброшенных неизвестно, а не равно нулю', async () => {
+      const summaryId = await createSummary();
+      await markSuggested(summaryId, new Date());
+      const detail = await repository.findById(admin(), projectId, summaryId);
+      expect(detail.suggester?.dropped).toBeNull();
+    });
+
     it('до разбивки текст устаревшим не считается', async () => {
       // `suggested_text_at` пуст: сравнивать не с чем, и предупреждать
       // не о чем.

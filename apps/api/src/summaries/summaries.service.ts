@@ -322,6 +322,7 @@ export class SummariesService implements OnModuleDestroy {
             name: this.suggester.kind,
             model: this.suggester.model,
             textUpdatedAt: source.textUpdatedAt,
+            dropped: result.dropped,
           },
         ),
       );

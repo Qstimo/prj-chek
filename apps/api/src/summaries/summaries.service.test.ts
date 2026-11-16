@@ -261,7 +261,7 @@ describe('служба саммари', () => {
       const replacement = testDb.appDb.transaction((tx) => kind === 'ручная'
         ? repository.replaceTasks(writer(), tx, projectId, summaryId, { tasks: [{ title: 'Опоздавшая правка' }] })
         : repository.replaceWithSuggested(writer(), tx, projectId, summaryId, ['Опоздавшая разбивка'], {
-          name: 'local', model: 'тест', textUpdatedAt: new Date(),
+          name: 'local', model: 'тест', textUpdatedAt: new Date(), dropped: 0,
         }));
       const outcome = replacement.then(() => null, (cause: unknown) => cause);
       try {
@@ -339,6 +339,28 @@ describe('служба саммари', () => {
         SummaryTaskOrigin.Model,
       ]);
       expect(detail.suggester).toMatchObject({ model: 'тестовая', name: 'local' });
+    });
+
+    it.each([0, 7])('отброшенные %s сохраняются и читаются новым репозиторием под ролью приложения', async (dropped) => {
+      suggesterStub.suggest.mockResolvedValue({ tasks: [{ title: 'Сохранённая задача' }], dropped });
+      const detail = await service.suggest(writer(), projectId, summaryId);
+      expect(detail.suggester?.dropped).toBe(dropped);
+      const access = new AccessService(testDb.appDb);
+      const reloaded = new SummariesRepository(testDb.appDb, access,
+        new ChronicleRepository(testDb.appDb, access), new RoadmapRepository(testDb.appDb, access));
+      expect((await reloaded.findById(writer(), projectId, summaryId)).suggester?.dropped).toBe(dropped);
+      await service.replaceTasks(writer(), projectId, summaryId, { tasks: [{ title: 'Правка человеком' }] });
+      expect((await reloaded.findById(writer(), projectId, summaryId)).suggester?.dropped).toBe(dropped);
+    });
+
+    it('новая разбивка заменяет число, а отказ сохраняет прежнюю отметку', async () => {
+      suggesterStub.suggest.mockResolvedValue({ tasks: [{ title: 'Задача' }], dropped: 7 });
+      await service.suggest(writer(), projectId, summaryId);
+      suggesterStub.suggest.mockRejectedValue(unavailable());
+      await expect(service.suggest(writer(), projectId, summaryId)).rejects.toThrow();
+      expect((await service.findById(writer(), projectId, summaryId)).suggester?.dropped).toBe(7);
+      suggesterStub.suggest.mockResolvedValue({ tasks: [{ title: 'Другая' }], dropped: 0 });
+      expect((await service.suggest(writer(), projectId, summaryId)).suggester?.dropped).toBe(0);
     });
 
     it('запись о передаче пишется до обращения к предложителю', async () => {

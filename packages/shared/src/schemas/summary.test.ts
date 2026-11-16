@@ -7,6 +7,7 @@ import {
   summaryCreateSchema,
   summaryDetailSchema,
   summaryTasksReplaceSchema,
+  summarySuggesterStampSchema,
 } from './summary';
 
 const ID = '00000000-0000-0000-0000-000000000001';
@@ -158,5 +159,17 @@ describe('нормализация текста', () => {
   it('отвергает прочие управляющие символы, а не чистит молча', () => {
     // Текст созвона — то, что прислал человек; подменять его тихо нельзя.
     expect(() => normalizeSummaryText('раз\u0007два')).toThrow();
+  });
+});
+
+describe('число отброшенных в отметке разбивки', () => {
+  const stamp = { name: 'local', model: 'модель', at: '2026-11-16T10:00:00Z' };
+
+  it.each([0, 7, null])('сохраняет значение %s, включая неизвестное у старой разбивки', (dropped) => {
+    expect(summarySuggesterStampSchema.parse({ ...stamp, dropped })).toEqual({ ...stamp, dropped });
+  });
+
+  it.each([-1, 1.5, '7', undefined])('отвергает негодное или отсутствующее число %s', (dropped) => {
+    expect(() => summarySuggesterStampSchema.parse({ ...stamp, dropped })).toThrow();
   });
 });

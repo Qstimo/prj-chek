@@ -31,6 +31,17 @@ describe('HTTP: саммари проекта', () => {
     expect(duplicate.body.code).toBe(SUMMARY_ALREADY_RELEASED);
   });
 
+  it('число отброшенных остаётся в HTTP-детали после нового чтения страницы', async () => {
+    const agent = await fixture.signIn();
+    const created = await agent.post(base()).send(SUMMARY_BODY).expect(201);
+    const path = `${base()}/${created.body.id}`;
+    fixture.suggester.suggest.mockResolvedValue({ tasks: [{ title: 'Задача' }], dropped: 5 });
+    const suggested = await agent.post(`${path}/tasks/suggest`).expect(200);
+    expect(suggested.body.suggester.dropped).toBe(5);
+    const reloaded = await agent.get(path).expect(200);
+    expect(reloaded.body.suggester).toEqual(suggested.body.suggester);
+  });
+
   it('пустой черновик отвечает 409 с кодом', async () => {
     const agent = await fixture.signIn();
     const created = await agent.post(base()).send(SUMMARY_BODY).expect(201);

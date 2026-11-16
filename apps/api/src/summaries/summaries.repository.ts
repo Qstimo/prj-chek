@@ -278,7 +278,7 @@ export class SummariesRepository {
     projectId: string,
     summaryId: string,
     titles: string[],
-    stamp: { name: string; model: string; textUpdatedAt: Date },
+    stamp: { name: string; model: string; textUpdatedAt: Date; dropped: number },
   ): Promise<SummaryDetail> {
     await this.requireForWrite(subject, tx, projectId, summaryId);
     const row = await this.lockSummary(tx, projectId, summaryId);
@@ -306,6 +306,7 @@ export class SummariesRepository {
       .set({
         suggesterName: stamp.name,
         suggesterModel: stamp.model,
+        suggesterDropped: stamp.dropped,
         suggestedAt: now,
         suggestedTextAt: stamp.textUpdatedAt,
         updatedAt: now,
@@ -591,5 +592,6 @@ function stampOf(row: SummaryRow): SummaryDetail['suggester'] {
     name: row.suggesterName,
     model: row.suggesterModel,
     at: row.suggestedAt.toISOString(),
+    dropped: row.suggesterDropped,
   };
 }

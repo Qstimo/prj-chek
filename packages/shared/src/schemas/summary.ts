@@ -58,6 +58,8 @@ export const summarySuggesterStampSchema = z.object({
   name: z.string(),
   model: z.string(),
   at: z.string(),
+  /** null у прежних разбивок: историческое число не восстанавливается. */
+  dropped: z.number().int().nonnegative().nullable(),
 });
 
 /** Строка истории саммари. */

@@ -1,5 +1,6 @@
 import { SummaryTaskOrigin } from '@cairn/shared';
-import { index, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { check, index, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 import { chronicleEntries } from './chronicle';
 import { projects } from './projects';
@@ -48,6 +49,8 @@ export const summaries = pgTable(
     suggesterName: text('suggester_name'),
     suggesterModel: text('suggester_model'),
     suggestedAt: timestamp('suggested_at', { withTimezone: true }),
+    /** null сохраняет неизвестность числа у разбивок до появления счётчика. */
+    suggesterDropped: integer('suggester_dropped'),
     /**
      * Момент текста, по которому построена текущая разбивка.
      *
@@ -58,7 +61,10 @@ export const summaries = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('summaries_project_created_idx').on(table.projectId, table.createdAt.desc())],
+  (table) => [
+    index('summaries_project_created_idx').on(table.projectId, table.createdAt.desc()),
+    check('summaries_suggester_dropped_nonnegative', sql`${table.suggesterDropped} >= 0`),
+  ],
 );
 
 /**
