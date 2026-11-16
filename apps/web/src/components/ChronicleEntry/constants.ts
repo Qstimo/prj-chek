@@ -4,4 +4,5 @@ import { ChronicleSource } from '@cairn/shared';
 export const SOURCE_LABELS: Record<ChronicleSource, string> = {
   [ChronicleSource.Manual]: 'Вручную',
   [ChronicleSource.Webhook]: 'Webhook',
+  [ChronicleSource.Summary]: 'Саммари созвона',
 };

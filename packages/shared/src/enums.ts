@@ -97,7 +97,6 @@ export enum TaskSuggesterKind {
   Local = 'local',
 }
 
-
 /**
  * Вид окружения (ТЗ 3.2).
  *
