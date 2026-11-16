@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AccessLevel,
+  ChronicleSource,
+  SummaryTaskOrigin,
+  TaskSuggesterKind,
   AuditSubjectKind,
   PlatformKind,
   PlatformReleaseState,
@@ -57,5 +60,23 @@ describe('платформы', () => {
     expect(states).not.toContain('planned');
     expect(states).not.toContain('in_progress');
     expect(states).toEqual(['on_test', 'in_review', 'released', 'rejected']);
+  });
+});
+
+describe('перечни саммари', () => {
+  it('у записи хроники появился третий источник', () => {
+    // Запись, заведённую конструктором, нельзя путать с рукописной:
+    // лента хроники показывает источник.
+    expect(ChronicleSource.Summary).toBe('summary');
+    expect(Object.values(ChronicleSource)).toEqual(['manual', 'webhook', 'summary']);
+  });
+
+  it('задача черновика помнит, кем предложена', () => {
+    // Инвариант ТЗ 5.3: интерфейс обязан показать, что пришло от машины.
+    expect(Object.values(SummaryTaskOrigin)).toEqual(['model', 'human']);
+  });
+
+  it('вид предложителя говорит, куда уходит текст', () => {
+    expect(Object.values(TaskSuggesterKind)).toEqual(['external', 'local']);
   });
 });
