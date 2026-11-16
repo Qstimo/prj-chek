@@ -7,6 +7,7 @@ import {
   summaryDetailSchema,
   type SummaryCreate,
 } from '@cairn/shared';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -339,6 +340,108 @@ describe('репозиторий саммари', () => {
 
       expect(detail.tasks.map((task) => task.title)).toEqual(['первое', 'второе']);
       expect(detail.tasks[0]?.origin).toBe(SummaryTaskOrigin.Model);
+    });
+  });
+
+  describe('замена черновика', () => {
+    it('нумерует позиции по порядку массива', async () => {
+      // Позиции не принимаются от клиента: второе место для порядка
+      // разошлось бы с первым.
+      const summaryId = await createSummary();
+
+      const detail = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ title: 'раз' }, { title: 'два' }, { title: 'три' }],
+        }),
+      );
+
+      expect(detail.tasks.map((task) => task.position)).toEqual([1, 2, 3]);
+      expect(detail.tasks.map((task) => task.title)).toEqual(['раз', 'два', 'три']);
+    });
+
+    it('строка с id сохраняет происхождение', async () => {
+      // Иначе «предложено моделью» снималось бы первым же сохранением.
+      const summaryId = await createSummary();
+      const modelTaskId = await addTask(summaryId, 'предложено моделью');
+
+      const detail = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ id: modelTaskId, title: 'правленная формулировка' }],
+        }),
+      );
+
+      expect(detail.tasks[0]?.origin).toBe(SummaryTaskOrigin.Model);
+      expect(detail.tasks[0]?.title).toBe('правленная формулировка');
+    });
+
+    it('строка без id набрана человеком', async () => {
+      const summaryId = await createSummary();
+
+      const detail = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ title: 'дописал руками' }],
+        }),
+      );
+
+      expect(detail.tasks[0]?.origin).toBe(SummaryTaskOrigin.Human);
+    });
+
+    it('исчезнувшая из массива строка удаляется', async () => {
+      const summaryId = await createSummary();
+      await addTask(summaryId, 'раз');
+
+      await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, { tasks: [] }),
+      );
+
+      expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(0);
+    });
+
+    it('чужой id в массиве не подхватывает чужую строку', async () => {
+      // Иначе правка черновика стала бы способом увести строку из другого
+      // саммари.
+      const summaryId = await createSummary();
+      const foreignSummaryId = await createSummary({ ...CREATE_INPUT, title: 'другое' });
+      const foreignTaskId = await addTask(foreignSummaryId, 'чужая');
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.replaceTasks(admin(), tx, projectId, summaryId, {
+            tasks: [{ id: foreignTaskId, title: 'чужая' }],
+          }),
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(1);
+    });
+
+    it('после сформированного релиза черновик не правится', async () => {
+      // Чекпоинты уже живут в роадмапе: правка задним числом развела бы
+      // две правды о том, что уехало.
+      const summaryId = await createSummary();
+      const versionId = await createVersion('v1.3');
+      await testDb.db.update(summaries).set({ releasedVersionId: versionId }).where(
+        eq(summaries.id, summaryId),
+      );
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.replaceTasks(admin(), tx, projectId, summaryId, {
+            tasks: [{ title: 'поздно' }],
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('уровня чтения хроники для правки не хватает', async () => {
+      const summaryId = await createSummary();
+      await grant(Section.Chronicle, AccessLevel.Read);
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.replaceTasks(member(), tx, projectId, summaryId, { tasks: [] }),
+        ),
+      ).rejects.toBeInstanceOf(InsufficientLevelError);
     });
   });
 

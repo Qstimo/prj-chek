@@ -2,12 +2,15 @@ import {
   AccessLevel,
   ChronicleSource,
   Section,
+  SUMMARY_ALREADY_RELEASED,
+  SummaryTaskOrigin,
   type SummaryCreate,
   type SummaryDetail,
   type SummaryListItem,
   type SummaryTask,
+  type SummaryTasksReplace,
 } from '@cairn/shared';
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
 
 import { SectionNotVisibleError } from '../access/access.errors';
@@ -142,6 +145,68 @@ export class SummariesRepository {
       .returning();
 
     return this.detailOf(subject, tx, created!);
+  }
+
+  /**
+   * Заменяет черновик задач целиком.
+   *
+   * Полная замена, а не разностное обновление: позиции нумеруются с 1 по
+   * порядку присланного массива, и сохранять уникальность позиций при
+   * перестановке иначе пришлось бы отложенными обновлениями на каждый
+   * шаг. Строка с `id` сохраняет своё происхождение — иначе «предложено
+   * моделью» снималось бы первым же сохранением; строка без `id` набрана
+   * человеком.
+   *
+   * После сформированного релиза отказ `409`: чекпоинты уже живут в
+   * роадмапе и правятся там, а правка черновика задним числом развела бы
+   * две правды о том, что уехало.
+   */
+  async replaceTasks(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    input: SummaryTasksReplace,
+  ): Promise<SummaryDetail> {
+    const row = await this.requireForWrite(subject, tx, projectId, summaryId);
+
+    if (row.releasedVersionId !== null) {
+      throw new ConflictException(SUMMARY_ALREADY_RELEASED);
+    }
+
+    const existing = await this.tasksOf(tx, summaryId);
+    const origins = new Map(existing.map((task) => [task.id, task.origin]));
+
+    const values = input.tasks.map((task, index) => {
+      // Присланный `id`, которого в черновике этого саммари нет, — либо
+      // исчезнувшая строка, либо чужая. Молча заводить её заново значило
+      // бы сделать правку черновика способом увести строку из другого
+      // саммари.
+      if (task.id !== undefined && !origins.has(task.id)) {
+        throw new NotFoundException(`Задача ${task.id} в черновике не найдена.`);
+      }
+
+      return {
+        summaryId,
+        title: task.title,
+        position: index + 1,
+        origin: task.id === undefined ? SummaryTaskOrigin.Human : origins.get(task.id)!,
+      };
+    });
+
+    await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
+
+    if (values.length > 0) {
+      await tx.insert(summaryTaskDrafts).values(values);
+    }
+
+    const [updated] = await tx
+      .update(summaries)
+      .set({ updatedAt: new Date() })
+      .where(eq(summaries.id, summaryId))
+      .returning();
+
+    return this.detailOf(subject, tx, updated!);
   }
 
   /**
