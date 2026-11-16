@@ -33,8 +33,13 @@ export interface ITasksProps {
 /** Пропсы шага «Релиз». */
 export interface IReleaseProps {
   summary: SummaryDetail;
-  /** Уровень записи на «Роадмап»: без него шаг показан выключенным. */
-  canRelease: boolean;
+  /**
+   * Почему шаг выключен, или `undefined` — он доступен.
+   *
+   * Строка, а не признак: «выдачи нет вовсе» и «выдача ниже записи» —
+   * разные причины, и одна фраза на оба случая соврала бы второму.
+   */
+  blockedNote?: string;
   /** Роадмап опубликован: чекпоинты попадут в публичную выдачу. */
   isRoadmapPublic: boolean;
   onRelease: (input: RoadmapVersionCreate) => void;

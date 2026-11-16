@@ -249,6 +249,20 @@ describe('экран саммари', () => {
     expect(screen.getByText(/Нет права на «Роадмап»/)).toBeInTheDocument();
   });
 
+  it('уровень роадмапа ниже записи называется своей причиной', () => {
+    // Роадмап он видит, и «нет права» прочиталось бы как ошибка системы:
+    // ручка ответит ему `403`, а не `404` (дизайн, раздел 1.4).
+    vi.mocked(hooks.useQuerySections).mockReturnValue(
+      query({ [Section.Chronicle]: AccessLevel.Write, [Section.Roadmap]: AccessLevel.Read }),
+    );
+
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    expect(screen.getByRole('button', { name: /Сформировать релиз/ })).toBeDisabled();
+    expect(screen.getByText(/ниже записи/)).toBeInTheDocument();
+    expect(screen.queryByText(/Нет права на «Роадмап»/)).not.toBeInTheDocument();
+  });
+
   it('пустой черновик релиз формировать не даёт', () => {
     renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
 

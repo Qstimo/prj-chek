@@ -1,6 +1,6 @@
 'use client';
 
-import { AccessLevel, Section } from '@cairn/shared';
+import { Section } from '@cairn/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -22,7 +22,7 @@ import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { Loader } from '@/components/Loader';
 import { SummaryText } from '@/components/SummaryText';
 
-import { SUMMARY_TEXTS, failureMessageOf } from '../constants';
+import { SUMMARY_TEXTS, failureMessageOf, releaseBlockedNoteOf } from '../constants';
 import { ReleaseBlock } from './ReleaseBlock';
 import { TasksBlock } from './TasksBlock';
 import type { IBodyProps } from './types';
@@ -98,7 +98,7 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
 
       <ReleaseBlock
         summary={summary}
-        canRelease={sections.data[Section.Roadmap] === AccessLevel.Write}
+        blockedNote={releaseBlockedNoteOf(sections.data[Section.Roadmap])}
         isRoadmapPublic={publicLink.data !== null && publicLink.data !== undefined}
         isReleasing={release.isPending}
         releaseError={failureMessageOf(

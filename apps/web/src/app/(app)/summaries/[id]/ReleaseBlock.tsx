@@ -20,7 +20,7 @@ import type { IReleaseProps } from './types';
  */
 export function ReleaseBlock({
   summary,
-  canRelease,
+  blockedNote,
   isRoadmapPublic,
   onRelease,
   isReleasing,
@@ -55,14 +55,14 @@ export function ReleaseBlock({
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        disabled={!canRelease || summary.tasks.length === 0}
+        disabled={blockedNote !== undefined || summary.tasks.length === 0}
         className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
       >
         {SUMMARY_TEXTS.release}
       </button>
 
-      {!canRelease && (
-        <p className="text-sm text-muted-foreground">{SUMMARY_TEXTS.noRoadmapRight}</p>
+      {blockedNote !== undefined && (
+        <p className="text-sm text-muted-foreground">{blockedNote}</p>
       )}
 
       <Drawer

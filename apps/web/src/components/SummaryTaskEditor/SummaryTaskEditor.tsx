@@ -24,6 +24,18 @@ function signatureOf(tasks: IDraftTask[]): string {
 }
 
 /**
+ * Строка в теле замены: формулировка и, у существующей, её `id`.
+ *
+ * Позиция не отправляется — порядок задаёт порядок массива. Отсутствие
+ * `id` и означает «новая, набранная человеком», поэтому ключ не ставится
+ * вовсе, а не ставится в `undefined`: строгая схема лишнего ключа не
+ * принимает.
+ */
+function payloadOf({ id, title }: IDraftTask): { id?: string; title: string } {
+  return { ...(id === undefined ? {} : { id }), title: title.trim() };
+}
+
+/**
  * Редактор черновика задач: формулировки, порядок, добавление, удаление.
  *
  * Правки накапливаются в памяти и уходят одной кнопкой «Сохранить» в
@@ -85,7 +97,7 @@ export function SummaryTaskEditor({
         {!isReleased && (
           <button
             type="button"
-            onClick={() => onSave({ tasks: draft.map(({ id, title }) => ({ ...(id === undefined ? {} : { id }), title: title.trim() })) })}
+            onClick={() => onSave({ tasks: draft.map(payloadOf) })}
             disabled={!isDirty || !isComplete || draft.length === 0 || isSaving}
             className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
           >

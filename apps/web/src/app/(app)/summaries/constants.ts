@@ -1,4 +1,5 @@
 import {
+  AccessLevel,
   SUGGESTER_DISABLED,
   SUGGESTER_UNAVAILABLE,
   SUMMARY_ALREADY_RELEASED,
@@ -37,6 +38,8 @@ export const SUMMARY_TEXTS = {
   release: 'Сформировать релиз на основании задач',
   releaseTitle: 'Релиз на основании задач',
   noRoadmapRight: 'Нет права на «Роадмап» этого проекта.',
+  /** Роадмап виден, но уровень ниже записи: ручка ответила бы `403`. */
+  roadmapBelowWrite: 'Доступ к «Роадмапу» этого проекта ниже записи.',
   released: 'Задачи ушли в роадмап.',
 } as const;
 
@@ -54,6 +57,22 @@ export const FAILURE_MESSAGES: Record<string, string> = {
   [SUMMARY_TASKS_EMPTY]: 'Добавьте задачи в черновик: формировать релиз не из чего.',
   [SUMMARY_TEXT_NOT_PLAIN]: 'В тексте управляющие символы: его прислали в непригодном виде.',
 };
+
+/**
+ * Почему шаг «Релиз» выключен — или `undefined`, если он доступен.
+ *
+ * Две разные причины называются по-разному (дизайн, раздел 1.4): выдачи
+ * на «Роадмап» нет вовсе — ручка ответит `404`; выдача есть, но ниже
+ * записи — `403`. Одна фраза на оба случая соврала бы второму: он роадмап
+ * видит, и «нет права» прочитал бы как ошибку системы.
+ */
+export function releaseBlockedNoteOf(level: AccessLevel | undefined): string | undefined {
+  if (level === AccessLevel.Write) {
+    return undefined;
+  }
+
+  return level === undefined ? SUMMARY_TEXTS.noRoadmapRight : SUMMARY_TEXTS.roadmapBelowWrite;
+}
 
 /** Число с разделителями разрядов обычным пробелом. */
 function spaced(value: number): string {
@@ -96,7 +115,7 @@ export function suggesterNoticeOf(suggester: TaskSuggesterInfo): string {
   const model = suggester.model === null ? '' : `, модель ${suggester.model}`;
 
   if (suggester.kind === TaskSuggesterKind.Local) {
-    return `Разбивку делает ${host} в вашем контуре${model}. Текст саммари уходит на этот адрес, обработка идёт в вашем контуре.`;
+    return `Разбивку делает ${host} в вашем контуре${model}. Текст саммари уходит на этот адрес; за пределы контура он не передаётся.`;
   }
 
   return `Разбивку делает ${host}${model}. Текст саммари уходит на этот адрес.`;
