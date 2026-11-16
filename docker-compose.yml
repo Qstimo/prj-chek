@@ -50,6 +50,27 @@ services:
       CAIRN_DNS_TRIES: ${CAIRN_DNS_TRIES:-2}
       CAIRN_RDAP_TIMEOUT_SECONDS: ${CAIRN_RDAP_TIMEOUT_SECONDS:-10}
       CAIRN_RDAP_CACHE_HOURS: ${CAIRN_RDAP_CACHE_HOURS:-24}
+      # Разбивка саммари на задачи. Переменные перечислены все семь по той
+      # же причине, что и у автопроверок: процесс в контейнере видит
+      # только то, что ему передали.
+      #
+      # Без ключа при `external` порт выключен: на свежей установке текст
+      # наружу не уходит до того, как ключ впишут руками.
+      #
+      # У адреса умолчания здесь нет намеренно, и это не пропуск.
+      # Подставить внешний адрес значило бы отправить текст наружу у
+      # установки с `local`, у которой адрес не задан, — ровно та подмена
+      # названной границы передачи данных, которую запрещает дизайн.
+      # Поэтому адрес внешнего API живёт в `.env.example` заполненным
+      # значением: приложение умолчание тоже подставляет, но только когда
+      # переменной нет вовсе, а compose всегда передаёт её — пустой.
+      CAIRN_TASK_SUGGESTER: ${CAIRN_TASK_SUGGESTER:-external}
+      CAIRN_TASK_SUGGESTER_BASE_URL: ${CAIRN_TASK_SUGGESTER_BASE_URL:-}
+      CAIRN_TASK_SUGGESTER_API_KEY: ${CAIRN_TASK_SUGGESTER_API_KEY:-}
+      CAIRN_TASK_SUGGESTER_MODEL: ${CAIRN_TASK_SUGGESTER_MODEL:-gpt-4o-mini}
+      CAIRN_TASK_SUGGESTER_TIMEOUT_SECONDS: ${CAIRN_TASK_SUGGESTER_TIMEOUT_SECONDS:-60}
+      CAIRN_TASK_SUGGESTER_MAX_CHARS: ${CAIRN_TASK_SUGGESTER_MAX_CHARS:-40000}
+      CAIRN_TASK_SUGGESTER_MAX_TASKS: ${CAIRN_TASK_SUGGESTER_MAX_TASKS:-50}
       NODE_ENV: production
     depends_on:
       postgres:
