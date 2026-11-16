@@ -55,7 +55,11 @@ describe('форма создания саммари', () => {
 
     await userEvent.upload(screen.getByLabelText(/Загрузить файл/), fileWith('чужое', 'n.txt'));
 
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // Ожидание обязательно: `upload` возвращается, отдав событие, а
+    // спросить о замене есть о чём только после ответа FileReader.
+    // Без него проверка проходила бы по тому, успел ли он, — то есть
+    // падала бы под нагрузкой и проходила в одиночном прогоне.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(screen.getByLabelText(/Текст саммари/)).toHaveValue('моё');
 
     await userEvent.click(screen.getByRole('button', { name: 'Заменить' }));
@@ -88,9 +92,14 @@ describe('форма создания саммари', () => {
       screen.getByLabelText(/Загрузить файл/),
       fileWith('текст', 'секретный-проект.txt'),
     );
+    // Дождаться содержимого обязательно: без него поле пусто, отправка
+    // выключена, и проверка прошла бы по пустому списку вызовов — то
+    // есть не проверила бы ничего.
+    await waitFor(() => expect(screen.getByLabelText(/Текст саммари/)).toHaveValue('текст'));
     await userEvent.type(screen.getByLabelText(/Заголовок/), 'Созвон');
     await userEvent.click(screen.getByRole('button', { name: /Создать/ }));
 
+    expect(onSubmit).toHaveBeenCalledOnce();
     expect(JSON.stringify(onSubmit.mock.calls)).not.toContain('секретный-проект');
     expect(document.body.textContent).not.toContain('секретный-проект');
   });
