@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import {
   AccessLevel,
   Section,
@@ -56,7 +57,7 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
   );
 
   if (chronicle.isPending || sections.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (chronicle.isError || sections.isError) {
@@ -179,7 +180,7 @@ function PromotePanel({ projectId, entryTitle, isSubmitting, onSubmit, onCancel 
   const roadmap = useQueryRoadmap(projectId);
 
   if (roadmap.isPending) {
-    return <p className="text-muted-foreground">Загрузка версий…</p>;
+    return <Loader label="Загрузка версий…" />;
   }
 
   if (roadmap.isError) {

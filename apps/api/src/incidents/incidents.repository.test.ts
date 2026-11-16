@@ -1,9 +1,17 @@
-import { EnvironmentKind, Section, SubjectKind, AccessLevel } from '@cairn/shared';
+import {
+  EnvironmentKind,
+  INCIDENT_WINDOW_DAYS,
+  Section,
+  SubjectKind,
+  AccessLevel,
+} from '@cairn/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { SectionNotVisibleError } from '../access/access.errors';
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import {
+  addressIncidents,
   domains,
   environmentDomains,
   environments,
@@ -16,11 +24,18 @@ import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 import { PAST_INCIDENTS_LIMIT } from './constants';
 import { IncidentsRepository } from './incidents.repository';
 
+/** Сутки в миллисекундах: окна и отрезки считаются от «сейчас». */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Зафиксированное «сейчас»: иначе доля времени плавала бы между прогонами. */
+const NOW = new Date('2026-11-16T12:00:00.000Z');
+
 describe('репозиторий инцидентов', () => {
   let testDb: TestDatabase;
   let repository: IncidentsRepository;
   let projectId: string;
   let adminSubjectId: string;
+  let adminUserId: string;
   let outsiderSubjectId: string;
   let domainId: string;
 
@@ -50,6 +65,7 @@ describe('репозиторий инцидентов', () => {
         isSuperadmin: true,
       })
       .returning();
+    adminUserId = adminUser!.id;
 
     const [outsider] = await testDb.db
       .insert(subjects)
@@ -104,6 +120,49 @@ describe('репозиторий инцидентов', () => {
     isRevoked: false,
   });
 
+  /** Падение синтетическим отрезком: прогон здесь не участвует. */
+  async function fall(
+    startedAt: Date,
+    resolvedAt: Date | null,
+    options: { domain?: string; cause?: string } = {},
+  ): Promise<string> {
+    const [row] = await testDb.db
+      .insert(addressIncidents)
+      .values({
+        domainId: options.domain ?? domainId,
+        startedAt,
+        resolvedAt,
+        cause: options.cause ?? null,
+      })
+      .returning();
+
+    return row!.id;
+  }
+
+  /** Момент на столько суток и часов раньше зафиксированного «сейчас». */
+  function before(days: number, hours = 0): Date {
+    return new Date(NOW.getTime() - days * DAY_MS - hours * 60 * 60 * 1000);
+  }
+
+  /** Второй проект со своим адресом: для проверки «чужой адрес — 404». */
+  async function otherProjectAddress(): Promise<string> {
+    const [other] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'drugoy', name: 'Другой' })
+      .returning();
+    const [environment] = await testDb.db
+      .insert(environments)
+      .values({ projectId: other!.id, name: 'прод', kind: EnvironmentKind.Production })
+      .returning();
+    const [root] = await testDb.db.insert(domains).values({ name: 'other.ru' }).returning();
+    const [address] = await testDb.db
+      .insert(environmentDomains)
+      .values({ environmentId: environment!.id, domainId: root!.id, name: 'other.ru' })
+      .returning();
+
+    return address!.id;
+  }
+
   it('открывает инцидент с причиной', async () => {
     const incident = await repository.open(domainId, 'HTTP 500');
 
@@ -155,6 +214,27 @@ describe('репозиторий инцидентов', () => {
     expect(address?.past).toHaveLength(1);
   });
 
+  it('счёт падений по проекту включает открытое и назван окном', async () => {
+    // Прежде считались только закрытые: адрес лежал прямо сейчас, а
+    // четвёртое падение в счёт не попадало.
+    await fall(before(2), before(1));
+    await fall(before(0, 2), null);
+
+    const [address] = await repository.forProject(superadmin(), projectId, NOW);
+
+    expect(address?.fallsInWindow).toBe(2);
+    expect(address?.windowDays).toBe(INCIDENT_WINDOW_DAYS);
+  });
+
+  it('падение вне окна в счёт по проекту не идёт', async () => {
+    await fall(before(INCIDENT_WINDOW_DAYS + 10), before(INCIDENT_WINDOW_DAYS + 9));
+
+    const [address] = await repository.forProject(superadmin(), projectId, NOW);
+
+    expect(address?.fallsInWindow).toBe(0);
+    expect(address?.past).toEqual([]);
+  });
+
   it('предел истории применяется в запросе, а не после выборки', async () => {
     // Иначе таблица, которая не чистится, будет выбираться целиком ради
     // двадцати строк.
@@ -172,5 +252,145 @@ describe('репозиторий инцидентов', () => {
     // Отсутствие доступа — 404, а не 403: иначе ответ подтвердил бы,
     // что проект существует.
     await expect(repository.forProject(outsider(), projectId)).rejects.toThrow();
+  });
+
+  describe('история одного адреса', () => {
+    type Query = { windowDays: number; limit: number; offset: number };
+
+    const query = (overrides: Partial<Query> = {}): Query => ({
+      windowDays: INCIDENT_WINDOW_DAYS,
+      limit: PAST_INCIDENTS_LIMIT,
+      offset: 0,
+      ...overrides,
+    });
+
+    it('доля времени считается пересечением отрезков с окном', async () => {
+      // Сутки простоя в окне тридцати суток: 1 − 1/30.
+      await fall(before(3), before(2));
+
+      const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+      expect(history.summary.downSeconds).toBe(DAY_MS / 1000);
+      expect(history.summary.uptime).toBeCloseTo(1 - 1 / 30, 6);
+      expect(history.summary.falls).toBe(1);
+    });
+
+    it('открытое падение считается до «сейчас»', async () => {
+      await fall(before(0, 2), null);
+
+      const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+      expect(history.summary.downSeconds).toBe(2 * 60 * 60);
+      expect(history.open).not.toBeNull();
+    });
+
+    it('падение, начавшееся до окна, входит только пересечением', async () => {
+      // Иначе доля времени за месяц учитывала бы простой прошлого года.
+      await fall(before(INCIDENT_WINDOW_DAYS + 10), before(INCIDENT_WINDOW_DAYS - 1));
+
+      const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+      expect(history.summary.downSeconds).toBe(DAY_MS / 1000);
+      expect(history.summary.falls).toBe(1);
+    });
+
+    it('падение целиком вне окна не считается вовсе', async () => {
+      await fall(before(60), before(59));
+
+      const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+      expect(history.summary).toEqual({ falls: 0, downSeconds: 0, uptime: 1 });
+      expect(history.incidents).toEqual([]);
+    });
+
+    it('окно задаётся параметром и называется в ответе', async () => {
+      await fall(before(10), before(9));
+
+      const narrow = await repository.forAddress(
+        superadmin(),
+        projectId,
+        domainId,
+        query({ windowDays: 7 }),
+        NOW,
+      );
+
+      expect(narrow.window).toEqual({
+        days: 7,
+        from: new Date(NOW.getTime() - 7 * DAY_MS).toISOString(),
+        to: NOW.toISOString(),
+      });
+      expect(narrow.summary.falls).toBe(0);
+    });
+
+    it('страница отдаётся смещением, у последней следующей нет', async () => {
+      await fall(before(5), before(4, 23));
+      await fall(before(3), before(2, 23));
+      await fall(before(1), before(0, 23));
+
+      const first = await repository.forAddress(
+        superadmin(),
+        projectId,
+        domainId,
+        query({ limit: 2 }),
+        NOW,
+      );
+      const second = await repository.forAddress(
+        superadmin(),
+        projectId,
+        domainId,
+        query({ limit: 2, offset: 2 }),
+        NOW,
+      );
+
+      expect(first.incidents).toHaveLength(2);
+      expect(first.nextOffset).toBe(2);
+      expect(second.incidents).toHaveLength(1);
+      expect(second.nextOffset).toBeNull();
+      // Число падений — по окну, а не по странице: иначе счёт зависел бы
+      // от того, насколько глубоко человек пролистал.
+      expect(second.summary.falls).toBe(3);
+    });
+
+    it('страница ведёт от свежих к старым, открытое падение в ней тоже', async () => {
+      await fall(before(5), before(4), { cause: 'старое' });
+      await fall(before(0, 1), null, { cause: 'свежее' });
+
+      const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+      expect(history.incidents.map((incident) => incident.cause)).toEqual(['свежее', 'старое']);
+    });
+
+    it('без выдачи на инфраструктуру адрес не раскрывается', async () => {
+      await expect(
+        repository.forAddress(outsider(), projectId, domainId, query(), NOW),
+      ).rejects.toThrow(SectionNotVisibleError);
+    });
+
+    it('адрес чужого проекта не раскрывается так же, как отсутствие выдачи', async () => {
+      // Один и тот же 404: иначе ответ сообщил бы, что адрес существует.
+      const foreign = await otherProjectAddress();
+
+      await expect(
+        repository.forAddress(superadmin(), projectId, foreign, query(), NOW),
+      ).rejects.toThrow(SectionNotVisibleError);
+    });
+
+    it('уровня «метаданные» достаточно', async () => {
+      // Ниже «метаданных» уровня нет: отказ 403 на этой ручке недостижим
+      // по построению, и проверять его нечем — доступ либо есть, либо
+      // секция не раскрывается.
+      await testDb.db.insert(grants).values({
+        subjectId: outsiderSubjectId,
+        projectId,
+        section: Section.Infrastructure,
+        level: AccessLevel.Metadata,
+        grantedBy: adminUserId,
+      });
+      await fall(before(1), before(0, 23));
+
+      const history = await repository.forAddress(outsider(), projectId, domainId, query(), NOW);
+
+      expect(history.summary.falls).toBe(1);
+    });
   });
 });

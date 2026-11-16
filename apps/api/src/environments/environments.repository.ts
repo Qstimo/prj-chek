@@ -6,6 +6,7 @@ import {
   type EnvironmentDetail,
   type EnvironmentDomainCreate,
   type EnvironmentMetadata,
+  type EnvironmentRootDomain,
   type EnvironmentUpdate,
   type PlatformRef,
 } from '@cairn/shared';
@@ -26,6 +27,10 @@ import type { Database, Executor, Transaction } from '../db/db.types';
 import {
   addressIncidents,
   domainStatuses,
+  // Таблица корней реестра. Под псевдонимом: `domains` в этом файле — это
+  // имена адресов окружения, и два разных смысла под одним словом
+  // запутали бы выборку.
+  domains as rootDomains,
   environmentDomains,
   environmentPlatforms,
   environments,
@@ -86,6 +91,10 @@ export class EnvironmentsRepository {
     const domains = await this.domainsOf(rows.map((row) => row.id));
     const machines = await this.serversOf(rows);
     const platforms = await this.platformsOf(rows.map((row) => row.id));
+    const roots = await this.rootsOf(
+      subject,
+      rows.map((row) => row.id),
+    );
 
     return rows.map((row) =>
       environmentProjection(
@@ -94,6 +103,7 @@ export class EnvironmentsRepository {
         level,
         row.serverId ? (machines.get(row.serverId) ?? null) : null,
         platforms.get(row.id) ?? [],
+        roots.get(row.id) ?? [],
       ),
     );
   }
@@ -115,6 +125,7 @@ export class EnvironmentsRepository {
     const domains = await this.domainsOf([environmentId]);
     const machines = await this.serversOf([environment]);
     const platforms = await this.platformsOf([environmentId]);
+    const roots = await this.rootsOf(subject, [environmentId]);
 
     return environmentProjection(
       environment,
@@ -122,6 +133,7 @@ export class EnvironmentsRepository {
       level,
       environment.serverId ? (machines.get(environment.serverId) ?? null) : null,
       platforms.get(environmentId) ?? [],
+      roots.get(environmentId) ?? [],
     );
   }
 
@@ -401,6 +413,46 @@ export class EnvironmentsRepository {
 
     for (const row of rows) {
       grouped.set(row.environmentId, [...(grouped.get(row.environmentId) ?? []), row.name]);
+    }
+
+    return grouped;
+  }
+
+  /**
+   * Корни адресов окружений — только суперадмину.
+   *
+   * Отбор по праву стоит здесь, а не в проекции: проекция знает уровень
+   * доступа к секции, а право на реестр доменов — это суперадминство,
+   * то есть свойство субъекта. Остальным возвращается пустая карта, и
+   * запрос в реестр не делается вовсе — так имя записи реестра не
+   * попадает даже в память процесса, обслуживающего подрядчика.
+   */
+  private async rootsOf(
+    subject: RequestSubject,
+    environmentIds: string[],
+  ): Promise<Map<string, EnvironmentRootDomain[]>> {
+    if (!subject.isSuperadmin || environmentIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      .selectDistinct({
+        environmentId: environmentDomains.environmentId,
+        id: rootDomains.id,
+        name: rootDomains.name,
+      })
+      .from(environmentDomains)
+      .innerJoin(rootDomains, eq(rootDomains.id, environmentDomains.domainId))
+      .where(inArray(environmentDomains.environmentId, environmentIds))
+      .orderBy(asc(rootDomains.name));
+
+    const grouped = new Map<string, EnvironmentRootDomain[]>();
+
+    for (const row of rows) {
+      grouped.set(row.environmentId, [
+        ...(grouped.get(row.environmentId) ?? []),
+        { id: row.id, name: row.name },
+      ]);
     }
 
     return grouped;

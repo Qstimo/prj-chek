@@ -1,14 +1,21 @@
-import { AccessLevel, EnvironmentKind, HealthState, Section, SubjectKind } from '@cairn/shared';
+import {
+  AccessLevel,
+  EnvironmentKind,
+  HealthState,
+  Section,
+  StatusCheckCode,
+  SubjectKind,
+} from '@cairn/shared';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
 import { DATABASE } from '../src/db/db.module';
-import { STATUS_CHECKERS } from '../src/status/status-runner.service';
+import { STATUS_CHECKERS, STATUS_RUN_LOCK_DB } from '../src/status/status-runner.service';
 import {
   domains,
   environmentDomains,
@@ -28,10 +35,16 @@ import { startTestDatabase, type TestDatabase } from './db-fixture';
  * Сами проверщики проверены отдельно, каждый своим тестом.
  */
 const DEAD_ADDRESS_CHECKERS = {
-  checkHealth: async () => ({ health: HealthState.Down, latencyMs: null, error: 'HTTP 502' }),
-  checkTls: async () => ({ validTo: null, error: null }),
-  checkDomainExpiry: async () => ({ expiresAt: null, error: null }),
-  resolveAddress: async () => ({ ip: null, error: null }),
+  checkHealth: async () => ({
+    health: HealthState.Down,
+    latencyMs: null,
+    code: StatusCheckCode.ServerError,
+    error: 'HTTP 502',
+    redirectTo: null,
+  }),
+  checkTls: async () => ({ validTo: null, trusted: null, code: null, error: null }),
+  checkDomainExpiry: async () => ({ expiresAt: null, code: null, error: null }),
+  resolveAddress: async () => ({ ips: [], code: null, error: null }),
 };
 
 describe('HTTP: статус', () => {
@@ -49,6 +62,11 @@ describe('HTTP: статус', () => {
       .useValue(testDb.db)
       .overrideProvider(STATUS_CHECKERS)
       .useValue(DEAD_ADDRESS_CHECKERS)
+      // Замок прогона держит соединение на весь обход, а рабочий пул
+      // фикстуры состоит из одного соединения: занять его значило бы
+      // запереть сам прогон. В развёртывании пул общий.
+      .overrideProvider(STATUS_RUN_LOCK_DB)
+      .useValue(testDb.appDb)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -138,11 +156,20 @@ describe('HTTP: статус', () => {
 
   it('после ручного прогона недоступное окружение даёт «аварию»', async () => {
     const admin = await signIn('admin@cairn.local');
-    await admin.post('/status/run').expect(202);
+    // Ручка объявлена `202`: прогон идёт в фоне, и статус приходит
+    // обновлением — потому его здесь и дожидаются, как это делает веб.
+    const accepted = await admin.post('/status/run').expect(202);
 
-    const status = await admin.get(`/projects/${projectId}/status`).expect(200);
+    expect(accepted.body).toEqual({ accepted: true });
 
-    expect(status.body.indicator).toBe('down');
+    const status = await vi.waitFor(async () => {
+      const response = await admin.get(`/projects/${projectId}/status`).expect(200);
+
+      expect(response.body.indicator).toBe('down');
+
+      return response;
+    });
+
     expect(status.body.environments[0].health).toBe('down');
     // Предупреждение называет адрес: оно отвечает на вопрос «что чинить».
     expect(status.body.warnings[0]).toMatchObject({
@@ -150,10 +177,8 @@ describe('HTTP: статус', () => {
       subject: 'prod.example.com',
       detail: 'HTTP 502',
     });
-    expect(status.body.warnings.some((warning: { kind: string }) => warning.kind === 'health_down')).toBe(
-      true,
-    );
   });
+
 
   it('запуск проверок доступен только суперадмину', async () => {
     await grantInfra(AccessLevel.Metadata);

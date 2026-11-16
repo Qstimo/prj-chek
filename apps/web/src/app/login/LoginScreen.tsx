@@ -63,6 +63,10 @@ export function LoginScreen() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-3 text-2xl font-semibold tracking-tight">
+        <img src="/cairn-raccoon.png" alt="Енот — логотип CAIRN" width={56} height={56} className="h-14 w-14 object-contain" />
+        <span>cairn</span>
+      </div>
       <h1 className="text-xl font-semibold">
         {challengeToken ? 'Подтверждение входа' : 'Вход в CAIRN'}
       </h1>

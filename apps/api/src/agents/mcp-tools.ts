@@ -105,7 +105,10 @@ export function registerTools(server: McpServer, deps: McpDeps, context: McpCont
   addTool('get_roadmap', 'Роадмап: версии, чекпоинты, выпуски по платформам и текущая стадия', {}, async () => {
     await recordCall('get_roadmap', {});
 
-    return asText(await deps.roadmap.findForProject(subject, projectId));
+    // Без ссылок на задачи: адрес внутреннего трекера вместе с номером
+    // задачи ушёл бы в контекст модели и дальше — в чужую историю
+    // переписки, откуда его не забрать (ТЗ 7.4).
+    return asText(await deps.roadmap.findForProject(subject, projectId, { withLinks: false }));
   });
 
   addTool('read_chronicle', 'Хроника проекта: как мы к этому пришли', {}, async () => {

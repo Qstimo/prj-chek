@@ -3,5 +3,5 @@ export { parseAddress, rootHintOf } from './parse-address';
 export type { IAddressParse } from './parse-address';
 export * from './plural';
 export { today } from './today';
-export { splitWarningsByUrgency } from './split-warnings';
+export { splitWarnings, splitWarningsByUrgency } from './split-warnings';
 export type { LinkedWarning, SplitWarnings } from './split-warnings';

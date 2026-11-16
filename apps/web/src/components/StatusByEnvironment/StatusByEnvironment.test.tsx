@@ -1,6 +1,12 @@
-import { HealthState, type DomainStatus, type EnvironmentStatus } from '@cairn/shared';
+import {
+  HealthState,
+  StatusCheckCode,
+  type DomainStatus,
+  type EnvironmentStatus,
+} from '@cairn/shared';
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 
 import { StatusByEnvironment } from './StatusByEnvironment';
 
@@ -21,9 +27,14 @@ function address(overrides: Partial<DomainStatus> = {}): DomainStatus {
     health: HealthState.Up,
     latencyMs: 42,
     healthError: null,
+    healthCode: null,
+    redirectTo: null,
     resolvedIp: '203.0.113.10',
+    resolvedIps: ['203.0.113.10'],
     resolveError: null,
     tlsValidTo: '2027-01-01T00:00:00.000Z',
+    tlsTrusted: true,
+    tlsCode: null,
     tlsError: null,
     registryExpiresAt: '2027-06-01T00:00:00.000Z',
     registryError: null,
@@ -32,32 +43,51 @@ function address(overrides: Partial<DomainStatus> = {}): DomainStatus {
   };
 }
 
+/** Строка таблицы по имени адреса. */
+function row(name = 'stage.example.com') {
+  return screen.getByRole('row', { name: new RegExp(name.replace(/\./g, '\\.')) });
+}
+
 describe('StatusByEnvironment', () => {
   it('показывает адреса под их окружением', () => {
     render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
 
-    const prodItem = screen.getByRole('listitem', { name: 'Прод' });
+    const group = screen.getByRole('rowgroup', { name: 'Прод' });
 
-    expect(within(prodItem).getByText(/stage\.example\.com/)).toBeInTheDocument();
+    expect(within(group).getByText('stage.example.com')).toBeInTheDocument();
+  });
+
+  it('называет три проверки заголовками столбцов', () => {
+    // Таблица отвечает на вопрос «что проверяли»: три проверки разнесены
+    // по столбцам, а не слиты в одну фразу.
+    render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
+
+    expect(screen.getByRole('columnheader', { name: 'Доступность' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Сертификат' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Домен' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Проверено' })).toBeInTheDocument();
   });
 
   it('у мёртвого адреса показывает причину', () => {
     // Именно это отвечает на вопрос «что чинить».
-    const dead = address({ health: HealthState.Down, latencyMs: null, healthError: 'HTTP 502' });
+    const dead = address({
+      health: HealthState.Down,
+      latencyMs: null,
+      healthError: 'сервер ответил ошибкой (HTTP 502)',
+      healthCode: StatusCheckCode.ServerError,
+    });
 
     render(<StatusByEnvironment environments={[prod]} addresses={[dead]} />);
 
-    expect(screen.getByText(/не отвечает \(HTTP 502\)/)).toBeInTheDocument();
+    expect(screen.getByText(/не отвечает \(сервер ответил ошибкой \(HTTP 502\)\)/)).toBeInTheDocument();
   });
 
   it('у живого адреса показывает задержку, сертификат и срок', () => {
     render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
 
-    const line = screen.getByRole('listitem', { name: 'stage.example.com' });
-
-    expect(within(line).getByText(/работает, 42 мс/)).toBeInTheDocument();
-    expect(within(line).getByText(/TLS до 2027-01-01/)).toBeInTheDocument();
-    expect(within(line).getByText(/регистрация до 2027-06-01/)).toBeInTheDocument();
+    expect(within(row()).getByText('работает, 42 мс')).toBeInTheDocument();
+    expect(within(row()).getByText('до 01.01.2027')).toBeInTheDocument();
+    expect(within(row()).getByText('до 01.06.2027')).toBeInTheDocument();
   });
 
   it('непроверенный адрес говорит об этом, а не молчит', () => {
@@ -65,35 +95,73 @@ describe('StatusByEnvironment', () => {
       health: null,
       latencyMs: null,
       tlsValidTo: null,
+      tlsTrusted: null,
       registryExpiresAt: null,
       checkedAt: null,
     });
 
     render(<StatusByEnvironment environments={[prod]} addresses={[fresh]} />);
 
-    expect(screen.getByText('не проверялся')).toBeInTheDocument();
+    expect(within(row()).getAllByText('не проверяли')).toHaveLength(3);
+    expect(within(row()).getByText('никогда')).toBeInTheDocument();
   });
 
-  it('ошибку проверки показывает вместо срока', () => {
-    const broken = address({ tlsValidTo: null, tlsError: 'нет соединения' });
+  it('ошибку проверки сертификата показывает вместо срока', () => {
+    const broken = address({ tlsValidTo: null, tlsTrusted: null, tlsError: 'нет соединения' });
 
     render(<StatusByEnvironment environments={[prod]} addresses={[broken]} />);
 
-    expect(screen.getByText(/TLS: нет соединения/)).toBeInTheDocument();
+    expect(screen.getByText('не проверить: нет соединения')).toBeInTheDocument();
   });
 
-  it('показывает, на какой адрес смотрит имя', () => {
+  it('недоверенный сертификат не выглядит действующим', () => {
+    // Пока в строке лежал один срок, зелёное «до 2027» уживалось с
+    // красным «не отвечает»: fetch отвергал сертификат, которому
+    // проверка TLS верила.
+    const untrusted = address({
+      tlsTrusted: false,
+      tlsCode: StatusCheckCode.CertificateUntrusted,
+      tlsError: 'сертификат не вызывает доверия (DEPTH_ZERO_SELF_SIGNED_CERT)',
+    });
+
+    render(<StatusByEnvironment environments={[prod]} addresses={[untrusted]} />);
+
+    expect(screen.getByText(/не доверяем/)).toBeInTheDocument();
+    expect(screen.queryByText('до 01.01.2027')).not.toBeInTheDocument();
+  });
+
+  it('живой адрес за авторизацией объясняет, почему он зелёный', () => {
+    // 401 — рабочее состояние стенда: предупреждения нет вовсе, и без
+    // пометки человек не понял бы, что увидела проверка.
+    const closed = address({ healthCode: StatusCheckCode.AuthRequired });
+
+    render(<StatusByEnvironment environments={[prod]} addresses={[closed]} />);
+
+    expect(screen.getByText(/закрыто авторизацией/)).toBeInTheDocument();
+  });
+
+  it('перенаправление называет цель', () => {
+    const moved = address({
+      healthCode: StatusCheckCode.Redirect,
+      redirectTo: 'https://example.com/health',
+    });
+
+    render(<StatusByEnvironment environments={[prod]} addresses={[moved]} />);
+
+    expect(screen.getByText(/https:\/\/example\.com\/health/)).toBeInTheDocument();
+  });
+
+  it('показывает время последней проверки у адреса и у окружения', () => {
+    // `checkedAt` считался на сервере и до экрана не доезжал: человек не
+    // знал, насколько свежее то, на что он смотрит.
     render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
 
-    expect(screen.getByText('смотрит на 203.0.113.10')).toBeInTheDocument();
-  });
-
-  it('неразрешённое имя объясняет причину', () => {
-    const broken = address({ resolvedIp: null, resolveError: 'queryA ENOTFOUND' });
-
-    render(<StatusByEnvironment environments={[prod]} addresses={[broken]} />);
-
-    expect(screen.getByText(/не разрешается: queryA ENOTFOUND/)).toBeInTheDocument();
+    expect(within(row()).getByText('17.09.2026, 13:00')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('rowgroup', { name: 'Прод' })).getByText(
+        /проверено 17\.09\.2026, 13:00/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('не называет машину: её имя принадлежит уровню чтения', () => {
@@ -113,33 +181,23 @@ describe('StatusByEnvironment', () => {
 
     render(<StatusByEnvironment environments={[prod]} addresses={[other]} />);
 
-    expect(screen.queryByText(/stage\.example\.com/)).not.toBeInTheDocument();
+    expect(screen.queryByText('stage.example.com')).not.toBeInTheDocument();
   });
-  it('историю падений показывает у своего адреса', () => {
-    // Инциденты приходят отдельным запросом и сводятся по адресу: без
-    // этого история могла бы оказаться под чужой строкой.
+
+  it('по клику на адрес открывает его разбор', async () => {
+    const onSelect = vi.fn();
     render(
-      <StatusByEnvironment
-        environments={[prod]}
-        addresses={[address()]}
-        incidents={[
-          {
-            domainId: address().domainId,
-            name: address().name,
-            open: {
-              id: '00000000-0000-0000-0000-00000000000a',
-              domainId: address().domainId,
-              startedAt: '2026-10-20T14:20:00.000Z',
-              resolvedAt: null,
-              cause: 'HTTP 500',
-            },
-            past: [],
-            pastTotal: 0,
-          },
-        ]}
-      />,
+      <StatusByEnvironment environments={[prod]} addresses={[address()]} onSelect={onSelect} />,
     );
 
-    expect(screen.getByText(/не отвечает с/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'stage.example.com' }));
+
+    expect(onSelect).toHaveBeenCalledWith('22222222-2222-2222-2222-222222222222');
+  });
+
+  it('без обработчика адрес остаётся текстом, а не мёртвой кнопкой', () => {
+    render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 });

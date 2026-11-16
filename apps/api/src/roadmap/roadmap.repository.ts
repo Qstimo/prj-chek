@@ -1,12 +1,18 @@
 import {
   AccessLevel,
+  CARRY_OVER_NEEDS_LABEL,
+  PlatformReleaseState,
   releaseStatesFor,
   RoadmapVersionState,
   Section,
+  type CarriedOutCheckpoint,
+  type CheckpointCarryOver,
   type PlatformRelease,
   type PlatformReleaseSet,
+  type PublicReleaseReport,
   type PublicRoadmap,
   type PublicVersion,
+  type ReleaseReport,
   type RoadmapCheckpointCreate,
   type RoadmapCheckpointUpdate,
   type RoadmapResponse,
@@ -30,6 +36,7 @@ import {
   projects,
   roadmapCheckpoints,
   roadmapPublicLinks,
+  roadmapReportPublicLinks,
   roadmapVersions,
   versionPlatformReleases,
   type PlatformReleaseRow,
@@ -37,6 +44,7 @@ import {
   type RoadmapCheckpointRow,
   type RoadmapVersionRow,
 } from '../db/schema';
+import { releaseReportOf } from './release.report';
 import { releaseSummaryOf } from './release.summary';
 import { versionProjection } from './roadmap.projection';
 
@@ -54,8 +62,18 @@ export class RoadmapRepository {
     private readonly access: AccessService,
   ) {}
 
-  /** Роадмап проекта в проекции по уровню, со стадией. */
-  async findForProject(subject: RequestSubject, projectId: string): Promise<RoadmapResponse> {
+  /**
+   * Роадмап проекта в проекции по уровню, со стадией.
+   *
+   * `withLinks` выключается вызывающей стороной, когда выдача уезжает
+   * туда, где адреса внутреннего трекера быть не должно, — например
+   * агенту MCP: ссылка с номером задачи попала бы в контекст модели.
+   */
+  async findForProject(
+    subject: RequestSubject,
+    projectId: string,
+    { withLinks = true }: { withLinks?: boolean } = {},
+  ): Promise<RoadmapResponse> {
     const level = await this.access.requireLevel(
       subject,
       projectId,
@@ -72,6 +90,7 @@ export class RoadmapRepository {
       stage: stageOf(versions),
       versions: versions.map((version) =>
         versionProjection(version, byVersion.get(version.id) ?? [], byRelease.get(version.id) ?? [], level, {
+          withLinks,
           platformsByCheckpoint: tags,
         }),
       ),
@@ -87,6 +106,7 @@ export class RoadmapRepository {
     input: RoadmapVersionCreate,
   ): Promise<RoadmapVersionRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockProject(tx, projectId);
     await this.requireDateFromReleases(tx, projectId, input);
 
     const existing = await tx
@@ -124,6 +144,7 @@ export class RoadmapRepository {
     input: RoadmapVersionUpdate,
   ): Promise<RoadmapVersionRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockProject(tx, projectId);
     await this.requireVersion(tx, projectId, versionId);
     await this.requireDateFromReleases(tx, projectId, input);
 
@@ -158,6 +179,7 @@ export class RoadmapRepository {
     versionId: string,
   ): Promise<RoadmapVersionRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockProject(tx, projectId);
 
     const version = await this.requireVersion(tx, projectId, versionId);
 
@@ -181,6 +203,11 @@ export class RoadmapRepository {
     await tx
       .delete(versionPlatformReleases)
       .where(eq(versionPlatformReleases.versionId, versionId));
+    // Публичная ссылка на отчёт тоже висит на версии и тоже `restrict`:
+    // без уборки версия с опубликованным отчётом стала бы неудаляемой.
+    await tx
+      .delete(roadmapReportPublicLinks)
+      .where(eq(roadmapReportPublicLinks.versionId, versionId));
     await tx.delete(roadmapCheckpoints).where(eq(roadmapCheckpoints.versionId, versionId));
     await tx.delete(roadmapVersions).where(eq(roadmapVersions.id, versionId));
 
@@ -196,6 +223,7 @@ export class RoadmapRepository {
     input: RoadmapCheckpointCreate,
   ): Promise<TaggedCheckpointRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockProject(tx, projectId);
     await this.requireVersion(tx, projectId, versionId);
 
     const existing = await tx
@@ -232,6 +260,7 @@ export class RoadmapRepository {
     input: RoadmapCheckpointUpdate,
   ): Promise<TaggedCheckpointRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockProject(tx, projectId);
     await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
 
     // Теги — не колонка чекпоинта: без отделения поле уехало бы
@@ -264,6 +293,7 @@ export class RoadmapRepository {
     checkpointId: string,
   ): Promise<RoadmapCheckpointRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockProject(tx, projectId);
 
     const checkpoint = await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
 
@@ -271,6 +301,123 @@ export class RoadmapRepository {
     await tx.delete(roadmapCheckpoints).where(eq(roadmapCheckpoints.id, checkpointId));
 
     return checkpoint;
+  }
+
+  /**
+   * Переносит чекпоинт в другую версию.
+   *
+   * Отдельное действие, а не правка с новым `versionId`: «найти или
+   * создать целевую версию» обязано быть атомарным, иначе между поиском
+   * и созданием успеет вклиниться чужая запись, а в журнале перенос
+   * оказался бы неотличим от переименования.
+   *
+   * Цель выбирается тремя способами: указанной версией, обозначением
+   * новой и — пустым телом — следующей открытой версией по тому же
+   * правилу, что стадия роадмапа.
+   *
+   * Возвращает обозначения обеих версий: журналу нужны «откуда» и
+   * «куда», а достать их отдельным запросом служба не может — тот же
+   * приём, что у {@link setRelease}.
+   */
+  async carryOverCheckpoint(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    versionId: string,
+    checkpointId: string,
+    input: CheckpointCarryOver,
+  ): Promise<CarriedOverCheckpoint> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockProject(tx, projectId);
+
+    const source = await this.requireVersion(tx, projectId, versionId);
+    await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
+
+    const { target, versionCreated } = await this.carryOverTarget(
+      subject,
+      tx,
+      projectId,
+      source,
+      input,
+    );
+
+    const existing = await tx
+      .select({ position: roadmapCheckpoints.position })
+      .from(roadmapCheckpoints)
+      .where(eq(roadmapCheckpoints.versionId, target.id));
+
+    const [moved] = await tx
+      .update(roadmapCheckpoints)
+      .set({
+        versionId: target.id,
+        // `max + 1`, а не прежняя позиция: позиции правятся без
+        // перенумерации и без уникальности, и перенесённый чекпоинт
+        // приехал бы на занятое место вторым жильцом.
+        position: Math.max(0, ...existing.map((row) => row.position)) + 1,
+        carriedFromVersionId: source.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(roadmapCheckpoints.id, checkpointId))
+      .returning();
+
+    // Теги не трогаются вовсе: они висят на чекпоинте, а не на версии,
+    // и переезжают вместе с ним сами.
+    return {
+      checkpoint: { ...moved!, platformIds: await this.tagsOf(tx, checkpointId) },
+      fromLabel: source.label,
+      toLabel: target.label,
+      versionCreated,
+    };
+  }
+
+  /** Версия-получатель переноса: указанная, новая либо следующая открытая. */
+  private async carryOverTarget(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    source: RoadmapVersionRow,
+    input: CheckpointCarryOver,
+  ): Promise<{ target: RoadmapVersionRow; versionCreated: boolean }> {
+    if (input.targetVersionId !== undefined) {
+      // Чужая версия — `404` из `requireVersion`: иначе ответ подтвердил
+      // бы, что она существует в другом проекте.
+      const target = await this.requireVersion(tx, projectId, input.targetVersionId);
+
+      if (target.id === source.id) {
+        throw new ConflictException('Чекпоинт уже в этой версии.');
+      }
+
+      return { target, versionCreated: false };
+    }
+
+    if (input.newVersionLabel !== undefined) {
+      // Через `createVersion`, а не своей вставкой: занятое обозначение
+      // обязано отвечать тем же конфликтом, что и заведение версии
+      // руками, а позиция — тем же «в конец последовательности».
+      return {
+        target: await this.createVersion(subject, tx, projectId, { label: input.newVersionLabel }),
+        versionCreated: true,
+      };
+    }
+
+    const versions = await tx
+      .select()
+      .from(roadmapVersions)
+      .where(eq(roadmapVersions.projectId, projectId))
+      .orderBy(asc(roadmapVersions.position), asc(roadmapVersions.createdAt));
+
+    const target = nextOpenVersion(versions, source.id);
+
+    if (!target) {
+      // Различимый код, а не общий конфликт: по нему интерфейс
+      // спрашивает обозначение новой версии и повторяет перенос.
+      throw new ConflictException({
+        code: CARRY_OVER_NEEDS_LABEL,
+        message: 'Открытой версии в роадмапе нет: укажите обозначение новой.',
+      });
+    }
+
+    return { target, versionCreated: false };
   }
 
   /**
@@ -301,6 +448,17 @@ export class RoadmapRepository {
     if (!releaseStatesFor(platform.kind).includes(input.state)) {
       throw new ConflictException(
         `Состояние «${input.state}» платформе «${platform.name}» не подходит: модерация и отклонение бывают только у магазина.`,
+      );
+    }
+
+    // Дата выхода бывает только у выпущенного. У выпуска «в пути» её ещё
+    // нет, и записанная дата уехала бы в сводку релизов датой обещания —
+    // сводка не различает «вышло тогда-то» и «обещали тогда-то».
+    // Проверка здесь, а не в схеме контракта: `null` остаётся
+    // допустимым при любом состоянии, отвергается именно дата.
+    if (input.state !== PlatformReleaseState.Released && input.releasedDate) {
+      throw new ConflictException(
+        'Дата выхода бывает только у выпущенного: у выпуска «в пути» её ещё нет.',
       );
     }
 
@@ -410,8 +568,16 @@ export class RoadmapRepository {
     }
   }
 
-  /** Токен действующей публичной ссылки либо `null`. */
-  async findPublicLink(projectId: string): Promise<string | null> {
+  /**
+   * Токен действующей публичной ссылки либо `null`.
+   *
+   * Субъект в подписи, а проверка — здесь, а не в контроллере: право
+   * проверяется на уровне выборки данных (ТЗ 4.1), иначе её легко
+   * забыть у следующей ручки. Уровень чтения: ссылку рассылают читающие.
+   */
+  async findPublicLink(subject: RequestSubject, projectId: string): Promise<string | null> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Read);
+
     const [row] = await this.db
       .select({ token: roadmapPublicLinks.token })
       .from(roadmapPublicLinks)
@@ -421,8 +587,16 @@ export class RoadmapRepository {
     return row?.token ?? null;
   }
 
-  /** Включает публикацию. Повторное включение — конфликт. */
-  async publish(tx: Transaction, projectId: string): Promise<string> {
+  /**
+   * Включает публикацию. Повторное включение — конфликт.
+   *
+   * Уровень записи проверяется здесь: раскрытие наружу остаётся
+   * решением суперадмина, и его право по-прежнему требует guard
+   * контроллера, — но проверка выборки обязана быть и тут (ТЗ 4.1).
+   */
+  async publish(subject: RequestSubject, tx: Transaction, projectId: string): Promise<string> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+
     const [existing] = await tx
       .select({ id: roadmapPublicLinks.id })
       .from(roadmapPublicLinks)
@@ -441,7 +615,9 @@ export class RoadmapRepository {
   }
 
   /** Отключает публикацию: прежняя ссылка гаснет. */
-  async unpublish(tx: Transaction, projectId: string): Promise<void> {
+  async unpublish(subject: RequestSubject, tx: Transaction, projectId: string): Promise<void> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+
     const [existing] = await tx
       .select({ id: roadmapPublicLinks.id })
       .from(roadmapPublicLinks)
@@ -495,6 +671,226 @@ export class RoadmapRepository {
       ),
       summary: releaseSummaryOf(platforms, versions, releases),
     };
+  }
+
+  /**
+   * Отчёт по релизу одной версии (дизайн доводки, 6).
+   *
+   * Третья проекция поверх той же пачки данных, что роадмап: отдельных
+   * выборок под отчёт не заводится, иначе «что в версии» считалось бы
+   * двумя разными способами.
+   *
+   * Уровень чтения: отчёт — это формулировки чекпоинтов и выпуски, а они
+   * открываются чтением. Чужая версия даёт `404` из `requireVersion`.
+   */
+  async findReport(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+  ): Promise<ReleaseReport> {
+    const level = await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Roadmap,
+      AccessLevel.Read,
+    );
+
+    return this.buildReport(projectId, versionId, level, { withLinks: true });
+  }
+
+  /**
+   * Токен действующей ссылки на отчёт версии либо `null`.
+   *
+   * Субъект в подписи, а проверка — здесь: право проверяется на уровне
+   * выборки (ТЗ 4.1), и у новой ручки её нельзя забыть. Уровень чтения:
+   * ссылку рассылают читающие.
+   */
+  async findReportLink(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+  ): Promise<string | null> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Read);
+    await this.requireVersion(this.db, projectId, versionId);
+
+    const [row] = await this.db
+      .select({ token: roadmapReportPublicLinks.token })
+      .from(roadmapReportPublicLinks)
+      .where(eq(roadmapReportPublicLinks.versionId, versionId))
+      .limit(1);
+
+    return row?.token ?? null;
+  }
+
+  /**
+   * Включает публикацию отчёта версии. Повторное включение — конфликт.
+   *
+   * Возвращает обозначение версии вместе с токеном: журналу нужно назвать
+   * версию, а достать её отдельным запросом служба не может — тот же
+   * приём, что у {@link setRelease}.
+   */
+  async publishReport(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    versionId: string,
+  ): Promise<{ token: string; label: string }> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+
+    const version = await this.requireVersion(tx, projectId, versionId);
+    const [existing] = await this.reportLinkRow(tx, versionId);
+
+    if (existing) {
+      throw new ConflictException(
+        'Отчёт по этой версии уже опубликован. Сначала отключите ссылку.',
+      );
+    }
+
+    const token = generateToken();
+
+    await tx.insert(roadmapReportPublicLinks).values({ versionId, token });
+
+    return { token, label: version.label };
+  }
+
+  /** Отключает публикацию отчёта: прежняя ссылка гаснет. */
+  async unpublishReport(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    versionId: string,
+  ): Promise<{ label: string }> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+
+    const version = await this.requireVersion(tx, projectId, versionId);
+    const [existing] = await this.reportLinkRow(tx, versionId);
+
+    if (!existing) {
+      throw new NotFoundException('Отчёт не опубликован');
+    }
+
+    await tx
+      .delete(roadmapReportPublicLinks)
+      .where(eq(roadmapReportPublicLinks.id, existing.id));
+
+    return { label: version.label };
+  }
+
+  /**
+   * Публичный отчёт по токену: та же проекция чтения, без ссылок.
+   *
+   * Мусорный токен и отключённая публикация неразличимы — `null`,
+   * снаружи одинаковый `404`.
+   */
+  async publicReport(token: string): Promise<PublicReleaseReport | null> {
+    const [link] = await this.db
+      .select({
+        versionId: roadmapReportPublicLinks.versionId,
+        projectId: roadmapVersions.projectId,
+        projectName: projects.name,
+      })
+      .from(roadmapReportPublicLinks)
+      .innerJoin(roadmapVersions, eq(roadmapVersions.id, roadmapReportPublicLinks.versionId))
+      .innerJoin(projects, eq(projects.id, roadmapVersions.projectId))
+      .where(eq(roadmapReportPublicLinks.token, token))
+      .limit(1);
+
+    if (!link) {
+      return null;
+    }
+
+    // Без ссылок на задачи: страница открыта без авторизации, и адрес
+    // внутреннего трекера с номером задачи наружу уходить не должен.
+    const report = await this.buildReport(link.projectId, link.versionId, AccessLevel.Read, {
+      withLinks: false,
+    });
+
+    return { projectName: link.projectName, ...report };
+  }
+
+  /** Строка публичной ссылки отчёта. Отдельно: её спрашивают дважды. */
+  private async reportLinkRow(executor: Executor, versionId: string) {
+    return executor
+      .select({ id: roadmapReportPublicLinks.id })
+      .from(roadmapReportPublicLinks)
+      .where(eq(roadmapReportPublicLinks.versionId, versionId))
+      .limit(1);
+  }
+
+  /**
+   * Собирает отчёт поверх пачки `loadRoadmap`.
+   *
+   * Уровень приходит аргументом, а не считается здесь: публичный путь
+   * субъекта не имеет вовсе, а внутренний уже спросил право у выборки.
+   */
+  private async buildReport(
+    projectId: string,
+    versionId: string,
+    level: AccessLevel,
+    { withLinks }: { withLinks: boolean },
+  ): Promise<ReleaseReport> {
+    const { versions, byVersion, checkpoints, platforms, releases, byRelease, tags } =
+      await this.loadRoadmap(this.db, projectId);
+
+    const version = versions.find((row) => row.id === versionId);
+
+    if (!version) {
+      throw new SectionNotVisibleError();
+    }
+
+    const labels = new Map(versions.map((row) => [row.id, row.label]));
+    const own = byVersion.get(versionId) ?? [];
+
+    // «Принято из»: обозначение, а не идентификатор — отчёт читают
+    // глазами. Удалённая версия-источник гасит пометку (`set null`
+    // на колонке), и в карту она не попадает.
+    const carriedFrom = new Map<string, string>();
+
+    for (const checkpoint of own) {
+      const label = checkpoint.carriedFromVersionId
+        ? labels.get(checkpoint.carriedFromVersionId)
+        : undefined;
+
+      if (label) {
+        carriedFrom.set(checkpoint.id, label);
+      }
+    }
+
+    // «Перенесено в»: чекпоинты, уехавшие отсюда и сейчас лежащие в
+    // другой версии. Условие по текущей версии обязательно: чекпоинт
+    // мог вернуться назад, и тогда он уже в собственном списке.
+    const carriedOut: CarriedOutCheckpoint[] = checkpoints
+      .filter(
+        (checkpoint) =>
+          checkpoint.carriedFromVersionId === versionId && checkpoint.versionId !== versionId,
+      )
+      .map((checkpoint) => ({
+        id: checkpoint.id,
+        title: checkpoint.title,
+        isDone: checkpoint.isDone,
+        position: checkpoint.position,
+        platformIds: tags.get(checkpoint.id) ?? [],
+        carriedTo: labels.get(checkpoint.versionId)!,
+        // Поле добавляется, а не обнуляется: публичная схема отчёта
+        // строгая, и `url: null` для неё такая же ошибка, как адрес.
+        ...(withLinks ? { url: checkpoint.url } : {}),
+      })) as CarriedOutCheckpoint[];
+
+    return releaseReportOf(
+      versionProjection(version, own, byRelease.get(versionId) ?? [], level, {
+        withLinks,
+        platformsByCheckpoint: tags,
+      }),
+      {
+        platforms,
+        // Сводка — та же, что наверху роадмапа: проектная, а не по одной
+        // версии. Отчёт отвечает на вопрос «что в релизе», и ответ не
+        // имеет права разойтись с экраном роадмапа.
+        summary: releaseSummaryOf(platforms, versions, releases),
+        carriedFrom,
+        carriedOut,
+      },
+    );
   }
 
   /** Версии проекта с чекпоинтами, всё по порядку позиций. */
@@ -596,7 +992,10 @@ export class RoadmapRepository {
       tags.set(row.checkpointId, [...(tags.get(row.checkpointId) ?? []), row.platformId]);
     }
 
-    return { versions, byVersion, platforms, releases, byRelease, tags };
+    // Плоский список чекпоинтов отдаётся рядом со сгруппированным:
+    // отчёту нужны чекпоинты, уехавшие из версии в другие, а в её
+    // собственной группе их уже нет.
+    return { versions, byVersion, checkpoints, platforms, releases, byRelease, tags };
   }
 
   /**
@@ -635,6 +1034,23 @@ export class RoadmapRepository {
         'Дата релиза задаётся выпуском платформы: укажите её в строке платформы у версии.',
       );
     }
+  }
+
+  /**
+   * Один писатель роадмапа на проект до конца транзакции.
+   *
+   * Замок берётся до чтения версии и чекпоинта: ожидавший перенос после
+   * чужого коммита заново проверит источник и не запишет ложный журнал.
+   * Создание и правка позиций используют тот же замок, иначе max + 1
+   * гонялся бы с обычным добавлением. Повторный захват при создании
+   * версии из переноса безопасен: транзакция уже владеет строкой.
+   */
+  private async lockProject(tx: Transaction, projectId: string): Promise<void> {
+    await tx
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .for('no key update');
   }
 
   /** Версия обязана принадлежать проекту из адреса. */
@@ -725,9 +1141,53 @@ function stageOf(versions: RoadmapVersionRow[]): RoadmapStage {
 }
 
 /**
+ * Следующая открытая версия — цель переноса по умолчанию.
+ *
+ * Правило одно со стадией и берётся из неё же: кнопка переноса и полоса
+ * версий обязаны называть одну и ту же «текущую» версию, а второй
+ * экземпляр правила с ней рано или поздно разошёлся бы.
+ *
+ * Выпущенная цель открытой не считается (так бывает, когда выпущены все
+ * версии), и источник переноса сам себе целью не бывает. В обоих случаях
+ * открытой версии нет, и перенос требует обозначения новой.
+ */
+function nextOpenVersion(
+  versions: RoadmapVersionRow[],
+  sourceVersionId: string,
+): RoadmapVersionRow | null {
+  const { current } = stageOf(versions);
+
+  if (current === null) {
+    return null;
+  }
+
+  const candidate = versions[current - 1]!;
+
+  if (candidate.state === RoadmapVersionState.Released || candidate.id === sourceVersionId) {
+    return null;
+  }
+
+  return candidate;
+}
+
+/**
  * Строка чекпоинта вместе с его тегами.
  *
  * Теги живут отдельной таблицей, а ответы ручек собираются литералом:
  * без них контроллеру нечего положить в обязательное поле контракта.
  */
 export type TaggedCheckpointRow = RoadmapCheckpointRow & { platformIds: string[] };
+
+/**
+ * Перенесённый чекпоинт вместе с обозначениями «откуда» и «куда».
+ *
+ * Обозначения возвращаются строкой результата, а не достаются службой:
+ * журналу нужны оба, а второй запрос за ними прошёл бы мимо транзакции
+ * переноса. Идентификатор версии-получателя — в самом чекпоинте.
+ */
+export interface CarriedOverCheckpoint {
+  checkpoint: TaggedCheckpointRow;
+  fromLabel: string;
+  toLabel: string;
+  versionCreated: boolean;
+}

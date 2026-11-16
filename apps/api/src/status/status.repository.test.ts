@@ -4,6 +4,7 @@ import {
   HealthState,
   ProjectLifecycle,
   Section,
+  StatusCheckCode,
   StatusIndicator,
   StatusWarningKind,
   SubjectKind,
@@ -35,6 +36,7 @@ describe('репозиторий статусов', () => {
   let environmentId: string;
   let domainId: string;
   let subjectId: string;
+  let adminSubjectId: string;
   let adminUserId: string;
 
   beforeAll(async () => {
@@ -63,6 +65,7 @@ describe('репозиторий статусов', () => {
       })
       .returning();
     adminUserId = admin!.id;
+    adminSubjectId = adminSubject!.id;
 
     const [subject] = await testDb.db
       .insert(subjects)
@@ -106,6 +109,15 @@ describe('репозиторий статусов', () => {
     isRevoked: false,
   });
 
+  /** Суперадмин: единственный, кому видны предупреждения реестров. */
+  const superadmin = (): RequestSubject => ({
+    id: adminSubjectId,
+    kind: SubjectKind.User,
+    label: 'admin@cairn.local',
+    isSuperadmin: true,
+    isRevoked: false,
+  });
+
   async function grantInfra(level: AccessLevel): Promise<void> {
     await testDb.db.insert(grants).values({
       subjectId,
@@ -122,9 +134,13 @@ describe('репозиторий статусов', () => {
       health: HealthState.Up,
       latencyMs: 42,
       healthError: null,
-      resolvedIp: null,
+      healthCode: null,
+      redirectTo: null,
+      resolvedIps: [],
       resolveError: null,
       tlsValidTo: null,
+      tlsTrusted: null,
+      tlsCode: null,
       tlsError: null,
       registryExpiresAt: null,
       registryError: null,
@@ -154,6 +170,7 @@ describe('репозиторий статусов', () => {
       {
         id: domainId,
         name: 'example.com',
+        rootDomain: 'example.com',
         healthCheckPath: '/api/health',
         projectId,
         projectName: 'Проект',
@@ -161,6 +178,25 @@ describe('репозиторий статусов', () => {
         lifecycle: ProjectLifecycle.Development,
       },
     ]);
+  });
+
+  it('цель обхода несёт корень адреса', async () => {
+    // Реестры знают только корни: пока у них спрашивали имя поддомена, у
+    // каждого адреса висело вечное «реестр ответил HTTP 404». Корень
+    // берётся связью, а не разбором имени: список зон с именами третьего
+    // уровня у нас закрытый и неполон по устройству.
+    await testDb.db
+      .insert(environmentDomains)
+      .values({
+        environmentId,
+        domainId: (await testDb.db.select().from(domains))[0]!.id,
+        name: 'stage.example.com',
+      });
+
+    const { addresses } = await repository.listTargets();
+    const stage = addresses.find((address) => address.name === 'stage.example.com');
+
+    expect(stage?.rootDomain).toBe('example.com');
   });
 
   it('цель обхода несёт проект, окружение и жизненный цикл', async () => {
@@ -188,13 +224,72 @@ describe('репозиторий статусов', () => {
       health: HealthState.Down,
       latencyMs: null,
       healthError: 'таймаут',
+      healthCode: StatusCheckCode.Timeout,
+      redirectTo: null,
     });
 
     const [row] = await testDb.db.select().from(domainStatuses);
 
     expect(row?.health).toBe(HealthState.Down);
     expect(row?.healthError).toBe('таймаут');
+    expect(row?.healthCode).toBe(StatusCheckCode.Timeout);
     expect(row?.tlsValidTo).not.toBeNull();
+  });
+
+  it('переспрос сообщает, что строки статуса не было', async () => {
+    // Первая фаза могла упасть до записи. Молчаливый `UPDATE` по
+    // отсутствующей строке читался как успех, и прогон терял знание о
+    // том, что писать было некуда.
+    const missing = await repository.updateAddressHealth(domainId, {
+      health: HealthState.Down,
+      latencyMs: null,
+      healthError: 'таймаут',
+      healthCode: StatusCheckCode.Timeout,
+      redirectTo: null,
+    });
+
+    expect(missing).toBe(false);
+
+    await repository.upsertAddressStatus(domainId, checked());
+
+    const written = await repository.updateAddressHealth(domainId, {
+      health: HealthState.Up,
+      latencyMs: 10,
+      healthError: null,
+      healthCode: null,
+      redirectTo: null,
+    });
+
+    expect(written).toBe(true);
+  });
+
+  it('хранит код наблюдения и доверие сертификату', async () => {
+    // Отсюда росло «не отвечает» рядом с зелёным «TLS до 2027-03-01»:
+    // срок был, а правды о доверии не было.
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({
+        healthCode: StatusCheckCode.AuthRequired,
+        redirectTo: 'https://example.com/login',
+        tlsValidTo: new Date('2027-03-01T00:00:00.000Z'),
+        tlsTrusted: false,
+        tlsCode: StatusCheckCode.CertificateUntrusted,
+        tlsError: 'сертификат не вызывает доверия (DEPTH_ZERO_SELF_SIGNED_CERT)',
+      }),
+    );
+    await grantInfra(AccessLevel.Metadata);
+
+    const status = await repository.statusForProject(member(), projectId);
+
+    expect(status.domains[0]).toMatchObject({
+      healthCode: StatusCheckCode.AuthRequired,
+      redirectTo: 'https://example.com/login',
+      tlsTrusted: false,
+      tlsCode: StatusCheckCode.CertificateUntrusted,
+    });
+    expect(status.warnings.map((warning) => warning.kind)).toContain(
+      StatusWarningKind.TlsInvalid,
+    );
   });
 
   it('пишет три проверки одной строкой', async () => {
@@ -246,18 +341,75 @@ describe('репозиторий статусов', () => {
   });
 
   it('пишет и отдаёт результат разрешения', async () => {
-    await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
+    await repository.upsertAddressStatus(domainId, checked({ resolvedIps: ['203.0.113.10'] }));
     await grantInfra(AccessLevel.Metadata);
 
     const status = await repository.statusForProject(member(), projectId);
 
-    expect(status.domains[0]).toMatchObject({ resolvedIp: '203.0.113.10', resolveError: null });
+    expect(status.domains[0]).toMatchObject({
+      resolvedIp: '203.0.113.10',
+      resolvedIps: ['203.0.113.10'],
+      resolveError: null,
+    });
+  });
+
+  it('из множества адресов выбирает один и тот же', async () => {
+    // Выбор делается здесь, а не в прогоне: привязка у окружения одна, а
+    // резолверы ротируют порядок — выбранный адрес не должен плясать.
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ resolvedIps: ['203.0.113.11', '203.0.113.10'] }),
+    );
+    await grantInfra(AccessLevel.Metadata);
+
+    const status = await repository.statusForProject(member(), projectId);
+
+    expect(status.domains[0]).toMatchObject({
+      resolvedIp: '203.0.113.10',
+      resolvedIps: ['203.0.113.11', '203.0.113.10'],
+    });
+  });
+
+  it('отказ разрешения не затирает прежний адрес', async () => {
+    // Потерянный UDP-пакет не повод объявить, что имя никуда не смотрит:
+    // привязка окружения и предупреждение о расхождении читают эту
+    // колонку, и пустота в ней мигала бы на ровном месте.
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ resolvedIps: ['203.0.113.10', '203.0.113.11'] }),
+    );
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ resolvedIps: [], resolveError: 'DNS сейчас не отвечает (EAI_AGAIN)' }),
+    );
+    await grantInfra(AccessLevel.Metadata);
+
+    const status = await repository.statusForProject(member(), projectId);
+
+    expect(status.domains[0]).toMatchObject({
+      resolvedIp: '203.0.113.10',
+      resolvedIps: ['203.0.113.10', '203.0.113.11'],
+      resolveError: 'DNS сейчас не отвечает (EAI_AGAIN)',
+    });
+  });
+
+  it('первая запись с отказом разрешения оставляет адрес пустым', async () => {
+    // Сохранять нечего: прежнего знания не было.
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ resolvedIps: [], resolveError: 'имени нет в DNS (ENOTFOUND)' }),
+    );
+    await grantInfra(AccessLevel.Metadata);
+
+    const status = await repository.statusForProject(member(), projectId);
+
+    expect(status.domains[0]).toMatchObject({ resolvedIp: null, resolvedIps: [] });
   });
 
   it('перечисляет окружения с их адресами для второго прохода', async () => {
     // Решение о машине принимается по окружению целиком: привязка у него
     // одна, а адресов несколько.
-    await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
+    await repository.upsertAddressStatus(domainId, checked({ resolvedIps: ['203.0.113.10'] }));
 
     const targets = await repository.listDiscoveryTargets();
 
@@ -266,8 +418,24 @@ describe('репозиторий статусов', () => {
         environmentId,
         environmentName: 'Прод',
         serverId: null,
-        addresses: [{ name: 'example.com', resolvedIp: '203.0.113.10' }],
+        addresses: [{ name: 'example.com', resolvedIps: ['203.0.113.10'] }],
       },
+    ]);
+  });
+
+  it('второй проход видит все адреса имени, а не выбранный', async () => {
+    // Решение о машине принимается по множеству: имя с двумя адресами
+    // не говорит, какая из машин та самая, и заводить по нему запись
+    // в реестре нельзя.
+    await repository.upsertAddressStatus(
+      domainId,
+      checked({ resolvedIps: ['203.0.113.11', '203.0.113.10'] }),
+    );
+
+    const [target] = await repository.listDiscoveryTargets();
+
+    expect(target?.addresses).toEqual([
+      { name: 'example.com', resolvedIps: ['203.0.113.11', '203.0.113.10'] },
     ]);
   });
 
@@ -332,12 +500,11 @@ describe('репозиторий статусов', () => {
 
     it('адрес, смотрящий не на ту машину, даёт предупреждение', async () => {
       await placeOn('198.51.100.7');
-      await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
-      await grantInfra(AccessLevel.Metadata);
+      await repository.upsertAddressStatus(domainId, checked({ resolvedIps: ['203.0.113.10'] }));
 
-      const status = await repository.statusForProject(member(), projectId);
+      const status = await repository.statusForProject(superadmin(), projectId);
 
-      expect(status.warnings).toContainEqual({
+      expect(status.registryWarnings).toContainEqual({
         kind: StatusWarningKind.ServerMismatch,
         subject: 'example.com',
         detail: 'смотрит на 203.0.113.10, а окружение привязано к другой машине',
@@ -347,24 +514,162 @@ describe('репозиторий статусов', () => {
     it('предупреждение не называет машину', async () => {
       // Имя сервера принадлежит уровню «чтение»: статус его не раскрывает.
       await placeOn('198.51.100.7');
-      await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
-      await grantInfra(AccessLevel.Metadata);
+      await repository.upsertAddressStatus(domainId, checked({ resolvedIps: ['203.0.113.10'] }));
 
-      const status = await repository.statusForProject(member(), projectId);
+      const status = await repository.statusForProject(superadmin(), projectId);
 
       expect(JSON.stringify(status)).not.toContain('hetzner-fsn-1');
     });
 
     it('совпавший адрес молчит', async () => {
       await placeOn('203.0.113.10');
-      await repository.upsertAddressStatus(domainId, checked({ resolvedIp: '203.0.113.10' }));
+      await repository.upsertAddressStatus(domainId, checked({ resolvedIps: ['203.0.113.10'] }));
+
+      const status = await repository.statusForProject(superadmin(), projectId);
+
+      expect(
+        status.registryWarnings.some(
+          (warning) => warning.kind === StatusWarningKind.ServerMismatch,
+        ),
+      ).toBe(false);
+    });
+
+    it('адрес машины в множестве — расхождения нет', async () => {
+      // Балансировка отдаёт пару адресов: пока сравнивался один
+      // выбранный, предупреждение мигало от прогона к прогону.
+      await placeOn('203.0.113.11');
+      await repository.upsertAddressStatus(
+        domainId,
+        checked({ resolvedIps: ['203.0.113.10', '203.0.113.11'] }),
+      );
+
+      const status = await repository.statusForProject(superadmin(), projectId);
+
+      expect(
+        status.registryWarnings.some(
+          (warning) => warning.kind === StatusWarningKind.ServerMismatch,
+        ),
+      ).toBe(false);
+    });
+  });
+
+  describe('предупреждения реестров', () => {
+    /** Ставит окружение на машину с близким сроком оплаты. */
+    async function placeOnExpiring(): Promise<void> {
+      const [server] = await testDb.db
+        .insert(servers)
+        .values({
+          name: 'hetzner-fsn-1',
+          ip: '198.51.100.7',
+          paidUntil: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        })
+        .returning();
+
+      await testDb.db
+        .update(environments)
+        .set({ serverId: server!.id })
+        .where(eq(environments.id, environmentId));
+    }
+
+    it('суперадмину приходят отдельным списком, а не вместе с остальными', async () => {
+      // Отвечать на них проекту нечем: межпроектную машину и корневой
+      // домен правит один суперадмин.
+      await placeOnExpiring();
+      await repository.upsertAddressStatus(domainId, checked({ resolvedIps: ['203.0.113.10'] }));
+
+      const status = await repository.statusForProject(superadmin(), projectId);
+
+      expect(status.registryWarnings.map((warning) => warning.kind).sort()).toEqual(
+        [StatusWarningKind.ServerExpiring, StatusWarningKind.ServerMismatch].sort(),
+      );
+      expect(
+        status.warnings.some((warning) =>
+          [
+            StatusWarningKind.ServerExpiring,
+            StatusWarningKind.ServerMismatch,
+            StatusWarningKind.DomainRenewalExpiring,
+          ].includes(warning.kind),
+        ),
+      ).toBe(false);
+    });
+
+    it('не-суперадмину не приходят вовсе', async () => {
+      // Утечка имени машины в предупреждение на уровне «метаданные»:
+      // реестр машин закрыт правом суперадмина целиком.
+      await placeOnExpiring();
+      await testDb.db.update(domains).set({
+        paidUntil: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      });
+      await repository.upsertAddressStatus(domainId, checked({ resolvedIps: ['203.0.113.10'] }));
       await grantInfra(AccessLevel.Metadata);
 
       const status = await repository.statusForProject(member(), projectId);
 
+      expect(status.registryWarnings).toEqual([]);
+      expect(JSON.stringify(status)).not.toContain('hetzner-fsn-1');
+    });
+
+    it('в сводке по проектам не показываются никому', async () => {
+      // У строки сводки нет отдельного списка, а индикатор они не красят:
+      // показать их там значило бы вернуть красный, на который нечем
+      // ответить.
+      await placeOnExpiring();
+
+      const [row] = await repository.summary(superadmin());
+
       expect(
-        status.warnings.some((warning) => warning.kind === StatusWarningKind.ServerMismatch),
+        row?.warnings.some((warning) => warning.kind === StatusWarningKind.ServerExpiring),
       ).toBe(false);
+    });
+  });
+
+  describe('жизненный цикл проекта', () => {
+    /** Записывает упавший адрес и ставит проекту жизненный цикл. */
+    async function fallenWith(lifecycle: ProjectLifecycle): Promise<void> {
+      await repository.upsertAddressStatus(
+        domainId,
+        checked({ health: HealthState.Down, latencyMs: null, healthError: 'HTTP 502' }),
+      );
+      await testDb.db
+        .update(projects)
+        .set({ lifecycle })
+        .where(eq(projects.id, projectId));
+      await grantInfra(AccessLevel.Metadata);
+    }
+
+    it('архивный проект не попадает в цели обхода', async () => {
+      // Архив никто не чинит: проверять его значит будить человека
+      // снятым доменом мёртвого проекта.
+      await testDb.db
+        .update(projects)
+        .set({ lifecycle: ProjectLifecycle.Archived })
+        .where(eq(projects.id, projectId));
+
+      expect((await repository.listTargets()).addresses).toEqual([]);
+    });
+
+    it('приостановленный проект не сопровождает «Приостановлен» аварией', async () => {
+      // Индикатор говорит «приостановлен», а красное «не отвечает» рядом
+      // с ним противоречит ему же: стенд погашен намеренно.
+      await fallenWith(ProjectLifecycle.Paused);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(status.indicator).toBe(StatusIndicator.Paused);
+      expect(
+        status.warnings.some((warning) => warning.kind === StatusWarningKind.HealthDown),
+      ).toBe(false);
+      // Сам результат проверки не прячется: он остаётся у адреса.
+      expect(status.domains[0]?.health).toBe(HealthState.Down);
+    });
+
+    it('архивный проект не предупреждает и аварией не светится', async () => {
+      await fallenWith(ProjectLifecycle.Archived);
+
+      const status = await repository.statusForProject(member(), projectId);
+
+      expect(status.indicator).not.toBe(StatusIndicator.Down);
+      expect(status.warnings).toEqual([]);
     });
   });
 
@@ -386,43 +691,48 @@ describe('репозиторий статусов', () => {
         .where(eq(environments.id, environmentId));
     }
 
-    it('предупреждает о близком сроке и поднимает индикатор', async () => {
+    it('предупреждает о близком сроке, но индикатор проекта не красит', async () => {
+      // Межпроектную машину правит один суперадмин: проекту по такому
+      // предупреждению делать нечего, и красный индикатор, на который
+      // нельзя ответить действием, обесценивает тот, на который можно.
       await placeOnServer('hetzner-fsn-1', inDays(3));
-      await grantInfra(AccessLevel.Metadata);
 
-      const status = await repository.statusForProject(member(), projectId);
+      const status = await repository.statusForProject(superadmin(), projectId);
 
-      expect(status.warnings).toContainEqual(
+      expect(status.registryWarnings).toContainEqual(
         expect.objectContaining({
           kind: StatusWarningKind.ServerExpiring,
           subject: 'hetzner-fsn-1',
         }),
       );
-      expect(status.indicator).toBe(StatusIndicator.Warning);
+      // Ни один адрес проекта не проверялся: индикатор об этом и говорит.
+      expect(status.indicator).toBe(StatusIndicator.Unknown);
     });
 
     it('не раскрывает соседей по машине', async () => {
       // В предупреждении только имя машины: список её проектов не должен
       // просачиваться в статус чужого проекта.
       await placeOnServer('hetzner-fsn-1', inDays(3));
-      await grantInfra(AccessLevel.Metadata);
 
-      const status = await repository.statusForProject(member(), projectId);
-      const serverWarning = status.warnings.find(
+      const status = await repository.statusForProject(superadmin(), projectId);
+      const serverWarning = status.registryWarnings.find(
         (warning) => warning.kind === StatusWarningKind.ServerExpiring,
       );
 
-      expect(Object.keys(serverWarning ?? {})).toEqual(['kind', 'subject', 'detail']);
+      // Состав полей закрыт: лишнее поле в предупреждении — лишнее
+      // сведение о межпроектной машине.
+      expect(Object.keys(serverWarning ?? {}).sort()).toEqual(
+        ['date', 'days', 'detail', 'kind', 'subject', 'threshold'].sort(),
+      );
     });
 
     it('молчит, когда срок далёк или сервера нет', async () => {
       await placeOnServer('hetzner-fsn-1', inDays(60));
-      await grantInfra(AccessLevel.Metadata);
 
-      const withFarDate = await repository.statusForProject(member(), projectId);
+      const withFarDate = await repository.statusForProject(superadmin(), projectId);
 
       expect(
-        withFarDate.warnings.some(
+        withFarDate.registryWarnings.some(
           (warning) => warning.kind === StatusWarningKind.ServerExpiring,
         ),
       ).toBe(false);
@@ -438,12 +748,13 @@ describe('репозиторий статусов', () => {
         kind: EnvironmentKind.Staging,
         serverId: server!.id,
       });
-      await grantInfra(AccessLevel.Metadata);
 
-      const status = await repository.statusForProject(member(), projectId);
+      const status = await repository.statusForProject(superadmin(), projectId);
 
       expect(
-        status.warnings.filter((warning) => warning.kind === StatusWarningKind.ServerExpiring),
+        status.registryWarnings.filter(
+          (warning) => warning.kind === StatusWarningKind.ServerExpiring,
+        ),
       ).toHaveLength(1);
     });
   });
@@ -456,19 +767,20 @@ describe('репозиторий статусов', () => {
       return new Date(Date.now() + days * DAY_MS).toISOString().slice(0, 10);
     }
 
-    it('предупреждает о близком продлении и поднимает индикатор', async () => {
+    it('предупреждает о близком продлении, но индикатор проекта не красит', async () => {
+      // Корень межпроектный, и срок продления правит суперадмин: то же
+      // правило, что у срока оплаты машины.
       await testDb.db.update(domains).set({ paidUntil: inDays(5) });
-      await grantInfra(AccessLevel.Metadata);
 
-      const status = await repository.statusForProject(member(), projectId);
+      const status = await repository.statusForProject(superadmin(), projectId);
 
-      expect(status.warnings).toContainEqual(
+      expect(status.registryWarnings).toContainEqual(
         expect.objectContaining({
           kind: StatusWarningKind.DomainRenewalExpiring,
           subject: 'example.com',
         }),
       );
-      expect(status.indicator).toBe(StatusIndicator.Warning);
+      expect(status.indicator).toBe(StatusIndicator.Unknown);
     });
 
     it('даёт одно предупреждение на корень, а не на каждый поддомен', async () => {
@@ -477,12 +789,11 @@ describe('репозиторий статусов', () => {
       await testDb.db
         .insert(environmentDomains)
         .values({ environmentId, domainId: root!.id, name: 'stage.example.com' });
-      await grantInfra(AccessLevel.Metadata);
 
-      const status = await repository.statusForProject(member(), projectId);
+      const status = await repository.statusForProject(superadmin(), projectId);
 
       expect(
-        status.warnings.filter(
+        status.registryWarnings.filter(
           (warning) => warning.kind === StatusWarningKind.DomainRenewalExpiring,
         ),
       ).toHaveLength(1);
@@ -490,12 +801,11 @@ describe('репозиторий статусов', () => {
 
     it('молчит, когда срок далёк', async () => {
       await testDb.db.update(domains).set({ paidUntil: inDays(90) });
-      await grantInfra(AccessLevel.Metadata);
 
-      const status = await repository.statusForProject(member(), projectId);
+      const status = await repository.statusForProject(superadmin(), projectId);
 
       expect(
-        status.warnings.some(
+        status.registryWarnings.some(
           (warning) => warning.kind === StatusWarningKind.DomainRenewalExpiring,
         ),
       ).toBe(false);

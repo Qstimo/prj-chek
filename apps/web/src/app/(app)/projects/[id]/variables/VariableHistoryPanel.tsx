@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import type { RevealResponse } from '@cairn/shared';
 
 import { useQueryVariableVersions } from '@/api/hooks';
@@ -27,7 +28,7 @@ export function VariableHistoryPanel({
   const versions = useQueryVariableVersions(projectId, environmentId, variableId);
 
   if (versions.isPending) {
-    return <p className="text-muted-foreground">Загрузка истории…</p>;
+    return <Loader label="Загрузка истории…" />;
   }
 
   if (versions.isError) {

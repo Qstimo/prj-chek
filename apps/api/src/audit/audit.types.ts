@@ -39,8 +39,22 @@ export enum AuditAction {
   CheckpointCreated = 'checkpoint.created',
   CheckpointUpdated = 'checkpoint.updated',
   CheckpointDeleted = 'checkpoint.deleted',
+  /**
+   * Своё действие, а не `checkpoint.updated`: перенос в другую версию
+   * иначе был бы в журнале неотличим от переименования, а метаданные
+   * записи на экране журнала не показываются.
+   */
+  CheckpointCarriedOver = 'checkpoint.carried_over',
   RoadmapPublished = 'roadmap.published',
   RoadmapUnpublished = 'roadmap.unpublished',
+  /**
+   * Свои действия, а не `roadmap.published`: ссылка на отчёт раскрывает
+   * одну версию, а не весь роадмап, и по журналу обязано быть видно, что
+   * именно открыли наружу. Публичное чтение в журнал не пишется — у
+   * анонимного читателя субъекта нет.
+   */
+  ReleaseReportPublished = 'release_report.published',
+  ReleaseReportUnpublished = 'release_report.unpublished',
   StatusCheckRun = 'status_check.run',
   DomainCreated = 'domain.created',
   DomainUpdated = 'domain.updated',

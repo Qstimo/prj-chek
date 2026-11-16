@@ -20,3 +20,31 @@ export const FIELD_LABELS = {
   platforms: 'Развёрнуто',
   notes: 'Заметки',
 } as const;
+
+/**
+ * Адрес карточки машины в реестре.
+ *
+ * Именно `/edit`: отдельной страницы просмотра машины в приложении нет,
+ * карточка и форма — одно и то же место (как у корневого домена рядом).
+ */
+export function serverHref(serverId: string): string {
+  return `/servers/${serverId}/edit`;
+}
+
+/** Адрес карточки корневого домена в реестре. */
+export function rootDomainHref(domainId: string): string {
+  return `/domains/${domainId}/edit`;
+}
+
+/** Подпись ссылки на корень адреса. */
+export function rootDomainLabel(name: string): string {
+  return `Корень ${name}`;
+}
+
+/**
+ * Адрес реестра корневых доменов целиком.
+ *
+ * Запасной путь на случай, когда идентификаторов корней в ответе нет:
+ * на проекции метаданных поля `rootDomains` не существует вовсе.
+ */
+export const DOMAINS_HREF = '/domains';

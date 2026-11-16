@@ -15,6 +15,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Каждый интеграционный файл поднимает отдельный PostgreSQL.
+    maxWorkers: 2,
     environment: 'node',
     include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
     env: {
@@ -22,6 +24,11 @@ export default defineConfig({
       CAIRN_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
       // Подключение не открывается: драйвер соединяется при первом запросе.
       DATABASE_URL: 'postgres://cairn_app:test@127.0.0.1:1/cairn_test',
+      // Фоновый цикл проверок выключен: `0` — его выключатель. Иначе
+      // подъём приложения в HTTP-тестах начинал бы обход сети по адресам
+      // из фикстур, а тесты «до первого прогона» перестали бы быть
+      // воспроизводимыми. Прогон в тестах запускается явно.
+      CAIRN_STATUS_CHECK_INTERVAL_MINUTES: '0',
     },
     // Интеграционные тесты поднимают контейнер с базой.
     testTimeout: 60_000,

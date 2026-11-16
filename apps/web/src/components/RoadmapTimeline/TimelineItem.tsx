@@ -1,12 +1,25 @@
-import { ITEM_CLASSES, MARK, MARK_HEIGHT, SLOT_CLASSES, STEP } from './constants';
+import Link from 'next/link';
+import type { CSSProperties, MouseEvent } from 'react';
+
+import {
+  ITEM_CLASSES,
+  MARK,
+  MARK_HEIGHT,
+  SLOT_CLASSES,
+  SLOT_HEIGHT,
+  STEP,
+} from './constants';
+import { useTimelineHref } from './href';
 import { sectorPath } from './sector';
-import type { TimelineForm, TimelineVersion } from './types';
+import type { TimelineCell, TimelineForm, TimelineVersion } from './types';
 import { dateLabelOf, datePartsOf, fillOf, noteOf, percentOf } from './utils';
 
 /** Пропсы элемента полосы. */
 interface IProps {
   version: TimelineVersion;
   form: TimelineForm;
+  /** Место в сетке серпантина. В прочих укладках его нет. */
+  cell?: TimelineCell;
   isCurrent: boolean;
   isFirst: boolean;
   isLast: boolean;
@@ -18,18 +31,24 @@ interface IProps {
 }
 
 /**
- * Версия на полосе: в ленте — колонка с отметкой, в списке — строка.
+ * Версия на полосе: в ленте и серпантине — место с отметкой, в списке — строка.
  *
- * Укладки две, но разметка одна: версия всегда ровно одна кнопка. Рисовать
- * обе формы и прятать лишнюю классом нельзя — это удвоило бы остановки
- * табуляции и дало бы по два узла с одним и тем же именем.
+ * Укладок три, но разметка одна: версия всегда ровно один управляющий
+ * элемент. Рисовать несколько форм и прятать лишние классом нельзя — это
+ * умножило бы остановки табуляции и дало бы по нескольку узлов с одним и
+ * тем же именем.
  *
- * С обработчиком элемент — нативная кнопка: клик, фокус и клавиатура без
- * самодельной обвязки.
+ * Элемент — нативная кнопка или нативная ссылка: клик, фокус и клавиатура
+ * без самодельной обвязки. Ссылкой версия становится там, где у экрана есть
+ * страница версии (отчёт по релизу): у кнопки нет ни Ctrl+клика в новую
+ * вкладку, ни копирования адреса. Простой щелчок при этом по-прежнему
+ * открывает панель версии — правка живёт в ней, и уводить человека со
+ * страницы при каждом щелчке значило бы отнять единственный путь к ней.
  */
 export function TimelineItem({
   version,
   form,
+  cell,
   isCurrent,
   isFirst,
   isLast,
@@ -37,18 +56,21 @@ export function TimelineItem({
   total,
   onSelect,
 }: IProps) {
+  const hrefOf = useTimelineHref();
+  const href = hrefOf?.(version.id);
   const note = noteOf(version);
   const content =
-    form === 'strip' ? (
+    form === 'list' ? (
+      <ListBody version={version} isCurrent={isCurrent} note={note} date={dateLabelOf(version)} />
+    ) : (
       <StripBody
         version={version}
         isCurrent={isCurrent}
         isFirst={isFirst}
         isLast={isLast}
+        isReversed={cell?.isReversed ?? false}
         note={note}
       />
-    ) : (
-      <ListBody version={version} isCurrent={isCurrent} note={note} date={dateLabelOf(version)} />
     );
 
   // Элемент списка несёт только место в ряду, а содержимое — внутренний
@@ -56,21 +78,43 @@ export function TimelineItem({
   // он выносит элемент из дерева доступности, и список перестаёт быть
   // списком.
   const bodyClassName = `${ITEM_CLASSES[form]} w-full`;
+  // Ссылка по умолчанию строчная, а кнопка — нет: без явного `block`
+  // отметка и подписи в ленте разъехались бы по строчным боксам. В списке
+  // раскладку задаёт `flex` из `ITEM_CLASSES`, и второе правило `display`
+  // там спорило бы с ним.
+  const linkClassName = form === 'list' ? bodyClassName : `${bodyClassName} block`;
 
   return (
     <li
       data-item
       data-version={version.label}
       data-current={isCurrent ? 'true' : undefined}
+      // Место в наборе — на элементе списка, а не на кнопке: роль
+      // `listitem` носит он, и на кнопке эти значения читалка не берёт.
+      // Счёт идёт от начала окна, которое умеет съезжать к текущей версии.
+      aria-posinset={position}
+      aria-setsize={total}
       className={SLOT_CLASSES[form]}
+      style={slotStyleOf(form, cell)}
     >
-      {onSelect ? (
+      {href ? (
+        <Link
+          href={href}
+          aria-label={`Версия ${version.label}`}
+          aria-current={isCurrent ? 'step' : undefined}
+          // Щелчок с клавишей-ускорителем и щелчок не основной кнопкой
+          // оставлены браузеру: это «открой в новой вкладке», и перехватить
+          // его значило бы отнять у ссылки то, ради чего она здесь.
+          onClick={onSelect ? (event) => select(event, version.id, onSelect) : undefined}
+          className={`${linkClassName} hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`}
+        >
+          {content}
+        </Link>
+      ) : onSelect ? (
         <button
           type="button"
           aria-label={`Версия ${version.label}`}
           aria-current={isCurrent ? 'step' : undefined}
-          aria-posinset={position}
-          aria-setsize={total}
           onClick={() => onSelect(version.id)}
           className={`${bodyClassName} hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`}
         >
@@ -83,21 +127,74 @@ export function TimelineItem({
   );
 }
 
+/**
+ * Выбор версии простым щелчком по ссылке.
+ *
+ * Простой щелчок открывает панель версии и отменяет переход: правка версии
+ * живёт в панели, и уводить человека на отчёт при каждом щелчке значило бы
+ * отнять единственный путь к правке. Щелчок с Ctrl, Cmd, Shift или Alt и
+ * щелчок средней кнопкой — это «открой в новой вкладке»; они уходят
+ * браузеру нетронутыми, и ровно ради них элемент стал ссылкой.
+ */
+function select(
+  event: MouseEvent<HTMLAnchorElement>,
+  versionId: string,
+  onSelect: (versionId: string) => void,
+): void {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+    return;
+  }
+
+  event.preventDefault();
+  onSelect(versionId);
+}
+
+/**
+ * Размеры места и его адрес в сетке.
+ *
+ * Ширина берётся из шага оси, а не из класса: `w-24` совпадал с шагом
+ * только при корневом шрифте 16 px, то есть шаг был задан дважды. Высота
+ * задана лишь в серпантине — по ней колено находит центры отметок.
+ */
+function slotStyleOf(form: TimelineForm, cell?: TimelineCell): CSSProperties | undefined {
+  if (form === 'list') {
+    return undefined;
+  }
+
+  if (!cell) {
+    return { width: STEP };
+  }
+
+  return {
+    width: STEP,
+    height: SLOT_HEIGHT,
+    gridColumn: cell.gridColumn,
+    gridRow: cell.gridRow,
+  };
+}
+
 /** Лента: отметка над подписью, шаг постоянный. */
 function StripBody({
   version,
   isCurrent,
   isFirst,
   isLast,
+  isReversed,
   note,
 }: {
   version: TimelineVersion;
   isCurrent: boolean;
   isFirst: boolean;
   isLast: boolean;
+  isReversed: boolean;
   note: string;
 }) {
   const { prefix, date } = datePartsOf(version);
+  // В строке серпантина, идущей справа налево, предшественник версии лежит
+  // справа, а продолжение — слева: сторону полуотрезка задаёт направление
+  // строки, иначе у края набора ось уходит в пустоту.
+  const hasLeft = isReversed ? !isLast : !isFirst;
+  const hasRight = isReversed ? !isFirst : !isLast;
 
   return (
     <>
@@ -112,7 +209,7 @@ function StripBody({
         height={MARK_HEIGHT}
         viewBox={`0 0 ${STEP} ${MARK_HEIGHT}`}
       >
-        {!isFirst && (
+        {hasLeft && (
           <line
             x1={0}
             y1={MARK.cy}
@@ -122,7 +219,7 @@ function StripBody({
             strokeWidth="2"
           />
         )}
-        {!isLast && (
+        {hasRight && (
           <line
             x1={MARK.cx}
             y1={MARK.cy}

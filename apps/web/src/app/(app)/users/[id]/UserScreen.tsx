@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import type { IssuedLinkResponse } from '@cairn/shared';
 import { useState } from 'react';
 
@@ -32,7 +33,7 @@ export function UserScreen({ userId, currentSubjectId }: IProps) {
   const [issued, setIssued] = useState<IssuedLinkResponse | null>(null);
 
   if (user.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (user.isError) {

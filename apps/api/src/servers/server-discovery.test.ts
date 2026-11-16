@@ -22,7 +22,7 @@ describe('решение о машине', () => {
       environmentName: 'Прод',
       isBound: false,
       boundIp: null,
-      addresses: [{ name: 'prod.example.com', resolvedIp: '203.0.113.10' }],
+      addresses: [{ name: 'prod.example.com', resolvedIps: ['203.0.113.10'] }],
       machinesByIp: registry({ id: SERVER_ID, ip: '203.0.113.10' }),
     });
 
@@ -34,7 +34,7 @@ describe('решение о машине', () => {
       environmentName: 'Прод',
       isBound: false,
       boundIp: null,
-      addresses: [{ name: 'prod.example.com', resolvedIp: '203.0.113.10' }],
+      addresses: [{ name: 'prod.example.com', resolvedIps: ['203.0.113.10'] }],
       machinesByIp: registry(),
     });
 
@@ -47,8 +47,8 @@ describe('решение о машине', () => {
       isBound: false,
       boundIp: null,
       addresses: [
-        { name: 'prod.example.com', resolvedIp: '203.0.113.10' },
-        { name: 'api.example.com', resolvedIp: '203.0.113.10' },
+        { name: 'prod.example.com', resolvedIps: ['203.0.113.10'] },
+        { name: 'api.example.com', resolvedIps: ['203.0.113.10'] },
       ],
       machinesByIp: registry({ id: SERVER_ID, ip: '203.0.113.10' }),
     });
@@ -65,8 +65,8 @@ describe('решение о машине', () => {
       isBound: false,
       boundIp: null,
       addresses: [
-        { name: 'prod.example.com', resolvedIp: '203.0.113.10' },
-        { name: 'api.example.com', resolvedIp: '198.51.100.7' },
+        { name: 'prod.example.com', resolvedIps: ['203.0.113.10'] },
+        { name: 'api.example.com', resolvedIps: ['198.51.100.7'] },
       ],
       machinesByIp: registry(),
     });
@@ -79,6 +79,20 @@ describe('решение о машине', () => {
     });
   });
 
+  it('имя с несколькими адресами машины не заводит', () => {
+    // Два адреса у одного имени — балансировка либо край сети: какая из
+    // машин «та самая», система не знает и гадать не вправе.
+    const decision = decideMachine({
+      environmentName: 'Прод',
+      isBound: false,
+      boundIp: null,
+      addresses: [{ name: 'prod.example.com', resolvedIps: ['203.0.113.10', '203.0.113.11'] }],
+      machinesByIp: registry(),
+    });
+
+    expect(decision).toEqual({ createIp: null, bindServerId: null, warnings: [] });
+  });
+
   it('две машины с одним адресом — не привязываем', () => {
     // Дубль в реестре — беспорядок оператора: раннер пишет о нём в лог,
     // а состояние чужого проекта им не портится.
@@ -86,7 +100,7 @@ describe('решение о машине', () => {
       environmentName: 'Прод',
       isBound: false,
       boundIp: null,
-      addresses: [{ name: 'prod.example.com', resolvedIp: '203.0.113.10' }],
+      addresses: [{ name: 'prod.example.com', resolvedIps: ['203.0.113.10'] }],
       machinesByIp: registry(
         { id: SERVER_ID, ip: '203.0.113.10' },
         { id: '22222222-2222-4222-8222-222222222222', ip: '203.0.113.10' },
@@ -101,7 +115,7 @@ describe('решение о машине', () => {
       environmentName: 'Прод',
       isBound: true,
       boundIp: '203.0.113.10',
-      addresses: [{ name: 'prod.example.com', resolvedIp: '203.0.113.10' }],
+      addresses: [{ name: 'prod.example.com', resolvedIps: ['203.0.113.10'] }],
       machinesByIp: registry({ id: SERVER_ID, ip: '203.0.113.10' }),
     });
 
@@ -113,7 +127,7 @@ describe('решение о машине', () => {
       environmentName: 'Прод',
       isBound: false,
       boundIp: null,
-      addresses: [{ name: 'prod.example.com', resolvedIp: null }],
+      addresses: [{ name: 'prod.example.com', resolvedIps: [] }],
       machinesByIp: registry(),
     });
 
@@ -129,7 +143,7 @@ describe('предупреждения о машине', () => {
       environmentName: 'Прод',
       isBound: true,
       boundIp: '198.51.100.7',
-      addresses: [{ name: 'prod.example.com', resolvedIp: '203.0.113.10' }],
+      addresses: [{ name: 'prod.example.com', resolvedIps: ['203.0.113.10'] }],
     });
 
     expect(warning).toEqual({
@@ -137,6 +151,38 @@ describe('предупреждения о машине', () => {
       subject: 'prod.example.com',
       detail: 'смотрит на 203.0.113.10, а окружение привязано к другой машине',
     });
+  });
+
+  it('адрес машины в множестве — расхождения нет', () => {
+    // Балансировка отдаёт пару адресов, и порядок ответа резолвера
+    // ротируется: пока сравнивался один выбранный адрес, предупреждение
+    // мигало от прогона к прогону на исправной настройке.
+    expect(
+      machineWarningsOf({
+        environmentName: 'Прод',
+        isBound: true,
+        boundIp: '203.0.113.11',
+        addresses: [{ name: 'prod.example.com', resolvedIps: ['203.0.113.10', '203.0.113.11'] }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('множество больше трёх адресов молчит', () => {
+    // За CDN имя разрешается в край сети, а не в машину: такое
+    // расхождение не лечится ничем и висело бы вечно.
+    expect(
+      machineWarningsOf({
+        environmentName: 'Прод',
+        isBound: true,
+        boundIp: '198.51.100.7',
+        addresses: [
+          {
+            name: 'prod.example.com',
+            resolvedIps: ['203.0.113.10', '203.0.113.11', '203.0.113.12', '203.0.113.13'],
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
 
   it('машина без известного адреса молчит', () => {
@@ -147,7 +193,7 @@ describe('предупреждения о машине', () => {
         environmentName: 'Прод',
         isBound: true,
         boundIp: null,
-        addresses: [{ name: 'prod.example.com', resolvedIp: '203.0.113.10' }],
+        addresses: [{ name: 'prod.example.com', resolvedIps: ['203.0.113.10'] }],
       }),
     ).toEqual([]);
   });
@@ -160,11 +206,27 @@ describe('предупреждения о машине', () => {
       isBound: true,
       boundIp: '203.0.113.10',
       addresses: [
-        { name: 'prod.example.com', resolvedIp: '203.0.113.10' },
-        { name: 'api.example.com', resolvedIp: '198.51.100.7' },
+        { name: 'prod.example.com', resolvedIps: ['203.0.113.10'] },
+        { name: 'api.example.com', resolvedIps: ['198.51.100.7'] },
       ],
     });
 
     expect(warnings.map((warning) => warning.kind)).toEqual([StatusWarningKind.ServerMismatch]);
+  });
+
+  it('одинаковые множества у двух адресов не спорят', () => {
+    // Оба имени смотрят на одну и ту же пару машин — это согласие,
+    // а не спор: сравниваются множества, а не выбранные из них адреса.
+    expect(
+      machineWarningsOf({
+        environmentName: 'Прод',
+        isBound: false,
+        boundIp: null,
+        addresses: [
+          { name: 'prod.example.com', resolvedIps: ['203.0.113.10', '203.0.113.11'] },
+          { name: 'api.example.com', resolvedIps: ['203.0.113.11', '203.0.113.10'] },
+        ],
+      }),
+    ).toEqual([]);
   });
 });

@@ -28,6 +28,7 @@ const detail = {
   notes: 'Заметка',
   server,
   platforms: [],
+  rootDomains: [{ id: '33333333-3333-3333-3333-333333333333', name: 'example.com' }],
   createdAt: '2026-08-27T10:00:00.000Z',
   updatedAt: '2026-08-27T10:00:00.000Z',
 };
@@ -116,6 +117,81 @@ describe('EnvironmentCard', () => {
 
     expect(onDelete).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Удалить' })).toBeInTheDocument();
+  });
+
+  it('суперадмину ведёт с машины в её карточку реестра', () => {
+    // `server.id` в контракте был, а печаталось имя текстом: суперадмин,
+    // увидев машину окружения, не мог к ней перейти.
+    render(<EnvironmentCard environment={detail} isSuperadmin />);
+
+    // Адрес именно карточки: страницы `/servers/:id` в приложении нет,
+    // и ссылка на неё отвечала бы «не найдено».
+    expect(screen.getByRole('link', { name: 'hetzner-fsn-1' })).toHaveAttribute(
+      'href',
+      `/servers/${server.id}/edit`,
+    );
+  });
+
+  it('не-суперадмину машина остаётся текстом', () => {
+    // Реестр машин закрыт правом суперадмина: ссылка в него обещала бы
+    // экран, который ответит отказом.
+    render(<EnvironmentCard environment={detail} />);
+
+    expect(screen.queryByRole('link', { name: 'hetzner-fsn-1' })).not.toBeInTheDocument();
+    expect(screen.getByText('hetzner-fsn-1')).toBeInTheDocument();
+  });
+
+  it('суперадмину ведёт в карточку корня адреса', () => {
+    // Корень правит только суперадмин, и переход нужен именно в его
+    // карточку: оттуда видно владельца, регистратора и срок продления.
+    render(<EnvironmentCard environment={detail} isSuperadmin />);
+
+    expect(screen.getByRole('link', { name: 'Корень example.com' })).toHaveAttribute(
+      'href',
+      '/domains/33333333-3333-3333-3333-333333333333/edit',
+    );
+  });
+
+  it('называет каждый корень отдельно', () => {
+    // Адресов у окружения несколько, и корень у каждого свой: одной
+    // ссылки «в реестр» для двух зон не хватает.
+    render(
+      <EnvironmentCard
+        environment={{
+          ...detail,
+          domains: ['stage.example.com', 'api.shop.co.uk'],
+          rootDomains: [
+            { id: '33333333-3333-3333-3333-333333333333', name: 'example.com' },
+            { id: '44444444-4444-4444-4444-444444444444', name: 'shop.co.uk' },
+          ],
+        }}
+        isSuperadmin
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Корень example.com' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Корень shop.co.uk' })).toHaveAttribute(
+      'href',
+      '/domains/44444444-4444-4444-4444-444444444444/edit',
+    );
+  });
+
+  it('без корней в ответе предлагает реестр целиком', () => {
+    // Пустой список означает «идентификаторы реестра не выданы»;
+    // у суперадмина так бывает только на проекции метаданных.
+    render(<EnvironmentCard environment={{ ...detail, rootDomains: [] }} isSuperadmin />);
+
+    expect(screen.getByRole('link', { name: 'Реестр доменов' })).toHaveAttribute(
+      'href',
+      '/domains',
+    );
+  });
+
+  it('не-суперадмину реестр доменов не предлагается', () => {
+    render(<EnvironmentCard environment={detail} />);
+
+    expect(screen.queryByRole('link', { name: 'Реестр доменов' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Корень example.com' })).not.toBeInTheDocument();
   });
 
   it('показывает развёрнутые платформы', () => {

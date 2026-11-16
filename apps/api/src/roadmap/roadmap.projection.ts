@@ -1,6 +1,7 @@
 import {
   AccessLevel,
   PlatformReleaseState,
+  RoadmapVersionState,
   type PlatformRelease,
   type RoadmapVersionDetail,
   type RoadmapVersionMetadata,
@@ -30,6 +31,11 @@ interface VersionProjectionOptions {
  * Формулировки чекпоинтов и выпуски по платформам открываются уровнем
  * чтения. Прогресс вычисляется здесь и нигде не хранится (ТЗ 3.5).
  *
+ * Там же считается расхождение «выпущено, но не закрыто»: оно тоже
+ * вычисляется, а не хранится, и принадлежит метаданным — публичная выдача
+ * расширяет их, и уровень «метаданные» обязан видеть расхождение, не видя
+ * формулировок.
+ *
  * Ссылки на задачи отключаются отдельным флагом, а не уровнем: публичная
  * страница роадмапа ходит именно под уровнем чтения, и различать пути по
  * уровню значило бы менять его смысл. Умолчание «со ссылками» выбрано
@@ -43,6 +49,9 @@ export function versionProjection(
   level: AccessLevel,
   { withLinks = true, platformsByCheckpoint }: VersionProjectionOptions = {},
 ): RoadmapVersionMetadata | RoadmapVersionDetail {
+  const done = checkpoints.filter((checkpoint) => checkpoint.isDone).length;
+  const unfinished = checkpoints.length - done;
+
   return projectByLevel(
     level,
     {
@@ -52,10 +61,12 @@ export function versionProjection(
       plannedDate: version.plannedDate,
       releasedDate: releasedDateOf(version, releases),
       position: version.position,
-      progress: {
-        done: checkpoints.filter((checkpoint) => checkpoint.isDone).length,
-        total: checkpoints.length,
-      },
+      progress: { done, total: checkpoints.length },
+      unfinished,
+      // Незакрытый чекпоинт в работе — норма; расхождением он становится
+      // в тот момент, когда версия объявлена выпущенной. Отказа при этом
+      // нет: выпуск разрешён, расхождение лишь помечается.
+      hasUnfinishedOnRelease: version.state === RoadmapVersionState.Released && unfinished > 0,
     },
     () => ({
       checkpoints: checkpoints.map((checkpoint) => ({

@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import {
   AccessLevel,
   Section,
@@ -51,7 +52,7 @@ export function VariablesScreen({ projectId, environmentId }: IProps) {
   const [isCreating, setIsCreating] = useState(false);
 
   if (variables.isPending || sections.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (variables.isError || sections.isError) {

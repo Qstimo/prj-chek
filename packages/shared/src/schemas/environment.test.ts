@@ -171,6 +171,7 @@ describe('схема деталей окружения', () => {
     healthCheckPath: null,
     notes: null,
     platforms: [],
+    rootDomains: [],
     createdAt: '2026-09-10T10:00:00.000Z',
     updatedAt: '2026-09-10T10:00:00.000Z',
   };
@@ -197,6 +198,35 @@ describe('схема деталей окружения', () => {
 
     expect(parsed.server?.owner).toBe('ООО Ромашка');
     expect(parsed).not.toHaveProperty('ip');
+  });
+
+  it('несёт корни адресов списком', () => {
+    // У окружения адресов несколько, и корень у каждого свой: одного
+    // поля «корневой домен» на окружение не бывает.
+    const parsed = environmentDetailSchema.parse({
+      ...BASE,
+      server: null,
+      rootDomains: [{ id: '33333333-3333-3333-3333-333333333333', name: 'example.com' }],
+    });
+
+    expect(parsed.rootDomains).toEqual([
+      { id: '33333333-3333-3333-3333-333333333333', name: 'example.com' },
+    ]);
+  });
+
+  it('обходится пустым списком корней', () => {
+    // Не-суперадмину идентификаторы сущностей реестра не выходят наружу
+    // вовсе, и пустой список — это именно «не ваше дело», а не «корней нет».
+    const parsed = environmentDetailSchema.parse({ ...BASE, server: null, rootDomains: [] });
+
+    expect(parsed.rootDomains).toEqual([]);
+  });
+
+  it('требует список корней', () => {
+    // Поле обязательное: забытый список молча выглядел бы как «корней нет».
+    const { rootDomains: _omitted, ...withoutRoots } = BASE;
+
+    expect(() => environmentDetailSchema.parse({ ...withoutRoots, server: null })).toThrow();
   });
 });
 

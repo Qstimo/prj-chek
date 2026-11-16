@@ -1,8 +1,16 @@
 import { EnvironmentKind, HealthState, SubjectKind } from '@cairn/shared';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccessService } from '../access/access.service';
-import { domains, environmentDomains, environments, projects, subjects, users } from '../db/schema';
+import {
+  addressIncidents,
+  domains,
+  environmentDomains,
+  environments,
+  projects,
+  subjects,
+  users,
+} from '../db/schema';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 import { IncidentsRepository } from './incidents.repository';
 import { IncidentEventKind, IncidentsService, type AddressState } from './incidents.service';
@@ -59,6 +67,7 @@ describe('сведение инцидентов', () => {
     projectName: 'CAIRN',
     environmentName: 'прод',
     isPaused: false,
+    isArchived: false,
     health: HealthState.Down,
     healthError: 'HTTP 500',
   });
@@ -112,6 +121,24 @@ describe('сведение инцидентов', () => {
     expect(await service.reconcile([{ ...downState(), isPaused: true }])).toEqual([]);
   });
 
+  it('архивный проект событий не даёт', async () => {
+    expect(await service.reconcile([{ ...downState(), isArchived: true }])).toEqual([]);
+  });
+
+  it('два одновременных прогона дают один инцидент и одно событие', async () => {
+    // Оба читают открытые инциденты как пустые, и второй упирается в
+    // частичный уникум «один открытый инцидент на адрес». Это гонка, а не
+    // сбой: событие отдаёт тот прогон, который успел, и второго пуша по
+    // тому же падению быть не должно.
+    const [first, second] = await Promise.all([
+      service.reconcile([downState()]),
+      service.reconcile([downState()]),
+    ]);
+
+    expect([...first, ...second]).toHaveLength(1);
+    expect(await testDb.rowsOf(addressIncidents)).toHaveLength(1);
+  });
+
   it('падение одного адреса не мешает свести остальные', async () => {
     // Адрес с несуществующим идентификатором уронит запись, но второй
     // адрес обязан быть сведён.
@@ -121,5 +148,79 @@ describe('сведение инцидентов', () => {
     ]);
 
     expect(events).toHaveLength(1);
+  });
+});
+
+describe('отказ записи инцидента', () => {
+  const DOMAIN_ID = '11111111-1111-4111-8111-111111111111';
+
+  /** Упавший адрес: подделкам хранилища больше ничего не нужно. */
+  const state = (): AddressState => ({
+    domainId: DOMAIN_ID,
+    name: 'project.ru',
+    projectId: '22222222-2222-4222-8222-222222222222',
+    projectName: 'CAIRN',
+    environmentName: 'прод',
+    isPaused: false,
+    isArchived: false,
+    health: HealthState.Down,
+    healthError: 'HTTP 500',
+  });
+
+  /** Хранилище-подделка: открытие отказывает, остальное задаёт тест. */
+  function serviceWith(openByDomain: ReturnType<typeof vi.fn>): {
+    service: IncidentsService;
+    open: ReturnType<typeof vi.fn>;
+  } {
+    const open = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'duplicate key value violates unique constraint "address_incidents_one_open_per_domain"',
+        ),
+      );
+
+    return {
+      open,
+      service: new IncidentsService({
+        open,
+        openByDomain,
+        resolve: vi.fn(),
+      } as unknown as IncidentsRepository),
+    };
+  }
+
+  it('конфликт уникума перечитывает открытый инцидент, а не глохнет в логе', async () => {
+    // Защита от повтора лежит в базе: частичный уникум «один открытый на
+    // адрес». Его нарушение означает, что инцидент уже открыл другой
+    // прогон — он же и разослал уведомление. Молчание в лог делало это
+    // состояние неотличимым от настоящего сбоя записи.
+    const openByDomain = vi
+      .fn()
+      .mockResolvedValueOnce(new Map())
+      .mockResolvedValueOnce(
+        new Map([
+          [
+            DOMAIN_ID,
+            { domainId: DOMAIN_ID, startedAt: new Date(), resolvedAt: null, cause: 'HTTP 500' },
+          ],
+        ]),
+      );
+    const { service } = serviceWith(openByDomain);
+
+    const events = await service.reconcile([state()]);
+
+    expect(openByDomain).toHaveBeenCalledTimes(2);
+    // Второго события по тому же падению быть не должно: пуш уже ушёл.
+    expect(events).toEqual([]);
+  });
+
+  it('настоящий отказ записи события не выдумывает', async () => {
+    // Открытого инцидента нет и после перечитывания — значит, запись
+    // правда не состоялась, и объявлять падение нечем.
+    const openByDomain = vi.fn().mockResolvedValue(new Map());
+    const { service } = serviceWith(openByDomain);
+
+    expect(await service.reconcile([state()])).toEqual([]);
   });
 });

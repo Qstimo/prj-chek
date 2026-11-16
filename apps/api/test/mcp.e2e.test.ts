@@ -310,6 +310,32 @@ describe('HTTP: токены агентов и MCP', () => {
       expect(status.result.content[0]!.text).toContain('Прод');
     });
 
+    it('get_roadmap не отдаёт агенту ссылку на задачу', async () => {
+      // Адрес внутреннего трекера с номером задачи ушёл бы в контекст
+      // модели и дальше — в чужую историю переписки (ТЗ 7.4).
+      const admin = await signIn('admin@cairn.local');
+      const version = await admin
+        .post(`/projects/${projectId}/roadmap/versions`)
+        .send({ label: 'v1.0' })
+        .expect(201);
+      await admin
+        .post(`/projects/${projectId}/roadmap/versions/${version.body.id}/checkpoints`)
+        .send({ title: 'Оплата', url: 'https://tracker.example.com/TASK-17' })
+        .expect(201);
+
+      const token = await createToken();
+
+      const roadmap = resultOf(await rpc(token, toolsCall('get_roadmap')).expect(200)) as {
+        result: { content: { text: string }[] };
+      };
+      const text = roadmap.result.content[0]!.text;
+
+      // Формулировка на месте — гаснет именно ссылка.
+      expect(text).toContain('Оплата');
+      expect(text).not.toContain('tracker.example.com');
+      expect(text).not.toContain('TASK-17');
+    });
+
     it('инструменты не достают чужой проект', async () => {
       const admin = await signIn('admin@cairn.local');
       const [other] = await testDb.db

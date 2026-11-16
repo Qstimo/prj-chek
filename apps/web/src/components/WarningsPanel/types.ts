@@ -8,6 +8,16 @@ export enum WarningTone {
   Attention = 'attention',
 }
 
+/** Расшифровка вида предупреждения на языке интерфейса. */
+export interface WarningGuide {
+  /** Что произошло — заголовком, вместо сырого вида. */
+  title: string;
+  /** Чем это грозит. */
+  meaning: string;
+  /** Чьё это действие и какое. */
+  action: string;
+}
+
 /** Предупреждение, возможно ведущее на свой проект. */
 export type PanelWarning = StatusWarning & { href?: string };
 

@@ -142,11 +142,44 @@ export class ServersRepository {
    *
    * Имя равно адресу: это всё, что система о ней знает. Человеческое имя,
    * владельца, провайдера и срок оплаты дописывает суперадмин.
+   *
+   * Устойчиво к занятому имени — по образцу `DomainsRepository.ensureRoot`.
+   * Машину мог завести человек, назвав её тем самым адресом и не заполнив
+   * колонку `ip`: по адресу она не находится, голая вставка нарушала
+   * уникальное имя, ошибка гасилась в лог, и окружение не привязывалось
+   * никогда. Свойства найденной записи не трогаются: дописывать человеку
+   * его запись система не вправе — она лишь перестаёт спорить с ней.
    */
   async createDiscovered(ip: string): Promise<Server> {
-    const [created] = await this.db.insert(servers).values({ name: ip, ip }).returning();
+    const [existing] = await this.db
+      .select()
+      .from(servers)
+      .where(eq(servers.name, ip))
+      .limit(1);
 
-    return created!;
+    if (existing) {
+      return existing;
+    }
+
+    // `onConflictDoNothing` вместо голой вставки: два прогона (или два
+    // экземпляра API) могут миновать выборку выше одновременно.
+    const [created] = await this.db
+      .insert(servers)
+      .values({ name: ip, ip })
+      .onConflictDoNothing({ target: servers.name })
+      .returning();
+
+    if (created) {
+      return created;
+    }
+
+    const [raced] = await this.db
+      .select()
+      .from(servers)
+      .where(eq(servers.name, ip))
+      .limit(1);
+
+    return raced!;
   }
 
   /**

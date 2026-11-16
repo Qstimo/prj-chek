@@ -3,6 +3,10 @@ import type { Incident } from '@cairn/shared';
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 
+const MINUTE_S = 60;
+const HOUR_S = 60 * MINUTE_S;
+const DAY_S = 24 * HOUR_S;
+
 /**
  * Склоняет единицу по числу: формы для 1, для 2–4 и для остальных.
  *
@@ -36,9 +40,59 @@ export function downSinceTextOf(startedAt: string): string {
     : `не отвечает с ${at.toLocaleDateString('ru-RU')}, ${time}`;
 }
 
-/** «падал 3 раза» — сколько закрытых инцидентов известно. */
-export function fallCountTextOf(count: number): string {
-  return `падал ${count} ${pluralOf(count, ['раз', 'раза', 'раз'])}`;
+/**
+ * «падал 3 раза за 30 дней» — сколько падений задело окно.
+ *
+ * Окно названо рядом с числом: «падал 3 раза» без окна читается как
+ * утверждение за всё время, а считается последний месяц. Само окно
+ * приходит из контракта — зашивать тридцатку здесь значило бы разойтись
+ * с сервером при первой же его правке.
+ */
+export function fallCountTextOf(count: number, windowDays: number): string {
+  const falls = pluralOf(count, ['раз', 'раза', 'раз']);
+  const days = pluralOf(windowDays, ['день', 'дня', 'дней']);
+
+  return `падал ${count} ${falls} за ${windowDays} ${days}`;
+}
+
+/**
+ * Суммарное время «не отвечает» за окно.
+ *
+ * Две старшие непустые единицы, не больше: «1 д 2 ч 15 мин 3 с» никому не
+ * нужен, а «1 д» скрыл бы разницу между сутками и сутками с лишним.
+ */
+export function downtimeTextOf(seconds: number): string {
+  if (seconds <= 0) {
+    return 'не падал ни разу';
+  }
+
+  if (seconds < MINUTE_S) {
+    return 'меньше минуты';
+  }
+
+  const days = Math.floor(seconds / DAY_S);
+  const hours = Math.floor((seconds % DAY_S) / HOUR_S);
+  const minutes = Math.floor((seconds % HOUR_S) / MINUTE_S);
+
+  const parts = [
+    days > 0 ? `${days} д` : null,
+    hours > 0 ? `${hours} ч` : null,
+    minutes > 0 ? `${minutes} мин` : null,
+  ].filter((part): part is string => part !== null);
+
+  return parts.slice(0, 2).join(' ');
+}
+
+/**
+ * Доля времени, когда адрес отвечал.
+ *
+ * Округление вниз: «100%» у адреса, который за окно падал, — ложное
+ * успокоение, а два знака после запятой и есть разница между девятками.
+ */
+export function uptimeTextOf(uptime: number): string {
+  const percent = Math.floor(uptime * 10_000) / 100;
+
+  return `${percent.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`;
 }
 
 /** Длительность закрытого инцидента: минуты до часа, дальше часы. */

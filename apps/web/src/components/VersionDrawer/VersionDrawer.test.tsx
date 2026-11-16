@@ -19,11 +19,21 @@ const detail = {
   releasedDate: null,
   position: 1,
   progress: { done: 1, total: 2 },
+  unfinished: 1,
+  hasUnfinishedOnRelease: false,
   releases: [],
   checkpoints: [
     { id: 'c1', title: 'Оплата', isDone: true, position: 1, platformIds: [] },
     { id: 'c2', title: 'Доставка', isDone: false, position: 2, platformIds: [] },
   ],
+};
+
+/** Версия выпущена, а один чекпоинт остался незакрытым. */
+const releasedWithUnfinished = {
+  ...detail,
+  state: RoadmapVersionState.Released,
+  releasedDate: '2026-03-14',
+  hasUnfinishedOnRelease: true,
 };
 
 const API: Platform = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
@@ -51,6 +61,8 @@ const metadataOnly = {
   releasedDate: detail.releasedDate,
   position: detail.position,
   progress: detail.progress,
+  unfinished: detail.unfinished,
+  hasUnfinishedOnRelease: detail.hasUnfinishedOnRelease,
 };
 
 /** Подписи опций селекта — по ним проверяется состав выбора. */
@@ -89,6 +101,32 @@ describe('VersionDrawer', () => {
     expect(screen.getByText('01.12.2026')).toBeInTheDocument();
     expect(screen.getByText('1 из 2')).toBeInTheDocument();
     expect(screen.getByLabelText('Оплата')).toBeChecked();
+  });
+
+  it('ведёт в отчёт по релизу, когда адрес отчёта задан', () => {
+    // Отчёт — внутренняя страница версии, и путь к ней из панели
+    // единственный: полоса версий открывает саму панель.
+    render(
+      <VersionDrawer
+        version={detail}
+        isCurrent
+        isOpen
+        onClose={vi.fn()}
+        reportHref="/projects/p-1/roadmap/versions/1"
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Отчёт по релизу' })).toHaveAttribute(
+      'href',
+      '/projects/p-1/roadmap/versions/1',
+    );
+  });
+
+  it('без адреса отчёта ссылки не рисует', () => {
+    // На публичной странице роадмапа внутренних адресов не бывает вовсе.
+    render(<VersionDrawer version={detail} isCurrent isOpen onClose={vi.fn()} />);
+
+    expect(screen.queryByRole('link', { name: 'Отчёт по релизу' })).not.toBeInTheDocument();
   });
 
   it('без actions ни кнопки сохранения, ни полей, ни удаления', () => {
@@ -318,6 +356,209 @@ describe('VersionDrawer', () => {
     await userEvent.tab();
 
     expect(onReadCheckpointTitle).toHaveBeenCalledWith('https://tracker.example.com/TASK-17');
+  });
+
+  describe('выпущено, но не закрыто', () => {
+    it('называет расхождение и число незакрытых', () => {
+      render(
+        <VersionDrawer version={releasedWithUnfinished} isCurrent={false} isOpen onClose={vi.fn()} />,
+      );
+
+      expect(screen.getByText(/незакрытых чекпоинтов: 1/i)).toBeInTheDocument();
+      expect(screen.getByText('не закрыт')).toBeInTheDocument();
+    });
+
+    it('паспорт на просмотре тоже говорит о расхождении', () => {
+      // Уровень «метаданные» чекпоинтов не видит, и кроме паспорта
+      // рассказать о расхождении там нечем.
+      render(
+        <VersionDrawer
+          version={{ ...metadataOnly, state: RoadmapVersionState.Released, hasUnfinishedOnRelease: true }}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText('Незакрыто')).toBeInTheDocument();
+    });
+
+    it('без расхождения о нём не говорит', () => {
+      render(<VersionDrawer version={detail} isCurrent={false} isOpen onClose={vi.fn()} />);
+
+      expect(screen.queryByText(/незакрытых чекпоинтов/i)).not.toBeInTheDocument();
+      expect(screen.queryByText('не закрыт')).not.toBeInTheDocument();
+      expect(screen.queryByText('Незакрыто')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('перенос чекпоинта', () => {
+    /** Перенос, который удался с первого раза. */
+    function carried(targetLabel: string, versionCreated = false) {
+      return vi.fn(async () => ({ kind: 'done' as const, targetLabel, versionCreated }));
+    }
+
+    it('уходит сразу и не трогает черновик', async () => {
+      // Чекпоинты «меняются сразу»: перенос обязан вести себя как
+      // галочка, а не попадать в черновик паспорта.
+      const onCarryOverCheckpoint = carried('v1.3');
+      render(
+        <VersionDrawer
+          version={releasedWithUnfinished}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+          carryOverTargetLabel="v1.3"
+          actions={makeActions({ onCarryOverCheckpoint })}
+        />,
+      );
+
+      await userEvent.type(screen.getByLabelText('Обозначение'), '1');
+      await userEvent.click(screen.getByRole('button', { name: 'Перенести Доставка в v1.3' }));
+
+      expect(onCarryOverCheckpoint).toHaveBeenCalledWith('c2', undefined);
+      // Предупреждение о несохранённом не сбилось, кнопка сохранения жива.
+      expect(screen.getByRole('status')).toHaveTextContent('Есть несохранённые изменения');
+      expect(saveButton()).toBeEnabled();
+    });
+
+    it('сообщает, куда уехал чекпоинт', async () => {
+      // После переноса чекпоинт исчезает из списка, и молчание читалось
+      // бы как «удалился».
+      render(
+        <VersionDrawer
+          version={releasedWithUnfinished}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+          carryOverTargetLabel="v1.3"
+          actions={makeActions({ onCarryOverCheckpoint: carried('v1.3') })}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Перенести Доставка в v1.3' }));
+
+      expect(await screen.findByText(/перенесён в «v1.3»/i)).toBeInTheDocument();
+    });
+
+    it('открытой версии нет — спрашивает обозначение и повторяет перенос', async () => {
+      const onCarryOverCheckpoint = vi
+        .fn()
+        .mockResolvedValueOnce({ kind: 'needs-label' })
+        .mockResolvedValueOnce({ kind: 'done', targetLabel: 'v1.3', versionCreated: true });
+
+      render(
+        <VersionDrawer
+          version={releasedWithUnfinished}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+          carryOverTargetLabel={null}
+          actions={makeActions({ onCarryOverCheckpoint })}
+        />,
+      );
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Перенести Доставка в следующую версию' }),
+      );
+
+      const dialog = await screen.findByRole('dialog', { name: 'Новая версия для переноса' });
+
+      expect(dialog).toBeInTheDocument();
+
+      await userEvent.type(screen.getByLabelText('Обозначение новой версии'), 'v1.3');
+      await userEvent.click(screen.getByRole('button', { name: 'Перенести' }));
+
+      expect(onCarryOverCheckpoint).toHaveBeenNthCalledWith(2, 'c2', 'v1.3');
+      expect(await screen.findByText(/создана версия «v1.3»/i)).toBeInTheDocument();
+    });
+
+    it('без обозначения повторять нечего', async () => {
+      const onCarryOverCheckpoint = vi.fn().mockResolvedValue({ kind: 'needs-label' });
+
+      render(
+        <VersionDrawer
+          version={releasedWithUnfinished}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+          actions={makeActions({ onCarryOverCheckpoint })}
+        />,
+      );
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Перенести Доставка в следующую версию' }),
+      );
+      await screen.findByRole('dialog', { name: 'Новая версия для переноса' });
+      await userEvent.click(screen.getByRole('button', { name: 'Перенести' }));
+
+      expect(onCarryOverCheckpoint).toHaveBeenCalledTimes(1);
+      // Молчащая кнопка выглядела бы как «ничего не произошло».
+      expect(screen.getByRole('alert')).toHaveTextContent('Укажите обозначение новой версии.');
+    });
+
+    it('вопрос об обозначении можно закрыть', async () => {
+      const onCarryOverCheckpoint = vi.fn().mockResolvedValue({ kind: 'needs-label' });
+
+      render(
+        <VersionDrawer
+          version={releasedWithUnfinished}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+          actions={makeActions({ onCarryOverCheckpoint })}
+        />,
+      );
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Перенести Доставка в следующую версию' }),
+      );
+      await screen.findByRole('dialog', { name: 'Новая версия для переноса' });
+      await userEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+
+      expect(
+        screen.queryByRole('dialog', { name: 'Новая версия для переноса' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('отказ переноса виден словами', async () => {
+      const onCarryOverCheckpoint = vi
+        .fn()
+        .mockResolvedValue({ kind: 'failed', message: 'Версия с таким обозначением уже есть' });
+
+      render(
+        <VersionDrawer
+          version={releasedWithUnfinished}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+          carryOverTargetLabel="v1.3"
+          actions={makeActions({ onCarryOverCheckpoint })}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Перенести Доставка в v1.3' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Версия с таким обозначением уже есть',
+      );
+    });
+
+    it('без колбэка переноса кнопки нет', () => {
+      // Фабрики действий в тестах не обязаны знать о каждой возможности
+      // панели: перенос — необязательное действие, как и правка.
+      render(
+        <VersionDrawer
+          version={releasedWithUnfinished}
+          isCurrent={false}
+          isOpen
+          onClose={vi.fn()}
+          actions={makeActions()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /Перенести/ })).not.toBeInTheDocument();
+    });
   });
 
   describe('закрытие', () => {

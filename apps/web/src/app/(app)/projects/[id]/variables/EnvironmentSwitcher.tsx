@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { useState } from 'react';
 
 import { useQueryVariablesEnvironments } from '@/api/hooks';
@@ -23,7 +24,7 @@ export function EnvironmentSwitcher({ projectId }: IProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   if (environments.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (environments.isError) {

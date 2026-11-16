@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import type { UserGrantRow, UserRow } from '@cairn/shared';
 import { useState } from 'react';
 
@@ -37,7 +38,7 @@ export function UserGrantsPanel({ user }: IProps) {
   }
 
   if (grants.isPending || projects.isPending) {
-    return <p className="text-muted-foreground">Загрузка доступов…</p>;
+    return <Loader label="Загрузка доступов…" />;
   }
 
   if (grants.isError || projects.isError) {

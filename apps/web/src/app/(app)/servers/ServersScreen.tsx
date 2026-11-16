@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { useMutationDeleteServer, useQueryServers } from '@/api/hooks';
 import { ServerList } from '@/components/ServerList';
 import { describeApiError } from '@/api';
@@ -10,7 +11,7 @@ export function ServersScreen() {
   const remove = useMutationDeleteServer();
 
   if (servers.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (servers.isError) {

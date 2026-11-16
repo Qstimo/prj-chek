@@ -14,6 +14,7 @@ const sections: Partial<Record<Section, AccessLevel>> = {
   [Section.Info]: AccessLevel.Read,
   [Section.Infrastructure]: AccessLevel.Read,
   [Section.Variables]: AccessLevel.Metadata,
+  [Section.Roadmap]: AccessLevel.Read,
 };
 
 function renderNav() {
@@ -57,6 +58,34 @@ describe('ProjectNav', () => {
 
     expect(screen.queryByRole('link', { name: 'Хроника' })).not.toBeInTheDocument();
     expect(screen.queryByText('Хроника')).not.toBeInTheDocument();
+  });
+
+  it('на вложенном адресе раздел остаётся текущим и ведёт назад', () => {
+    // Страница отчёта по релизу лежит внутри роадмапа. При точном
+    // сравнении адреса «Роадмап» перестал быть текущим вовсе: ни пометки
+    // места, ни звена в крошках — выйти можно было только к проекту.
+    pathname.value = '/projects/p1/roadmap/versions/v1';
+    renderNav();
+
+    const [breadcrumbs, tabs] = screen.getAllByRole('list');
+
+    expect(within(breadcrumbs!).getByRole('link', { name: 'Роадмап' })).toHaveAttribute(
+      'href',
+      '/projects/p1/roadmap',
+    );
+    expect(within(tabs!).getByRole('link', { name: 'Роадмап' })).toHaveAttribute(
+      'href',
+      '/projects/p1/roadmap',
+    );
+    // Текущая страница — отчёт, а не раздел: `aria-current` на звене пути
+    // был бы неправдой.
+    expect(within(tabs!).getByRole('link', { name: 'Роадмап' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    // Соседние разделы вложенный адрес себе не присваивают.
+    expect(within(tabs!).getByRole('link', { name: 'Переменные' })).toBeInTheDocument();
+
+    pathname.value = '/projects/p1/variables';
   });
 
   it('на карточке проекта его имя не ссылка, а текущее место', () => {

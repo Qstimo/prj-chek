@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
-import { DbModule } from '../db/db.module';
+import { DATABASE, DbModule } from '../db/db.module';
 import { IncidentsModule } from '../incidents/incidents.module';
 import { PushModule } from '../push/push.module';
 import { PushNotifier } from '../push/push.notifier';
@@ -11,7 +11,12 @@ import { ServersModule } from '../servers/servers.module';
 import { INCIDENT_NOTIFIER } from './notifier';
 import { ProjectStatusController, StatusController } from './status.controller';
 import { StatusRepository } from './status.repository';
-import { REAL_CHECKERS, STATUS_CHECKERS, StatusRunnerService } from './status-runner.service';
+import {
+  REAL_CHECKERS,
+  STATUS_CHECKERS,
+  STATUS_RUN_LOCK_DB,
+  StatusRunnerService,
+} from './status-runner.service';
 import { StatusService } from './status.service';
 
 /** Модуль автопроверок статуса. */
@@ -23,6 +28,11 @@ import { StatusService } from './status.service';
     StatusRunnerService,
     StatusService,
     { provide: STATUS_CHECKERS, useValue: REAL_CHECKERS },
+    // Замку нужно соединение на весь прогон. В развёртывании оно берётся
+    // из того же пула, что и рабочие запросы (их там десяток, одного не
+    // жалко); отдельным токеном он объявлен затем, что в тестах рабочий
+    // пул состоит из единственного соединения.
+    { provide: STATUS_RUN_LOCK_DB, useExisting: DATABASE },
     // Прогон знает только интерфейс: чем уведомляют, решает этот
     // поставщик, и второй канал станет вторым поставщиком токена.
     { provide: INCIDENT_NOTIFIER, useExisting: PushNotifier },

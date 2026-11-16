@@ -7,7 +7,16 @@ import {
 } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
-import { draftOf, isDetailed, isDirtyOf, releaseOpsOf, versionPatchOf } from './utils';
+import {
+  carryOverActionOf,
+  carryOverTargetOf,
+  draftOf,
+  isDetailed,
+  isDirtyOf,
+  releaseOpsOf,
+  unfinishedNoteOf,
+  versionPatchOf,
+} from './utils';
 import type { IVersionDraft } from './types';
 
 const metadata = {
@@ -18,6 +27,8 @@ const metadata = {
   releasedDate: null,
   position: 1,
   progress: { done: 0, total: 0 },
+  unfinished: 0,
+  hasUnfinishedOnRelease: false,
 };
 
 const API: Platform = { id: 'p1', kind: PlatformKind.Server, name: 'API', position: 1 };
@@ -203,6 +214,51 @@ describe('releaseOpsOf', () => {
     // Выпуски приходят только с уровнем чтения, и сравнивать там нечего:
     // иначе панель на метаданных сняла бы все выпуски разом.
     expect(releaseOpsOf(metadata, draftOf(metadata, [API]), [API])).toEqual([]);
+  });
+});
+
+describe('unfinishedNoteOf', () => {
+  it('называет число незакрытых, не упрекая', () => {
+    const note = unfinishedNoteOf(2);
+
+    expect(note).toContain('2');
+    expect(note).toMatch(/выпущена/i);
+  });
+});
+
+describe('carryOverActionOf', () => {
+  it('называет цель, когда она известна', () => {
+    expect(carryOverActionOf('Оплата', 'v1.3')).toBe('Перенести Оплата в v1.3');
+  });
+
+  it('без цели говорит о следующей версии', () => {
+    // Имя цели считает сервер, и обещать неизвестное обозначение нельзя.
+    expect(carryOverActionOf('Оплата', null)).toBe('Перенести Оплата в следующую версию');
+  });
+});
+
+describe('carryOverTargetOf', () => {
+  const open = [
+    { id: '1', label: 'v1.0', state: RoadmapVersionState.Released },
+    { id: '2', label: 'v1.1', state: RoadmapVersionState.InProgress },
+  ];
+
+  it('берёт текущую версию, посчитанную сервером', () => {
+    expect(carryOverTargetOf(open, 2, '1')).toBe('v1.1');
+  });
+
+  it('источник переноса сам себе целью не бывает', () => {
+    expect(carryOverTargetOf(open, 2, '2')).toBeNull();
+  });
+
+  it('выпущенная цель целью не считается', () => {
+    const released = [{ id: '1', label: 'v1.0', state: RoadmapVersionState.Released }];
+
+    expect(carryOverTargetOf(released, 1, '9')).toBeNull();
+  });
+
+  it('пустой роадмап цели не даёт', () => {
+    expect(carryOverTargetOf([], null, '1')).toBeNull();
   });
 });
 

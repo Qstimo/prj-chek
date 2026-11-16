@@ -39,7 +39,13 @@ export interface TestDatabase {
 export async function startTestDatabase(): Promise<TestDatabase> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(
     'postgres:17-alpine',
-  ).start();
+  )
+    // Одноразовая тестовая база не требует сохранности после сбоя хоста.
+    // На Docker Desktop синхронизация каждого WAL-запроса растягивает
+    // фикстуры до таймаута; проверки транзакций и прав остаются включены.
+    .withEnvironment({ POSTGRES_INITDB_ARGS: '--no-sync' })
+    .withCommand(['postgres', '-c', 'fsync=off'])
+    .start();
 
   const ownerClient = postgres(container.getConnectionUri(), { max: 1 });
   const db = drizzle(ownerClient, { schema });
@@ -71,7 +77,8 @@ export async function startTestDatabase(): Promise<TestDatabase> {
                        domain_statuses, address_incidents, push_subscriptions,
                        checkpoint_platforms, version_platform_releases,
                        environment_platforms, project_platforms,
-                       roadmap_public_links, roadmap_checkpoints, roadmap_versions,
+                       roadmap_report_public_links, roadmap_public_links,
+                       roadmap_checkpoints, roadmap_versions,
                        variable_versions, variables,
                        doc_pages, chronicle_entries, environment_domains, domains, environments,
                        servers, projects, users, subjects

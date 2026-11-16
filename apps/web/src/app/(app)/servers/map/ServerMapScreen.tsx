@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { useQueryServerMap } from '@/api/hooks';
 import { ServerMap } from '@/components/ServerMap';
 
@@ -8,7 +9,7 @@ export function ServerMapScreen() {
   const map = useQueryServerMap();
 
   if (map.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (map.isError) {

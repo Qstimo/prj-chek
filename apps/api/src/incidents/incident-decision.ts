@@ -16,6 +16,16 @@ export interface AddressVerdict {
   health: HealthState | null;
   /** Проект приостановлен: намеренно отключённый не аварийный (ТЗ 6). */
   isPaused: boolean;
+  /**
+   * Проект в архиве: его никто не чинит и не поднимает.
+   *
+   * Отдельно от паузы, хотя действие то же: пауза — обещание вернуться,
+   * архив — конец жизни проекта. Прогон архивные адреса и не проверяет,
+   * но правило держит инвариант у себя: это единственное место, где
+   * решается судьба инцидента, и забывший фильтр вызывающий не должен
+   * будить человека снятым доменом мёртвого проекта.
+   */
+  isArchived: boolean;
   /** Есть ли уже открытый инцидент у этого адреса. */
   hasOpenIncident: boolean;
 }
@@ -23,9 +33,10 @@ export interface AddressVerdict {
 /**
  * Решает судьбу инцидента адреса (дизайн уведомлений, раздел 5).
  *
- * Пауза гасит только открытие, но не закрытие: её могли поставить поверх
- * уже начавшегося падения, и «отвечает снова» в этом случае — правда.
- * Обратное правило оставило бы инцидент открытым навсегда.
+ * Пауза и архив гасят только открытие, но не закрытие: их могли
+ * поставить поверх уже начавшегося падения, и «отвечает снова» в этом
+ * случае — правда. Обратное правило оставило бы инцидент открытым
+ * навсегда.
  */
 export function decideIncident(verdict: AddressVerdict): IncidentAction {
   if (verdict.health === null) {
@@ -33,7 +44,7 @@ export function decideIncident(verdict: AddressVerdict): IncidentAction {
   }
 
   if (verdict.health === HealthState.Down) {
-    if (verdict.isPaused || verdict.hasOpenIncident) {
+    if (verdict.isPaused || verdict.isArchived || verdict.hasOpenIncident) {
       return IncidentAction.None;
     }
 

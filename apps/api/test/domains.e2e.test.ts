@@ -163,10 +163,15 @@ describe('домены по HTTP', () => {
 
     const status = await admin.get(`/projects/${projectId}/status`).expect(200);
 
-    expect(status.body.warnings).toContainEqual(
+    // Отдельным списком и только суперадмину: корень межпроектный, срок
+    // продления правит он один, и индикатор проекта это предупреждение
+    // не красит — ответить на него проекту нечем.
+    expect(status.body.registryWarnings).toContainEqual(
       expect.objectContaining({ kind: 'domain_renewal_expiring', subject: 'example.com' }),
     );
-    expect(status.body.indicator).toBe('warning');
+    expect(status.body.warnings).toEqual([]);
+    // Ни один адрес проекта не проверялся — об этом индикатор и говорит.
+    expect(status.body.indicator).toBe('unknown');
   });
 
   it('карта показывает ребро между корнем и проектом', async () => {

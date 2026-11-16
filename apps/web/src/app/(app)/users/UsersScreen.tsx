@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { ApiError } from '@/api';
 import { useQueryUsers } from '@/api/hooks';
 import { UserList } from '@/components/UserList';
@@ -17,7 +18,7 @@ export function UsersScreen() {
   const users = useQueryUsers();
 
   if (users.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (users.isError) {

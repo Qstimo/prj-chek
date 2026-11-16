@@ -14,6 +14,8 @@ const versions = [
     releasedDate: null,
     position: 1,
     progress: { done: 0, total: 0 },
+    unfinished: 0,
+    hasUnfinishedOnRelease: false,
   },
 ];
 

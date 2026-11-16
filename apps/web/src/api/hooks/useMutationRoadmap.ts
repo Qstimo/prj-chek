@@ -1,6 +1,8 @@
 'use client';
 
 import type {
+  CheckpointCarryOver,
+  CheckpointCarryOverResult,
   LinkTitleResponse,
   RoadmapCheckpointCreate,
   RoadmapCheckpointUpdate,
@@ -87,6 +89,39 @@ export function useMutationDeleteCheckpoint(projectId: string) {
       apiClient(
         `/projects/${projectId}/roadmap/versions/${versionId}/checkpoints/${checkpointId}`,
         { method: 'DELETE' },
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Перенос чекпоинта в другую версию.
+ *
+ * Отдельная мутация, а не правка чекпоинта: «найти или создать целевую
+ * версию» делается на сервере одним действием, и журнал пишет свой вид
+ * записи. Пустое тело означает «следующая открытая версия» — правило
+ * живёт на сервере, и второй его экземпляр в браузере с ним разошёлся бы.
+ *
+ * Отказ 409 с кодом `carry_over_needs_label` доезжает до вызывающего как
+ * обычная `ApiError` с телом в `details`: панель читает код и спрашивает
+ * обозначение новой версии.
+ */
+export function useMutationCarryOverCheckpoint(projectId: string) {
+  const invalidate = useRoadmapInvalidation(projectId);
+
+  return useMutation({
+    mutationFn: ({
+      versionId,
+      checkpointId,
+      input,
+    }: {
+      versionId: string;
+      checkpointId: string;
+      input?: CheckpointCarryOver;
+    }) =>
+      apiClient<CheckpointCarryOverResult>(
+        `/projects/${projectId}/roadmap/versions/${versionId}/checkpoints/${checkpointId}/carry-over`,
+        { method: 'POST', body: input ?? {} },
       ),
     onSuccess: invalidate,
   });

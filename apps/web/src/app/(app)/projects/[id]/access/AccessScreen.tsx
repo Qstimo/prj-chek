@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { ApiError, describeApiError } from '@/api';
 import {
   useMutationCreateAgentToken,
@@ -40,7 +41,7 @@ export function AccessScreen({ projectId }: IProps) {
   const revokeToken = useMutationRevokeAgentToken(projectId);
 
   if (grants.isPending || users.isPending || tokens.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (grants.isError || users.isError || tokens.isError) {

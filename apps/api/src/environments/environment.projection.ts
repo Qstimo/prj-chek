@@ -2,6 +2,7 @@ import {
   AccessLevel,
   type EnvironmentDetail,
   type EnvironmentMetadata,
+  type EnvironmentRootDomain,
   type PlatformRef,
 } from '@cairn/shared';
 
@@ -32,6 +33,14 @@ export function environmentProjection(
    * окружения в переменных (дизайн 4.2 и 9); это не утечка проекции.
    */
   platforms: PlatformRef[],
+  /**
+   * Корни адресов окружения, по которым строится переход в реестр.
+   *
+   * Передаётся уже отобранным: право на реестр знает репозиторий, который
+   * спрашивает субъект, а не проекция. Пустой список — обычное состояние
+   * для всех, кроме суперадмина, и это не ошибка выборки.
+   */
+  roots: EnvironmentRootDomain[],
 ): EnvironmentMetadata | EnvironmentDetail {
   return projectByLevel(
     level,
@@ -56,6 +65,7 @@ export function environmentProjection(
           }
         : null,
       platforms,
+      rootDomains: roots,
       createdAt: environment.createdAt.toISOString(),
       updatedAt: environment.updatedAt.toISOString(),
     }),

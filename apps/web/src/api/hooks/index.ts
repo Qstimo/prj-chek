@@ -35,4 +35,5 @@ export * from './useQueryUser';
 export * from './useQueryUserGrants';
 export * from './useQueryUsers';
 export * from './useQueryVariables';
+export * from './useReport';
 export * from './useStatus';

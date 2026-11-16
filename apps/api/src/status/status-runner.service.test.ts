@@ -1,4 +1,5 @@
 import { EnvironmentKind, HealthState, ProjectLifecycle, SubjectKind } from '@cairn/shared';
+import { ConflictException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,7 +24,7 @@ import { IncidentsRepository } from '../incidents/incidents.repository';
 import { IncidentEventKind, IncidentsService } from '../incidents/incidents.service';
 import type { IncidentNotifier } from './notifier';
 import { StatusRepository } from './status.repository';
-import { type Checkers, StatusRunnerService } from './status-runner.service';
+import { type Checkers, StatusRunOutcome, StatusRunnerService } from './status-runner.service';
 import { StatusService } from './status.service';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
@@ -121,17 +122,33 @@ describe('runner статусов', () => {
   /** Проверщики, отвечающие без отказов. */
   function healthyCheckers() {
     return {
-      checkHealth: vi
-        .fn()
-        .mockResolvedValue({ health: HealthState.Up, latencyMs: 42, error: null }),
-      checkTls: vi
-        .fn()
-        .mockResolvedValue({ validTo: new Date('2027-01-01T00:00:00Z'), error: null }),
+      checkHealth: vi.fn().mockResolvedValue({
+        health: HealthState.Up,
+        latencyMs: 42,
+        code: null,
+        error: null,
+        redirectTo: null,
+      }),
+      checkTls: vi.fn().mockResolvedValue({
+        validTo: new Date('2027-01-01T00:00:00Z'),
+        trusted: true,
+        code: null,
+        error: null,
+      }),
       checkDomainExpiry: vi
         .fn()
-        .mockResolvedValue({ expiresAt: new Date('2027-06-01T00:00:00Z'), error: null }),
-      resolveAddress: vi.fn().mockResolvedValue({ ip: '203.0.113.10', error: null }),
+        .mockResolvedValue({ expiresAt: new Date('2027-06-01T00:00:00Z'), code: null, error: null }),
+      resolveAddress: vi
+        .fn()
+        .mockResolvedValue({ ips: ['203.0.113.10'], code: null, error: null }),
     };
+  }
+
+  /** Упавший health с заданной причиной: нужен почти каждому тесту об инцидентах. */
+  function downHealth(error: string | null = 'HTTP 500') {
+    return vi
+      .fn()
+      .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, code: null, error, redirectTo: null });
   }
 
   /**
@@ -139,12 +156,17 @@ describe('runner статусов', () => {
    *
    * Проверщики накладываются на здоровый набор: тесту почти всегда нужен
    * один подменённый, а не все четыре.
+   *
+   * Соединение замка — своё (`appDb`): замок держит его на весь прогон, а
+   * рабочий пул фикстуры состоит из одного соединения, и занять его
+   * значило бы запереть сам прогон.
    */
   function runnerWith(
     overrides: Partial<Checkers> = {},
     notifier: IncidentNotifier | null = null,
   ): StatusRunnerService {
     return new StatusRunnerService(
+      testDb.appDb,
       repository,
       servers,
       { ...healthyCheckers(), ...overrides },
@@ -163,7 +185,20 @@ describe('runner статусов', () => {
 
     expect(checkers.checkHealth).toHaveBeenCalledWith('stage.example.com', '/api/health');
     expect(checkers.checkTls).toHaveBeenCalledWith('stage.example.com');
-    expect(checkers.checkDomainExpiry).toHaveBeenCalledWith('stage.example.com');
+  });
+
+  it('у реестра спрашивает корень, и один раз на прогон', async () => {
+    // Реестры знают только корни: пока вопрос задавался по имени адреса,
+    // у каждого поддомена висело вечное «реестр ответил HTTP 404». Два
+    // адреса одного корня — одна оплата и один вопрос.
+    await seedTargets();
+
+    const checkers = healthyCheckers();
+
+    await runnerWith(checkers).runAll();
+
+    expect(checkers.checkDomainExpiry).toHaveBeenCalledTimes(1);
+    expect(checkers.checkDomainExpiry).toHaveBeenCalledWith('example.com');
   });
 
   it('прогон пишет три проверки одной строкой на адрес', async () => {
@@ -180,6 +215,7 @@ describe('runner статусов', () => {
     expect(status).toMatchObject({ health: HealthState.Up, latencyMs: 42 });
     expect(status?.tlsValidTo?.toISOString()).toBe('2027-01-01T00:00:00.000Z');
     expect(status?.registryExpiresAt?.toISOString()).toBe('2027-06-01T00:00:00.000Z');
+    expect(status?.tlsTrusted).toBe(true);
   });
 
   it('окружение без пути проверяется по корню', async () => {
@@ -208,6 +244,7 @@ describe('runner статусов', () => {
       .orderBy(domainStatuses.resolvedIp);
 
     expect(status?.resolvedIp).toBe('203.0.113.10');
+    expect(status?.resolvedIps).toEqual(['203.0.113.10']);
   });
 
   it('заводит машину и привязывает окружение', async () => {
@@ -232,6 +269,21 @@ describe('runner статусов', () => {
     expect(await testDb.db.select().from(serversTable)).toHaveLength(1);
   });
 
+  it('машина, названная человеком адресом, не ломает привязку', async () => {
+    // Имя в реестре уникально: голая вставка нарушала ключ, ошибка
+    // гасилась в лог, и окружение не привязывалось никогда.
+    await seedTargets();
+    await testDb.db.insert(serversTable).values({ name: '203.0.113.10' });
+
+    await runnerWith(healthyCheckers()).runAll();
+
+    const machines = await testDb.db.select().from(serversTable);
+    const [environment] = await testDb.db.select().from(environments);
+
+    expect(machines).toHaveLength(1);
+    expect(environment?.serverId).toBe(machines[0]!.id);
+  });
+
   it('падение одного адреса не прерывает обход', async () => {
     await seedTargets();
 
@@ -248,13 +300,31 @@ describe('runner статусов', () => {
     expect(rows[0]).toMatchObject({ health: HealthState.Up });
   });
 
+  it('незаписанный отказ инцидента не открывает', async () => {
+    // Порядок «сначала база, потом память»: исключение записи раньше
+    // правило читало из памяти уже обновлённый вердикт и открывало
+    // инцидент по падению, которого на экране никто не увидит.
+    await seedOneTarget();
+
+    const broken = new StatusRepository(testDb.db, new AccessService(testDb.db));
+    vi.spyOn(broken, 'upsertAddressStatus').mockRejectedValue(new Error('база отказала'));
+
+    const runner = new StatusRunnerService(
+      testDb.appDb,
+      broken,
+      servers,
+      { ...healthyCheckers(), checkHealth: downHealth() },
+      incidents,
+      null,
+    );
+
+    await runner.runAll();
+
+    expect(await testDb.rowsOf(addressIncidents)).toHaveLength(0);
+  });
+
   it('ручной запуск пишет в журнал, фоновый — нет', async () => {
-    const runner = runnerWith({
-      checkHealth: vi.fn(),
-      checkTls: vi.fn(),
-      checkDomainExpiry: vi.fn(),
-      resolveAddress: vi.fn(),
-    });
+    const runner = runnerWith();
     const service = new StatusService(testDb.db, repository, runner, new AuditService());
 
     await runner.runAll();
@@ -263,18 +333,184 @@ describe('runner статусов', () => {
     ).toHaveLength(0);
 
     await service.runNow(admin());
+    await runner.settled();
+
     expect(
       await testDb.db.select().from(auditLog).where(eq(auditLog.action, AuditAction.StatusCheckRun)),
     ).toHaveLength(1);
   });
+
+  it('ручной запуск отвечает, не дожидаясь обхода', async () => {
+    // Ручка объявлена 202: держать запрос браузера до конца обхода
+    // значило рвать его по таймауту при живом прогоне.
+    await seedOneTarget();
+
+    let release = (): void => {};
+    const checkHealth = vi.fn().mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      return { health: HealthState.Up, latencyMs: 1, code: null, error: null, redirectTo: null };
+    });
+    const runner = runnerWith({ checkHealth });
+    const service = new StatusService(testDb.db, repository, runner, new AuditService());
+
+    await service.runNow(admin());
+    await vi.waitFor(() => expect(checkHealth).toHaveBeenCalled());
+
+    // Ответ уже отдан, а обход ещё держится на первой проверке: писать
+    // ему пока нечего.
+    expect(await testDb.db.select().from(domainStatuses)).toHaveLength(0);
+
+    release();
+    await runner.settled();
+
+    expect(await testDb.db.select().from(domainStatuses)).toHaveLength(1);
+  });
+
+  it('ручной запуск поверх идущего отвечает отказом', async () => {
+    // Различимо, а не молча: 202 поверх идущего прогона обещал бы
+    // обновление, которого этот запрос не вызовет.
+    await seedOneTarget();
+
+    let release = (): void => {};
+    const checkHealth = vi.fn().mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      return { health: HealthState.Up, latencyMs: 1, code: null, error: null, redirectTo: null };
+    });
+    const runner = runnerWith({ checkHealth });
+    const service = new StatusService(testDb.db, repository, runner, new AuditService());
+
+    await service.runNow(admin());
+    await vi.waitFor(() => expect(checkHealth).toHaveBeenCalled());
+
+    await expect(service.runNow(admin())).rejects.toBeInstanceOf(ConflictException);
+
+    release();
+    await runner.settled();
+  });
+
+  it('второй запуск поверх идущего не начинается', async () => {
+    // Два прогона читают открытые инциденты как пустые, и второй либо
+    // ловит нарушение уникума, либо закрывает только что открытый
+    // инцидент ложным «отвечает снова».
+    await seedOneTarget();
+
+    let release = (): void => {};
+    const checkHealth = vi.fn().mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      return { health: HealthState.Up, latencyMs: 1, code: null, error: null, redirectTo: null };
+    });
+    const runner = runnerWith({ checkHealth });
+    const first = runner.runAll();
+
+    expect(await runner.runAll()).toBe(StatusRunOutcome.Busy);
+
+    // Отпускать первый прогон можно только после того, как он дошёл до
+    // проверки: иначе `release` ещё не присвоен, и ждать его некому.
+    await vi.waitFor(() => expect(checkHealth).toHaveBeenCalled());
+    release();
+    expect(await first).toBe(StatusRunOutcome.Done);
+    expect(checkHealth).toHaveBeenCalledTimes(1);
+  });
+
+  it('прогон другого экземпляра API тоже не наезжает', async () => {
+    // Замок в памяти процесса не защитил бы от второго контейнера:
+    // он лежит в базе — `pg_try_advisory_lock`.
+    await seedOneTarget();
+
+    let release = (): void => {};
+    const busy = vi.fn().mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      return { health: HealthState.Up, latencyMs: 1, code: null, error: null, redirectTo: null };
+    });
+    const first = runnerWith({ checkHealth: busy });
+    // Своё соединение — другой экземпляр API: в памяти процесса про
+    // чужой прогон не знает никто.
+    const second = new StatusRunnerService(
+      testDb.db,
+      repository,
+      servers,
+      healthyCheckers(),
+      incidents,
+      null,
+    );
+
+    const running = first.runAll();
+    // Пока первый не взял замок, спрашивать второго бессмысленно: оба
+    // соревновались бы за него в произвольном порядке.
+    await vi.waitFor(() => expect(busy).toHaveBeenCalled());
+
+    expect(await second.runAll()).toBe(StatusRunOutcome.Busy);
+
+    release();
+    await running;
+  });
+
+  it('прогон при старте идёт сразу, не ожидая интервала', async () => {
+    // После деплоя статус устаревал на целый интервал, а новый адрес до
+    // того же срока оставался «неизвестно».
+    await seedOneTarget();
+    process.env.CAIRN_STATUS_CHECK_INTERVAL_MINUTES = '15';
+
+    const runner = runnerWith(healthyCheckers());
+
+    try {
+      runner.onModuleInit();
+      await runner.settled();
+    } finally {
+      process.env.CAIRN_STATUS_CHECK_INTERVAL_MINUTES = '0';
+      runner.onModuleDestroy();
+    }
+
+    expect(await testDb.db.select().from(domainStatuses)).toHaveLength(1);
+  });
+
+  it('выключенный цикл не прогоняет и при старте', async () => {
+    // `0` означает «выключено целиком» — так работают тесты и локальная
+    // разработка, и внезапный обход сети при подъёме приложения им не нужен.
+    await seedOneTarget();
+    process.env.CAIRN_STATUS_CHECK_INTERVAL_MINUTES = '0';
+
+    const runner = runnerWith(healthyCheckers());
+
+    runner.onModuleInit();
+    await runner.settled();
+    runner.onModuleDestroy();
+
+    expect(await testDb.db.select().from(domainStatuses)).toHaveLength(0);
+  });
+
   it('одиночный отказ переспрашивается и инцидента не даёт', async () => {
     // Сетевая икота не должна будить человека: спрашиваем ещё раз.
     await seedOneTarget();
 
     const checkHealth = vi
       .fn()
-      .mockResolvedValueOnce({ health: HealthState.Down, latencyMs: 0, error: 'таймаут' })
-      .mockResolvedValueOnce({ health: HealthState.Up, latencyMs: 12, error: null });
+      .mockResolvedValueOnce({
+        health: HealthState.Down,
+        latencyMs: 0,
+        code: null,
+        error: 'таймаут',
+        redirectTo: null,
+      })
+      .mockResolvedValueOnce({
+        health: HealthState.Up,
+        latencyMs: 12,
+        code: null,
+        error: null,
+        redirectTo: null,
+      });
 
     await runnerWith({ checkHealth }).runAll();
 
@@ -285,11 +521,7 @@ describe('runner статусов', () => {
   it('подтверждённый отказ открывает инцидент', async () => {
     await seedOneTarget();
 
-    const checkHealth = vi
-      .fn()
-      .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' });
-
-    await runnerWith({ checkHealth }).runAll();
+    await runnerWith({ checkHealth: downHealth() }).runAll();
 
     const [incident] = await testDb.rowsOf(addressIncidents);
 
@@ -299,11 +531,7 @@ describe('runner статусов', () => {
   it('переспрос не затирает сроки первой фазы', async () => {
     await seedOneTarget();
 
-    await runnerWith({
-      checkHealth: vi
-        .fn()
-        .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'таймаут' }),
-    }).runAll();
+    await runnerWith({ checkHealth: downHealth('таймаут') }).runAll();
 
     const [status] = await testDb.db.select().from(domainStatuses);
 
@@ -314,13 +542,11 @@ describe('runner статусов', () => {
   it('живой адрес не переспрашивается', async () => {
     await seedOneTarget();
 
-    const checkHealth = vi
-      .fn()
-      .mockResolvedValue({ health: HealthState.Up, latencyMs: 10, error: null });
+    const checkers = healthyCheckers();
 
-    await runnerWith({ checkHealth }).runAll();
+    await runnerWith(checkers).runAll();
 
-    expect(checkHealth).toHaveBeenCalledTimes(1);
+    expect(checkers.checkHealth).toHaveBeenCalledTimes(1);
   });
 
   it('события уходят уведомителю', async () => {
@@ -328,14 +554,7 @@ describe('runner статусов', () => {
 
     const notify = vi.fn();
 
-    await runnerWith(
-      {
-        checkHealth: vi
-          .fn()
-          .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: null }),
-      },
-      { notify },
-    ).runAll();
+    await runnerWith({ checkHealth: downHealth(null) }, { notify }).runAll();
 
     expect(notify).toHaveBeenCalledWith([
       expect.objectContaining({ kind: IncidentEventKind.Opened, address: 'example.com' }),
@@ -348,9 +567,7 @@ describe('runner статусов', () => {
     await seedOneTarget();
     process.env.CAIRN_HEALTH_RECHECK_DELAY_SECONDS = '600';
 
-    const checkHealth = vi
-      .fn()
-      .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' });
+    const checkHealth = downHealth();
 
     try {
       await runnerWith({ checkHealth }).runAll({ isManual: true });
@@ -366,11 +583,7 @@ describe('runner статусов', () => {
     await seedOneTarget();
 
     await runnerWith(
-      {
-        checkHealth: vi
-          .fn()
-          .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' }),
-      },
+      { checkHealth: downHealth() },
       { notify: vi.fn().mockRejectedValue(new Error('push-служба молчит')) },
     ).runAll();
 
@@ -385,12 +598,25 @@ describe('runner статусов', () => {
       .set({ lifecycle: ProjectLifecycle.Paused })
       .where(eq(projects.id, projectId));
 
-    await runnerWith({
-      checkHealth: vi
-        .fn()
-        .mockResolvedValue({ health: HealthState.Down, latencyMs: 0, error: 'HTTP 500' }),
-    }).runAll();
+    await runnerWith({ checkHealth: downHealth() }).runAll();
 
+    expect(await testDb.rowsOf(addressIncidents)).toHaveLength(0);
+  });
+
+  it('архивный проект не проверяется и инцидента не открывает', async () => {
+    // Архивный проект со снятым доменом открывал инцидент и будил
+    // человека пушем: чинить его никто не собирается.
+    await seedOneTarget();
+    await testDb.db
+      .update(projects)
+      .set({ lifecycle: ProjectLifecycle.Archived })
+      .where(eq(projects.id, projectId));
+
+    const checkHealth = downHealth();
+
+    await runnerWith({ checkHealth }).runAll();
+
+    expect(checkHealth).not.toHaveBeenCalled();
     expect(await testDb.rowsOf(addressIncidents)).toHaveLength(0);
   });
 });

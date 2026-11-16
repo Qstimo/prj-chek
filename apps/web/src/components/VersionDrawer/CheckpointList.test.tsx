@@ -156,6 +156,116 @@ describe('CheckpointList', () => {
     expect(screen.queryByRole('button', { name: /Править/ })).not.toBeInTheDocument();
   });
 
+  describe('незакрытые чекпоинты выпущенной версии', () => {
+    it('помечает незакрытый чекпоинт словами', () => {
+      render(
+        <CheckpointList
+          checkpoints={[plain, { ...withUrl, isDone: true }]}
+          canWrite
+          markUnfinished
+          onToggle={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      // Пометка только у незакрытого: у закрытого она была бы шумом.
+      expect(screen.getAllByText('не закрыт')).toHaveLength(1);
+    });
+
+    it('без расхождения пометки нет', () => {
+      render(
+        <CheckpointList checkpoints={[plain]} canWrite onToggle={vi.fn()} onDelete={vi.fn()} />,
+      );
+
+      expect(screen.queryByText('не закрыт')).not.toBeInTheDocument();
+    });
+
+    it('кнопка переноса называет целевую версию до нажатия', async () => {
+      const onCarryOver = vi.fn();
+      render(
+        <CheckpointList
+          checkpoints={[plain]}
+          canWrite
+          carryOverTargetLabel="v1.3"
+          onCarryOver={onCarryOver}
+          onToggle={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      const button = screen.getByRole('button', { name: `Перенести ${plain.title} в v1.3` });
+
+      await userEvent.click(button);
+
+      expect(onCarryOver).toHaveBeenCalledWith(plain.id);
+    });
+
+    it('без известной цели говорит о следующей версии', () => {
+      // Правило «следующая открытая» живёт на сервере: обещать имя,
+      // которого не знаем, нельзя.
+      render(
+        <CheckpointList
+          checkpoints={[plain]}
+          canWrite
+          carryOverTargetLabel={null}
+          onCarryOver={vi.fn()}
+          onToggle={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: `Перенести ${plain.title} в следующую версию` }),
+      ).toBeInTheDocument();
+    });
+
+    it('у закрытого чекпоинта переносить нечего', () => {
+      render(
+        <CheckpointList
+          checkpoints={[{ ...plain, isDone: true }]}
+          canWrite
+          carryOverTargetLabel="v1.3"
+          onCarryOver={vi.fn()}
+          onToggle={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /Перенести/ })).not.toBeInTheDocument();
+    });
+
+    it('без права записи переносить не предлагает', () => {
+      render(
+        <CheckpointList
+          checkpoints={[plain]}
+          canWrite={false}
+          carryOverTargetLabel="v1.3"
+          onCarryOver={vi.fn()}
+          onToggle={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /Перенести/ })).not.toBeInTheDocument();
+    });
+
+    it('пока перенос идёт, кнопка занята', () => {
+      render(
+        <CheckpointList
+          checkpoints={[plain]}
+          canWrite
+          carryOverTargetLabel="v1.3"
+          isCarryingOver
+          onCarryOver={vi.fn()}
+          onToggle={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: /Перенести/ })).toBeDisabled();
+    });
+  });
+
   it('из правки можно выйти, не сохраняя', async () => {
     // Иначе открытая по ошибке правка — ловушка: закрыть её нечем.
     const onEdit = vi.fn();

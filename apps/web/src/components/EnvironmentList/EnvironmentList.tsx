@@ -4,7 +4,13 @@ import { EnvironmentCard } from '../EnvironmentCard';
 import type { IProps } from './types';
 
 /** Список окружений проекта (ТЗ 3.2). */
-export function EnvironmentList({ environments, canWrite = false, onEdit, onDelete }: IProps) {
+export function EnvironmentList({
+  environments,
+  canWrite = false,
+  isSuperadmin = false,
+  onEdit,
+  onDelete,
+}: IProps) {
   if (environments.length === 0) {
     return (
       <p className="text-muted-foreground">
@@ -22,6 +28,7 @@ export function EnvironmentList({ environments, canWrite = false, onEdit, onDele
           <EnvironmentCard
             environment={environment}
             canWrite={canWrite}
+            isSuperadmin={isSuperadmin}
             onEdit={() => onEdit(environment.id)}
             onDelete={() => onDelete(environment.id)}
           />

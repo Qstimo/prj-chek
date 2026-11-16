@@ -1,8 +1,9 @@
-import type {
-  Platform,
-  RoadmapVersionDetail,
-  RoadmapVersionMetadata,
-  RoadmapVersionUpdate,
+import {
+  RoadmapVersionState,
+  type Platform,
+  type RoadmapVersionDetail,
+  type RoadmapVersionMetadata,
+  type RoadmapVersionUpdate,
 } from '@cairn/shared';
 
 import type { IReleaseCell, IVersionDraft, ReleaseOp } from './types';
@@ -164,4 +165,70 @@ export function releaseOpsOf(
  */
 export function isDirtyOf(patch: RoadmapVersionUpdate, ops: ReleaseOp[]): boolean {
   return Object.keys(patch).length > 0 || ops.length > 0;
+}
+
+/**
+ * Текст пометки «выпущено, но не закрыто».
+ *
+ * Без упрёка и без запрета: выпуск с незакрытыми чекпоинтами разрешён
+ * (решение владельца продукта), и сказать надо только о расхождении и о
+ * том, что с ним можно сделать.
+ */
+export function unfinishedNoteOf(count: number): string {
+  return `Версия выпущена, незакрытых чекпоинтов: ${count}. Их можно закрыть или перенести в следующую версию.`;
+}
+
+/**
+ * Название действия переноса для кнопки и читалок.
+ *
+ * Цель называется до нажатия: «перенести» без ответа на вопрос «куда»
+ * заставляет нажимать, чтобы узнать. Неизвестная цель называется словами
+ * («в следующую версию»), а не придуманным обозначением: решение
+ * принимает сервер.
+ */
+export function carryOverActionOf(title: string, targetLabel: string | null | undefined): string {
+  return targetLabel
+    ? `Перенести ${title} в ${targetLabel}`
+    : `Перенести ${title} в следующую версию`;
+}
+
+/** Версия роадмапа в том объёме, который нужен для имени цели переноса. */
+interface IVersionLike {
+  id: string;
+  label: string;
+  state: RoadmapVersionState;
+}
+
+/**
+ * Обозначение версии, в которую уедет чекпоинт по умолчанию.
+ *
+ * `stageCurrent` — та самая «текущая версия», которую посчитал сервер и
+ * показывает полоса версий: своего правила выбора здесь нет намеренно,
+ * иначе кнопка и полоса называли бы разные версии. Остаются два отказа,
+ * совпадающие с серверным `nextOpenVersion`: выпущенная версия открытой
+ * не считается, и источник переноса сам себе целью не бывает.
+ *
+ * `null` означает «цель посчитает сервер»: панель тогда не обещает
+ * обозначения, а на отказ спрашивает его у человека.
+ */
+export function carryOverTargetOf(
+  versions: IVersionLike[],
+  stageCurrent: number | null,
+  sourceVersionId: string,
+): string | null {
+  if (stageCurrent === null) {
+    return null;
+  }
+
+  const candidate = versions[stageCurrent - 1];
+
+  if (
+    !candidate ||
+    candidate.state === RoadmapVersionState.Released ||
+    candidate.id === sourceVersionId
+  ) {
+    return null;
+  }
+
+  return candidate.label;
 }

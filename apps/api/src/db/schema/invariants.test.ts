@@ -8,6 +8,7 @@ import { docPages } from './docs';
 import { domains } from './domains';
 import { environmentDomains, environments } from './environments';
 import { grants } from './grants';
+import { addressIncidents } from './incidents';
 import { invitations } from './invitations';
 import {
   checkpointPlatforms,
@@ -16,7 +17,13 @@ import {
   versionPlatformReleases,
 } from './platforms';
 import { projects } from './projects';
-import { roadmapCheckpoints, roadmapPublicLinks, roadmapVersions } from './roadmap';
+import { pushSubscriptions } from './push';
+import {
+  roadmapCheckpoints,
+  roadmapPublicLinks,
+  roadmapReportPublicLinks,
+  roadmapVersions,
+} from './roadmap';
 import { servers } from './servers';
 import { sessions } from './sessions';
 import { domainStatuses } from './status';
@@ -49,13 +56,27 @@ const ALL_TABLES = [
   { name: 'roadmap_versions', table: roadmapVersions },
   { name: 'roadmap_checkpoints', table: roadmapCheckpoints },
   { name: 'roadmap_public_links', table: roadmapPublicLinks },
+  { name: 'roadmap_report_public_links', table: roadmapReportPublicLinks },
   { name: 'domain_statuses', table: domainStatuses },
+  { name: 'address_incidents', table: addressIncidents },
+  { name: 'push_subscriptions', table: pushSubscriptions },
   { name: 'grants', table: grants },
   { name: 'sessions', table: sessions },
   { name: 'invitations', table: invitations },
   { name: 'totp_challenges', table: totpChallenges },
   { name: 'audit_log', table: auditLog },
 ];
+
+/**
+ * Что разрешено делать ссылке при удалении строки, на которую она смотрит.
+ *
+ * `restrict` — основной случай: строки уносят репозитории явно, в той же
+ * транзакции. `set null` допущен отдельно и только потому, что строк он не
+ * удаляет: гаснет пометка («перенесено из версии, которой больше нет»), а
+ * сама запись остаётся на месте и журнал не рвётся. Запрет нацелен на
+ * `cascade`, который унёс бы вместе с родителем целые поддеревья.
+ */
+const ALLOWED_DELETE_ACTIONS = ['restrict', 'set null'];
 
 describe('внешние ключи', () => {
   it.each(ALL_TABLES)('$name не удаляет строки каскадом', ({ table }) => {
@@ -64,9 +85,15 @@ describe('внешние ключи', () => {
     // ссылка с каскадом обесценивает правило целиком.
     const cascading = getTableConfig(table)
       .foreignKeys.map((key) => key.onDelete)
-      .filter((action) => action !== 'restrict');
+      .filter((action) => action === undefined || !ALLOWED_DELETE_ACTIONS.includes(action));
 
     expect(cascading).toEqual([]);
+  });
+
+  it('гашение пометки разрешено, а каскад — нет', () => {
+    // Страховка от расширения списка «до зелёного»: правило обязано
+    // по-прежнему ловить cascade и неуказанное действие.
+    expect(ALLOWED_DELETE_ACTIONS).toEqual(['restrict', 'set null']);
   });
 
   it('в системе объявлены внешние ключи', () => {

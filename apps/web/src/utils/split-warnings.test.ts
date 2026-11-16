@@ -1,7 +1,12 @@
-import { StatusIndicator, StatusWarningKind, type StatusSummaryRow } from '@cairn/shared';
+import {
+  StatusIndicator,
+  StatusWarningKind,
+  type StatusSummaryRow,
+  type StatusWarning,
+} from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
-import { splitWarningsByUrgency } from './split-warnings';
+import { splitWarnings, splitWarningsByUrgency } from './split-warnings';
 
 const rows: StatusSummaryRow[] = [
   {
@@ -18,6 +23,46 @@ const rows: StatusSummaryRow[] = [
     ],
   },
 ];
+
+describe('splitWarnings', () => {
+  it('делит предупреждения одного проекта без сводки', () => {
+    // Ядро нужно экрану проекта: там сводки по проектам нет вовсе, а
+    // делить «не отвечает» и «требует внимания» надо тем же правилом.
+    const warnings: StatusWarning[] = [
+      { kind: StatusWarningKind.HealthDown, subject: 'api.example.com', detail: 'не отвечает' },
+      {
+        kind: StatusWarningKind.HealthCheckMisconfigured,
+        subject: 'api.example.com',
+        detail: 'ручка не найдена',
+      },
+    ];
+
+    const { critical, attention } = splitWarnings(warnings);
+
+    expect(critical.map((warning) => warning.kind)).toEqual([StatusWarningKind.HealthDown]);
+    expect(attention.map((warning) => warning.kind)).toEqual([
+      StatusWarningKind.HealthCheckMisconfigured,
+    ]);
+  });
+
+  it('сохраняет чужие поля предупреждения', () => {
+    // Ядро обобщено по типу: ссылка сводки обязана доехать до панели.
+    const linked = [
+      {
+        kind: StatusWarningKind.HealthDown,
+        subject: 'Прод',
+        detail: 'не отвечает',
+        href: '/projects/1/infrastructure',
+      },
+    ];
+
+    expect(splitWarnings(linked).critical[0]?.href).toBe('/projects/1/infrastructure');
+  });
+
+  it('на пустом списке отдаёт два пустых списка', () => {
+    expect(splitWarnings([])).toEqual({ critical: [], attention: [] });
+  });
+});
 
 describe('splitWarningsByUrgency', () => {
   it('кладёт падение в срочные, а срок — в остальные', () => {

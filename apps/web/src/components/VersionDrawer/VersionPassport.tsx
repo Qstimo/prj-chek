@@ -2,7 +2,7 @@ import type { RoadmapVersionDetail, RoadmapVersionMetadata } from '@cairn/shared
 
 import { formatDate } from '@/utils';
 
-import { STATE_LABELS } from './constants';
+import { STATE_LABELS, UNFINISHED_ROW_LABEL } from './constants';
 
 /** Пропсы паспорта версии. */
 interface IProps {
@@ -27,6 +27,15 @@ export function VersionPassport({ version, isCurrent }: IProps) {
       <PassportRow name="Прогресс">
         {version.progress.done} из {version.progress.total}
       </PassportRow>
+      {/* Строка только при расхождении: в открытой версии незакрытые
+          чекпоинты — норма, и «total − done» паспорт уже показал
+          прогрессом. На уровне «метаданные» чекпоинтов не видно вовсе,
+          и кроме паспорта сказать о расхождении нечем. */}
+      {version.hasUnfinishedOnRelease && (
+        <PassportRow name={UNFINISHED_ROW_LABEL}>
+          <span className="text-amber-600 dark:text-amber-500">{version.unfinished}</span>
+        </PassportRow>
+      )}
     </dl>
   );
 }

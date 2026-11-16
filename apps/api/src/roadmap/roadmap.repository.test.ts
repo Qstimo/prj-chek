@@ -1,5 +1,7 @@
 import {
   AccessLevel,
+  CARRY_OVER_NEEDS_LABEL,
+  EnvironmentKind,
   PlatformKind,
   PlatformReleaseState,
   RoadmapVersionState,
@@ -16,10 +18,12 @@ import { InsufficientLevelError, SectionNotVisibleError } from '../access/access
 import type { RequestSubject } from '../access/access.types';
 import {
   checkpointPlatforms,
+  environments,
   grants,
   projectPlatforms,
   projects,
   roadmapCheckpoints,
+  roadmapReportPublicLinks,
   subjects,
   users,
   versionPlatformReleases,
@@ -353,6 +357,26 @@ describe('репозиторий роадмапа', () => {
       expect(version.checkpoints[0]!.url).toBe('https://tracker.example.com/TASK-17');
     });
 
+    it('по просьбе без ссылок не отдаёт их и на уровне чтения', async () => {
+      // Этим пользуется путь агентов MCP: адрес внутреннего трекера с
+      // номером задачи в контексте модели не нужен.
+      const versionId = await createVersion();
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Со ссылкой',
+          url: 'https://tracker.example.com/TASK-17',
+        }),
+      );
+      await grant(AccessLevel.Read);
+
+      const roadmap = await repository.findForProject(member(), projectId, { withLinks: false });
+
+      const version = roadmap.versions[0] as RoadmapVersionDetail;
+
+      expect(version.checkpoints[0]).not.toHaveProperty('url');
+      expect(JSON.stringify(roadmap)).not.toContain('tracker.example.com');
+    });
+
     it('чекпоинт без ссылки отдаёт её пустой', async () => {
       const versionId = await createVersion();
       await testDb.db.transaction((tx) =>
@@ -435,11 +459,11 @@ describe('репозиторий роадмапа', () => {
 
   describe('публичная ссылка', () => {
     it('публикация выдаёт токен, повторная — конфликт', async () => {
-      const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
+      const token = await testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId));
 
       expect(token.length).toBeGreaterThanOrEqual(32);
       await expect(
-        testDb.db.transaction((tx) => repository.publish(tx, projectId)),
+        testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId)),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -448,7 +472,7 @@ describe('репозиторий роадмапа', () => {
       await testDb.db.transaction((tx) =>
         repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Публичный' }),
       );
-      const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
+      const token = await testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId));
 
       const roadmap = await repository.publicRoadmap(token);
 
@@ -466,7 +490,7 @@ describe('репозиторий роадмапа', () => {
           url: 'https://tracker.example.com/TASK-17',
         }),
       );
-      const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
+      const token = await testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId));
 
       const roadmap = await repository.publicRoadmap(token);
 
@@ -477,24 +501,49 @@ describe('репозиторий роадмапа', () => {
     it('мусорный токен и отключённая публикация неразличимы', async () => {
       expect(await repository.publicRoadmap('мусор')).toBeNull();
 
-      const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
-      await testDb.db.transaction((tx) => repository.unpublish(tx, projectId));
+      const token = await testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId));
+      await testDb.db.transaction((tx) => repository.unpublish(admin(), tx, projectId));
 
       expect(await repository.publicRoadmap(token)).toBeNull();
     });
 
     it('отключение без публикации — «не найдено»', async () => {
       await expect(
-        testDb.db.transaction((tx) => repository.unpublish(tx, projectId)),
+        testDb.db.transaction((tx) => repository.unpublish(admin(), tx, projectId)),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('находит действующий токен проекта', async () => {
-      expect(await repository.findPublicLink(projectId)).toBeNull();
+      expect(await repository.findPublicLink(admin(), projectId)).toBeNull();
 
-      const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
+      const token = await testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId));
 
-      expect(await repository.findPublicLink(projectId)).toBe(token);
+      expect(await repository.findPublicLink(admin(), projectId)).toBe(token);
+    });
+
+    it('скрывает ссылку без выдачи и отказывает ниже уровня', async () => {
+      // Право проверяет выборка, а не контроллер (ТЗ 4.1): без выдачи
+      // секция не существует, с одними метаданными — уровня не хватает.
+      await expect(repository.findPublicLink(member(), projectId)).rejects.toBeInstanceOf(
+        SectionNotVisibleError,
+      );
+
+      await grant(AccessLevel.Metadata);
+
+      await expect(repository.findPublicLink(member(), projectId)).rejects.toBeInstanceOf(
+        InsufficientLevelError,
+      );
+    });
+
+    it('публикация и отключение требуют записи', async () => {
+      await grant(AccessLevel.Read);
+
+      await expect(
+        testDb.db.transaction((tx) => repository.publish(member(), tx, projectId)),
+      ).rejects.toBeInstanceOf(InsufficientLevelError);
+      await expect(
+        testDb.db.transaction((tx) => repository.unpublish(member(), tx, projectId)),
+      ).rejects.toBeInstanceOf(InsufficientLevelError);
     });
   });
 
@@ -529,6 +578,285 @@ describe('репозиторий роадмапа', () => {
           }),
         ),
       ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    });
+  });
+
+  describe('перенос чекпоинта', () => {
+    /** Чекпоинт в указанной версии: перенос всегда начинается с него. */
+    async function createCheckpoint(versionId: string, title = 'Оплата'): Promise<string> {
+      const created = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, { title }),
+      );
+
+      return created.id;
+    }
+
+    function carryOver(
+      versionId: string,
+      checkpointId: string,
+      input: Parameters<typeof repository.carryOverCheckpoint>[5] = {},
+      subject = admin(),
+    ) {
+      return testDb.db.transaction((tx) =>
+        repository.carryOverCheckpoint(subject, tx, projectId, versionId, checkpointId, input),
+      );
+    }
+
+    it('переносит в указанную версию', async () => {
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const checkpointId = await createCheckpoint(from);
+
+      const carried = await carryOver(from, checkpointId, { targetVersionId: to });
+
+      expect(carried.checkpoint.versionId).toBe(to);
+      expect(carried.toLabel).toBe('v1.3');
+      expect(carried.versionCreated).toBe(false);
+    });
+
+    it('без тела едет в следующую открытую версию', async () => {
+      // То же правило, что у стадии: кнопка переноса и полоса версий
+      // обязаны называть одну и ту же текущую версию.
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, from, {
+          state: RoadmapVersionState.Released,
+        }),
+      );
+      const checkpointId = await createCheckpoint(from);
+
+      const carried = await carryOver(from, checkpointId);
+
+      expect(carried.checkpoint.versionId).toBe(to);
+      expect(carried.versionCreated).toBe(false);
+    });
+
+    it('создаёт версию по обозначению', async () => {
+      const from = await createVersion('v1.2');
+      const checkpointId = await createCheckpoint(from);
+
+      const carried = await carryOver(from, checkpointId, { newVersionLabel: 'v1.3' });
+
+      expect(carried.versionCreated).toBe(true);
+      expect(carried.toLabel).toBe('v1.3');
+
+      const roadmap = await repository.findForProject(admin(), projectId);
+      expect(roadmap.versions.map((version) => version.label)).toEqual(['v1.2', 'v1.3']);
+    });
+
+    it('занятое обозначение новой версии — конфликт', async () => {
+      const from = await createVersion('v1.2');
+      await createVersion('v1.3');
+      const checkpointId = await createCheckpoint(from);
+
+      await expect(
+        carryOver(from, checkpointId, { newVersionLabel: 'v1.3' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('без открытой версии и без обозначения — различимый конфликт', async () => {
+      const from = await createVersion('v1.2');
+      await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, from, {
+          state: RoadmapVersionState.Released,
+        }),
+      );
+      const checkpointId = await createCheckpoint(from);
+
+      // Код, а не разбор текста: по нему интерфейс спрашивает обозначение.
+      await expect(carryOver(from, checkpointId)).rejects.toMatchObject({
+        response: { code: CARRY_OVER_NEEDS_LABEL },
+      });
+    });
+
+    it('чужая целевая версия — «не видно», а не «нельзя»', async () => {
+      const from = await createVersion('v1.2');
+      const foreign = await createVersion('v9', otherProjectId);
+      const checkpointId = await createCheckpoint(from);
+
+      await expect(
+        carryOver(from, checkpointId, { targetVersionId: foreign }),
+      ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    });
+
+    it('перенос в ту же версию — конфликт', async () => {
+      const from = await createVersion('v1.2');
+      const checkpointId = await createCheckpoint(from);
+
+      await expect(
+        carryOver(from, checkpointId, { targetVersionId: from }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('становится последним в целевой версии, а не вторым жильцом', async () => {
+      // Позиции правятся без перенумерации и без уникальности: прежняя
+      // позиция привела бы чекпоинт на занятое место.
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      await createCheckpoint(to, 'Первый');
+      await createCheckpoint(to, 'Второй');
+      const checkpointId = await createCheckpoint(from, 'Приезжий');
+
+      const carried = await carryOver(from, checkpointId, { targetVersionId: to });
+
+      expect(carried.checkpoint.position).toBe(3);
+    });
+
+    it('помнит версию, из которой приехал', async () => {
+      // Отчёту нужна пометка «перенесено в v1.3»: другого следа в
+      // версии-источнике не остаётся.
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const checkpointId = await createCheckpoint(from);
+
+      await carryOver(from, checkpointId, { targetVersionId: to });
+
+      const [row] = await testDb.db
+        .select()
+        .from(roadmapCheckpoints)
+        .where(eq(roadmapCheckpoints.id, checkpointId));
+
+      expect(row?.carriedFromVersionId).toBe(from);
+    });
+
+    it('теги платформ переезжают вместе с чекпоинтом', async () => {
+      await grant(AccessLevel.Read);
+      const apiId = await createPlatform('API');
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const created = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, from, {
+          title: 'Оплата',
+          platformIds: [apiId],
+        }),
+      );
+
+      const carried = await carryOver(from, created.id, { targetVersionId: to });
+
+      expect(carried.checkpoint.platformIds).toEqual([apiId]);
+      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(1);
+    });
+
+    it('возвращает обозначения «откуда» и «куда» для журнала', async () => {
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const checkpointId = await createCheckpoint(from);
+
+      const carried = await carryOver(from, checkpointId, { targetVersionId: to });
+
+      expect(carried).toMatchObject({ fromLabel: 'v1.2', toLabel: 'v1.3' });
+    });
+
+    it('переносит прогресс вместе с чекпоинтом', async () => {
+      // Прогресс вычисляется, не хранится: после переноса незакрытый
+      // чекпоинт считается у получателя, а не у источника.
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const checkpointId = await createCheckpoint(from);
+
+      await carryOver(from, checkpointId, { targetVersionId: to });
+
+      const roadmap = await repository.findForProject(admin(), projectId);
+
+      expect(roadmap.versions[0]).toMatchObject({ label: 'v1.2', unfinished: 0 });
+      expect(roadmap.versions[1]).toMatchObject({ label: 'v1.3', unfinished: 1 });
+    });
+
+    it('требует уровня записи', async () => {
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const checkpointId = await createCheckpoint(from);
+      await grant(AccessLevel.Read);
+
+      await expect(
+        carryOver(from, checkpointId, { targetVersionId: to }, member()),
+      ).rejects.toBeInstanceOf(InsufficientLevelError);
+    });
+
+    it('не отдаёт чекпоинт через чужую исходную версию', async () => {
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const checkpointId = await createCheckpoint(from);
+
+      // Исходная версия — чужая: перенос не должен её находить.
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.carryOverCheckpoint(admin(), tx, otherProjectId, from, checkpointId, {
+            targetVersionId: to,
+          }),
+        ),
+      ).rejects.toBeInstanceOf(SectionNotVisibleError);
+    });
+
+    it('удаление версии-источника гасит пометку, а не запирает удаление', async () => {
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const checkpointId = await createCheckpoint(from);
+      await carryOver(from, checkpointId, { targetVersionId: to });
+
+      await testDb.db.transaction((tx) => repository.removeVersion(admin(), tx, projectId, from));
+
+      const [row] = await testDb.db
+        .select()
+        .from(roadmapCheckpoints)
+        .where(eq(roadmapCheckpoints.id, checkpointId));
+
+      expect(row?.carriedFromVersionId).toBeNull();
+    });
+  });
+
+  describe('расхождение «выпущено, но не закрыто»', () => {
+    it('помечает выпущенную версию с незакрытыми чекпоинтами', async () => {
+      // Отказа нет: выпуск разрешён, расхождение лишь помечается.
+      const versionId = await createVersion('v1.2');
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Оплата' }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, versionId, {
+          state: RoadmapVersionState.Released,
+        }),
+      );
+
+      const roadmap = await repository.findForProject(admin(), projectId);
+
+      expect(roadmap.versions[0]).toMatchObject({ unfinished: 1, hasUnfinishedOnRelease: true });
+    });
+
+    it('признак виден на уровне метаданных', async () => {
+      await grant(AccessLevel.Metadata);
+      const versionId = await createVersion('v1.2');
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Секрет' }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, versionId, {
+          state: RoadmapVersionState.Released,
+        }),
+      );
+
+      const roadmap = await repository.findForProject(member(), projectId);
+
+      expect(roadmap.versions[0]?.hasUnfinishedOnRelease).toBe(true);
+      expect(JSON.stringify(roadmap)).not.toContain('Секрет');
+    });
+
+    it('признак доезжает до публичной выдачи', async () => {
+      const versionId = await createVersion('v1.2');
+      await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Оплата' }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.updateVersion(admin(), tx, projectId, versionId, {
+          state: RoadmapVersionState.Released,
+        }),
+      );
+      const token = await testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId));
+
+      const roadmap = await repository.publicRoadmap(token);
+
+      expect(roadmap?.versions[0]?.hasUnfinishedOnRelease).toBe(true);
     });
   });
 
@@ -584,7 +912,7 @@ describe('репозиторий роадмапа', () => {
           url: 'https://tracker.example.com/TASK-1',
         }),
       );
-      const token = await testDb.db.transaction((tx) => repository.publish(tx, projectId));
+      const token = await testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId));
 
       const roadmap = await repository.publicRoadmap(token);
       const checkpoint = roadmap?.versions[0]?.checkpoints[0];
@@ -681,6 +1009,38 @@ describe('репозиторий роадмапа', () => {
 
       expect(release?.releasedDate).toBeNull();
       expect(release?.buildLabel).toBeNull();
+    });
+
+    it('не принимает дату выхода у выпуска «в пути»', async () => {
+      // Иначе дата обещания уедет в сводку релизов наравне с датой
+      // настоящего выхода, и сводка перестанет их различать.
+      const versionId = await createVersion('v1.0');
+      const storeId = await createPlatform('App Store', PlatformKind.Store);
+
+      await expect(
+        testDb.db.transaction((tx) =>
+          repository.setRelease(admin(), tx, projectId, versionId, storeId, {
+            state: PlatformReleaseState.InReview,
+            releasedDate: '2026-03-12',
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('пустую дату у выпуска «в пути» принимает', async () => {
+      // Отвергается дата, а не ключ: `null` — это «даты нет», и оно
+      // допустимо при любом состоянии.
+      const versionId = await createVersion('v1.0');
+      const apiId = await createPlatform('API');
+
+      const set = await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, apiId, {
+          state: PlatformReleaseState.OnTest,
+          releasedDate: null,
+        }),
+      );
+
+      expect(set.releasedDate).toBeNull();
     });
 
     it('не ставит модерацию серверной платформе', async () => {
@@ -912,6 +1272,261 @@ describe('репозиторий роадмапа', () => {
       );
 
       expect(updated.platformIds).toEqual([iosId]);
+    });
+  });
+
+  describe('отчёт по релизу', () => {
+    /** Версия с чекпоинтом и платформой: отчёт всегда начинается с них. */
+    async function releasedVersion(): Promise<{ versionId: string; platformId: string }> {
+      const platformId = await createPlatform('App Store', PlatformKind.Store);
+      const versionId = await createVersion('v1.2');
+
+      const checkpoint = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, versionId, {
+          title: 'Оплата',
+          url: 'https://tracker.example.com/TASK-17',
+          platformIds: [platformId],
+        }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.updateCheckpoint(admin(), tx, projectId, versionId, checkpoint.id, {
+          isDone: true,
+        }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.setRelease(admin(), tx, projectId, versionId, platformId, {
+          state: PlatformReleaseState.Released,
+          releasedDate: '2026-03-12',
+          buildLabel: '1.2.3 (45)',
+        }),
+      );
+
+      return { versionId, platformId };
+    }
+
+    it('собирает паспорт, выпуски, чекпоинты и сводку', async () => {
+      const { versionId } = await releasedVersion();
+
+      const report = await repository.findReport(admin(), projectId, versionId);
+
+      expect(report.version).toMatchObject({ label: 'v1.2', releasedDate: '2026-03-12' });
+      expect(report.releases[0]).toMatchObject({
+        state: PlatformReleaseState.Released,
+        buildLabel: '1.2.3 (45)',
+      });
+      expect(report.checkpoints[0]).toMatchObject({ title: 'Оплата', isDone: true });
+      expect(report.summary[0]?.released).toMatchObject({ versionLabel: 'v1.2' });
+      expect(report.markdown).toContain('Отчёт по релизу v1.2');
+      expect(report.text).toContain('Отчёт по релизу v1.2');
+    });
+
+    it('имён окружений в отчёте нет', async () => {
+      // Роадмап не читает окружения: это секция «Инфраструктура», и
+      // отчёт не обходной путь к ней (инвариант ТЗ 4.1).
+      const { versionId } = await releasedVersion();
+      await testDb.db
+        .insert(environments)
+        .values({ projectId, name: 'прод', kind: EnvironmentKind.Production });
+
+      const report = await repository.findReport(admin(), projectId, versionId);
+
+      expect(JSON.stringify(report)).not.toContain('прод');
+    });
+
+    it('переносы видны с обеих сторон', async () => {
+      // «Перенесено в v1.3» в отчёте v1.2 иначе не собрать: после
+      // переноса чекпоинт этой версии уже не принадлежит.
+      const from = await createVersion('v1.2');
+      const to = await createVersion('v1.3');
+      const moved = await testDb.db.transaction((tx) =>
+        repository.createCheckpoint(admin(), tx, projectId, from, { title: 'Отчёты' }),
+      );
+      await testDb.db.transaction((tx) =>
+        repository.carryOverCheckpoint(admin(), tx, projectId, from, moved.id, {
+          targetVersionId: to,
+        }),
+      );
+
+      const source = await repository.findReport(admin(), projectId, from);
+      const target = await repository.findReport(admin(), projectId, to);
+
+      expect(source.checkpoints).toEqual([]);
+      expect(source.carriedOut[0]).toMatchObject({ title: 'Отчёты', carriedTo: 'v1.3' });
+      expect(source.markdown).toContain('перенесено в v1.3');
+      expect(target.checkpoints[0]).toMatchObject({ title: 'Отчёты', carriedFrom: 'v1.2' });
+      expect(target.markdown).toContain('принято из v1.2');
+    });
+
+    it('чужая версия не существует', async () => {
+      const alien = await createVersion('v1.0', otherProjectId);
+
+      await expect(repository.findReport(admin(), projectId, alien)).rejects.toBeInstanceOf(
+        SectionNotVisibleError,
+      );
+    });
+
+    it('без выдачи секции отчёта нет, с метаданными — уровня не хватает', async () => {
+      const versionId = await createVersion('v1.2');
+
+      await expect(repository.findReport(member(), projectId, versionId)).rejects.toBeInstanceOf(
+        SectionNotVisibleError,
+      );
+
+      await grant(AccessLevel.Metadata);
+
+      await expect(repository.findReport(member(), projectId, versionId)).rejects.toBeInstanceOf(
+        InsufficientLevelError,
+      );
+    });
+
+    describe('публичная ссылка отчёта', () => {
+      it('публикация выдаёт токен, повторная — конфликт', async () => {
+        const versionId = await createVersion('v1.2');
+
+        const published = await testDb.db.transaction((tx) =>
+          repository.publishReport(admin(), tx, projectId, versionId),
+        );
+
+        expect(published.token.length).toBeGreaterThanOrEqual(32);
+        expect(published.label).toBe('v1.2');
+        await expect(
+          testDb.db.transaction((tx) =>
+            repository.publishReport(admin(), tx, projectId, versionId),
+          ),
+        ).rejects.toBeInstanceOf(ConflictException);
+      });
+
+      it('ссылка живёт на версии, а не на проекте', async () => {
+        // Отчёты по разным версиям публикуются независимо: уникум стоит
+        // на версии, и вторая версия не упирается в первую.
+        const first = await createVersion('v1.2');
+        const second = await createVersion('v1.3');
+
+        const one = await testDb.db.transaction((tx) =>
+          repository.publishReport(admin(), tx, projectId, first),
+        );
+        const two = await testDb.db.transaction((tx) =>
+          repository.publishReport(admin(), tx, projectId, second),
+        );
+
+        expect(two.token).not.toBe(one.token);
+        expect((await repository.publicReport(one.token))?.version.label).toBe('v1.2');
+        expect((await repository.publicReport(two.token))?.version.label).toBe('v1.3');
+      });
+
+      it('публичный отчёт читается по токену, без ссылок на задачи', async () => {
+        const { versionId } = await releasedVersion();
+        const { token } = await testDb.db.transaction((tx) =>
+          repository.publishReport(admin(), tx, projectId, versionId),
+        );
+
+        const report = await repository.publicReport(token);
+
+        expect(report?.projectName).toBe('Проект');
+        expect(report?.checkpoints[0]?.title).toBe('Оплата');
+        expect(report?.checkpoints[0]).not.toHaveProperty('url');
+        expect(JSON.stringify(report)).not.toContain('tracker.example.com');
+      });
+
+      it('перенесённый чекпоинт тоже уезжает без ссылки', async () => {
+        // Второй список чекпоинтов собирается отдельной выборкой, и
+        // забыть в нём `withLinks` легче всего.
+        const from = await createVersion('v1.2');
+        const to = await createVersion('v1.3');
+        const moved = await testDb.db.transaction((tx) =>
+          repository.createCheckpoint(admin(), tx, projectId, from, {
+            title: 'Отчёты',
+            url: 'https://tracker.example.com/TASK-18',
+          }),
+        );
+        await testDb.db.transaction((tx) =>
+          repository.carryOverCheckpoint(admin(), tx, projectId, from, moved.id, {
+            targetVersionId: to,
+          }),
+        );
+        const { token } = await testDb.db.transaction((tx) =>
+          repository.publishReport(admin(), tx, projectId, from),
+        );
+
+        const report = await repository.publicReport(token);
+
+        expect(report?.carriedOut[0]).toMatchObject({ carriedTo: 'v1.3' });
+        expect(report?.carriedOut[0]).not.toHaveProperty('url');
+        expect(JSON.stringify(report)).not.toContain('TASK-18');
+      });
+
+      it('мусорный токен и отключённая ссылка неразличимы', async () => {
+        const versionId = await createVersion('v1.2');
+
+        expect(await repository.publicReport('мусор')).toBeNull();
+
+        const { token } = await testDb.db.transaction((tx) =>
+          repository.publishReport(admin(), tx, projectId, versionId),
+        );
+        await testDb.db.transaction((tx) =>
+          repository.unpublishReport(admin(), tx, projectId, versionId),
+        );
+
+        expect(await repository.publicReport(token)).toBeNull();
+      });
+
+      it('отключение без публикации — «не найдено»', async () => {
+        const versionId = await createVersion('v1.2');
+
+        await expect(
+          testDb.db.transaction((tx) =>
+            repository.unpublishReport(admin(), tx, projectId, versionId),
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      });
+
+      it('находит действующий токен версии', async () => {
+        const versionId = await createVersion('v1.2');
+
+        expect(await repository.findReportLink(admin(), projectId, versionId)).toBeNull();
+
+        const { token } = await testDb.db.transaction((tx) =>
+          repository.publishReport(admin(), tx, projectId, versionId),
+        );
+
+        expect(await repository.findReportLink(admin(), projectId, versionId)).toBe(token);
+      });
+
+      it('право проверяет выборка, а не контроллер', async () => {
+        const versionId = await createVersion('v1.2');
+
+        await expect(
+          repository.findReportLink(member(), projectId, versionId),
+        ).rejects.toBeInstanceOf(SectionNotVisibleError);
+
+        await grant(AccessLevel.Read);
+
+        await expect(
+          testDb.db.transaction((tx) =>
+            repository.publishReport(member(), tx, projectId, versionId),
+          ),
+        ).rejects.toBeInstanceOf(InsufficientLevelError);
+        await expect(
+          testDb.db.transaction((tx) =>
+            repository.unpublishReport(member(), tx, projectId, versionId),
+          ),
+        ).rejects.toBeInstanceOf(InsufficientLevelError);
+      });
+
+      it('удаление версии уносит ссылку на её отчёт', async () => {
+        // На ссылке `restrict`: без уборки версия стала бы неудаляемой.
+        const versionId = await createVersion('v1.2');
+        const { token } = await testDb.db.transaction((tx) =>
+          repository.publishReport(admin(), tx, projectId, versionId),
+        );
+
+        await testDb.db.transaction((tx) =>
+          repository.removeVersion(admin(), tx, projectId, versionId),
+        );
+
+        expect(await repository.publicReport(token)).toBeNull();
+        expect(await testDb.rowsOf(roadmapReportPublicLinks)).toEqual([]);
+      });
     });
   });
 });

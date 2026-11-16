@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { AccessLevel, Section } from '@cairn/shared';
 import { useState } from 'react';
 
@@ -40,7 +41,7 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
   const [isCreating, setIsCreating] = useState(false);
 
   if (environments.isPending || sections.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (environments.isError || sections.isError) {
@@ -86,6 +87,9 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
       <EnvironmentList
         environments={environments.data}
         canWrite={canWrite}
+        // Переход в реестр машин и доменов — право суперадмина: решение
+        // принимает карточка, а знает о праве страница.
+        isSuperadmin={isSuperadmin}
         onEdit={(id) => {
           setIsCreating(false);
           setEditingId(id);

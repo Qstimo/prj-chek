@@ -12,12 +12,20 @@ interface IProps {
   canWrite: boolean;
   /** Платформы проекта: теги в строке и переключатели в правке. */
   platforms?: Platform[];
+  /** Помечать незакрытые: версия выпущена, а они остались. */
+  markUnfinished?: boolean;
   onToggle: (checkpointId: string, isDone: boolean) => void;
   onDelete: (checkpointId: string) => void;
   /** Сохранение правки. Отсутствие — правка недоступна. */
   onEdit?: (checkpointId: string, input: RoadmapCheckpointCreate) => void;
   /** Чтение заголовка задачи по ссылке. */
   onReadTitle?: (url: string) => Promise<string | null>;
+  /** Перенос в другую версию. Отсутствие — переносить нечем. */
+  onCarryOver?: (checkpointId: string) => void;
+  /** Обозначение версии-получателя; `null` — её назовёт сервер. */
+  carryOverTargetLabel?: string | null;
+  /** Перенос уже идёт: кнопки спят до ответа. */
+  isCarryingOver?: boolean;
 }
 
 /**
@@ -31,10 +39,14 @@ export function CheckpointList({
   checkpoints,
   canWrite,
   platforms,
+  markUnfinished = false,
   onToggle,
   onDelete,
   onEdit,
   onReadTitle,
+  onCarryOver,
+  carryOverTargetLabel,
+  isCarryingOver = false,
 }: IProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -70,9 +82,13 @@ export function CheckpointList({
             checkpoint={checkpoint}
             canWrite={canWrite}
             platforms={platforms}
+            markUnfinished={markUnfinished}
             onToggle={onToggle}
             onDelete={onDelete}
             onEdit={onEdit && setEditingId}
+            onCarryOver={onCarryOver}
+            carryOverTargetLabel={carryOverTargetLabel}
+            isCarryingOver={isCarryingOver}
           />
         ),
       )}

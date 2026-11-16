@@ -4,7 +4,12 @@ import { describe, expect, it } from 'vitest';
 import { decideIncident, IncidentAction } from './incident-decision';
 
 /** Живой адрес непаузированного проекта без открытого инцидента. */
-const CALM = { health: HealthState.Up, isPaused: false, hasOpenIncident: false };
+const CALM = {
+  health: HealthState.Up,
+  isPaused: false,
+  isArchived: false,
+  hasOpenIncident: false,
+};
 
 describe('решение об инциденте', () => {
   it('спокойное состояние ничего не меняет', () => {
@@ -37,15 +42,31 @@ describe('решение об инциденте', () => {
 
   it('приостановленный проект инцидента не открывает', () => {
     // ТЗ 6: намеренно отключённый проект не выглядит аварийным.
-    expect(
-      decideIncident({ health: HealthState.Down, isPaused: true, hasOpenIncident: false }),
-    ).toBe(IncidentAction.None);
+    expect(decideIncident({ ...CALM, health: HealthState.Down, isPaused: true })).toBe(
+      IncidentAction.None,
+    );
   });
 
   it('приостановленный проект всё равно закрывает открытый инцидент', () => {
     // Паузу могли поставить поверх уже начавшегося падения. «Отвечает
     // снова» — правда, и держать инцидент открытым вечно незачем.
-    expect(decideIncident({ health: HealthState.Up, isPaused: true, hasOpenIncident: true })).toBe(
+    expect(decideIncident({ ...CALM, isPaused: true, hasOpenIncident: true })).toBe(
+      IncidentAction.Resolve,
+    );
+  });
+
+  it('архивный проект инцидента не открывает', () => {
+    // Архив никто не чинит и не поднимает: снятый домен архивного проекта
+    // будил человека пушем каждые четверть часа.
+    expect(decideIncident({ ...CALM, health: HealthState.Down, isArchived: true })).toBe(
+      IncidentAction.None,
+    );
+  });
+
+  it('архивный проект всё равно закрывает открытый инцидент', () => {
+    // Проект могли заархивировать поверх начавшегося падения, и открытый
+    // инцидент иначе остался бы висеть навсегда — то же правило, что у паузы.
+    expect(decideIncident({ ...CALM, isArchived: true, hasOpenIncident: true })).toBe(
       IncidentAction.Resolve,
     );
   });

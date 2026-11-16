@@ -108,10 +108,100 @@ export enum HealthState {
   Down = 'down',
 }
 
+/**
+ * Код наблюдения автопроверки: что именно увидели (ТЗ 6).
+ *
+ * Один перечень на все четыре проверки, а не свой у каждой: причины у них
+ * общие — таймаут, отказ соединения, нераспознанное имя, — и второй
+ * перечень неизбежно разошёлся бы с первым, а вебу пришлось бы держать
+ * две карты расшифровки вместо одной.
+ *
+ * Код, а не фраза: настоящая причина отказа лежит в `Error.cause` кодом
+ * (`ECONNREFUSED`, `ENOTFOUND`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`), и
+ * сворачивать её в «не отвечает (fetch failed)» значит выбросить
+ * единственное, по чему понятно, что делать. Сырой код остаётся в фразе,
+ * а здесь он сведён к закрытому списку: на сыром списке карту расшифровки
+ * не построить — OpenSSL добавляет свои коды без нашего участия.
+ *
+ * Не всякий код — отказ: `Redirect`, `AuthRequired` и `MethodNotAllowed`
+ * означают «отвечает», и инцидента по ним не бывает.
+ */
+export enum StatusCheckCode {
+  /** Перенаправление: сервер жив, но путь проверки ведёт в другое место. */
+  Redirect = 'redirect',
+  /** 401/403: ручка закрыта авторизацией. Не падение. */
+  AuthRequired = 'auth_required',
+  /** 405/501: метод не разрешён или не реализован. Не падение. */
+  MethodNotAllowed = 'method_not_allowed',
+  /** 404: путь ручки проверки задан неверно. Настройка, а не падение. */
+  PathNotFound = 'path_not_found',
+  /** Прочий 4xx: адрес отказывает запросу. */
+  ClientError = 'client_error',
+  /** 5xx: сервер ответил своей ошибкой. */
+  ServerError = 'server_error',
+  /** Ответа не дождались. */
+  Timeout = 'timeout',
+  /** `ECONNREFUSED`: порт закрыт. */
+  ConnectionRefused = 'connection_refused',
+  /** `ECONNRESET`/`EPIPE`: соединение разорвано на полуслове. */
+  ConnectionReset = 'connection_reset',
+  /** `ENETUNREACH`/`EHOSTUNREACH`: сети до адреса нет. */
+  Unreachable = 'unreachable',
+  /** `EPROTO`/`ERR_SSL_*`: порт отвечает не по тому протоколу. */
+  ProtocolError = 'protocol_error',
+  /** `ENOTFOUND`: имени нет в DNS. */
+  DnsNotFound = 'dns_not_found',
+  /** `ENODATA`: имя есть, адресной записи нет. */
+  DnsNoRecord = 'dns_no_record',
+  /** `EAI_AGAIN`/`SERVFAIL`: DNS не ответил сейчас — возможно, ответит потом. */
+  DnsTemporary = 'dns_temporary',
+  /** Сертификат не вызывает доверия: самоподписанный, цепочка не проверяется. */
+  CertificateUntrusted = 'certificate_untrusted',
+  /** Сертификат истёк. */
+  CertificateExpired = 'certificate_expired',
+  /** Сертификат выписан на другое имя. */
+  CertificateNameMismatch = 'certificate_name_mismatch',
+  /** Рукопожатие прошло, а срока в сертификате нет. */
+  CertificateMissing = 'certificate_missing',
+  /** Реестр не знает этого домена. */
+  RegistryNotFound = 'registry_not_found',
+  /** Реестр ответил, но события `expiration` не сообщил. */
+  RegistryNoExpiration = 'registry_no_expiration',
+  /** Реестр недоступен или ответил отказом. */
+  RegistryUnavailable = 'registry_unavailable',
+  /** Код не разобран: таким его и показываем, не выдумывая причину. */
+  Unknown = 'unknown',
+}
+
 /** Вид предупреждения о статусе. */
 export enum StatusWarningKind {
   HealthDown = 'health_down',
+  /**
+   * Ручка проверки отвечает не тем, чего от неё ждут.
+   *
+   * 404 — путь задан неверно, прочие 4xx — адрес отказывает запросу.
+   * Это настройка проверки, а не падение: инцидент не открывается и пуш
+   * не уходит, но предупреждение висит, пока путь не поправят. Что именно
+   * увидели, говорит `code`.
+   */
+  HealthCheckMisconfigured = 'health_check_misconfigured',
   TlsExpiring = 'tls_expiring',
+  /**
+   * Сертификат уже истёк.
+   *
+   * Отдельно от {@link StatusWarningKind.TlsExpiring}: пока срок считался
+   * одним условием «меньше порога», истёкший был неотличим от истекающего,
+   * хотя первый уже ломает доступ, а второй ещё нет.
+   */
+  TlsExpired = 'tls_expired',
+  /**
+   * Сертификат получен, но доверия не вызывает.
+   *
+   * Самоподписанный, непроверяемая цепочка, чужое имя. Отдельно от
+   * {@link StatusWarningKind.TlsError}: тот означает, что рукопожатия не
+   * было вовсе и о сертификате ничего не известно.
+   */
+  TlsInvalid = 'tls_invalid',
   TlsError = 'tls_error',
   DomainExpiring = 'domain_expiring',
   /** Близок или прошёл срок оплаты сервера. */

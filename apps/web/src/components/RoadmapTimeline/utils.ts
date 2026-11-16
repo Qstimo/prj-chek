@@ -2,8 +2,25 @@ import { RoadmapVersionState } from '@cairn/shared';
 
 import { formatDate } from '@/utils';
 
-import { FILL_MAX, FILL_MIN, LIST_WINDOW, STRIP_MAX_VERSIONS } from './constants';
-import type { TimelineForm, TimelineVersion, TimelineWindow } from './types';
+import {
+  DEFAULT_COLUMNS,
+  FILL_MAX,
+  FILL_MIN,
+  KNEE_HEIGHT,
+  LIST_WINDOW,
+  SLOT_HEIGHT,
+  STEP,
+  TURN_WIDTH,
+  WINDOW_SIZES,
+} from './constants';
+import type {
+  TimelineCell,
+  TimelineForm,
+  TimelineKnee,
+  TimelinePlan,
+  TimelineVersion,
+  TimelineWindow,
+} from './types';
 
 /**
  * Заполненность отметки: выпущенная всегда полная — выпущена, значит завершена.
@@ -56,9 +73,30 @@ export function noteOf(version: TimelineVersion): string {
   return `${version.progress.done} из ${version.progress.total}`;
 }
 
-/** Укладка по числу версий. См. {@link STRIP_MAX_VERSIONS}. */
-export function formOf(count: number): TimelineForm {
-  return count > STRIP_MAX_VERSIONS ? 'list' : 'strip';
+/**
+ * Основная укладка — серпантин при любом числе версий.
+ * Полосу и список человек выбирает переключателем.
+ */
+export function formOf(_count: number): TimelineForm {
+  return 'serpentine';
+}
+
+/**
+ * Размер окна: сколько последних версий показывать.
+ *
+ * `null` — все: предела нет. Отсутствие — умолчание укладки: лента и
+ * серпантин смотрят на последние десять, список — на двадцать строк.
+ */
+export function windowSizeOf(form: TimelineForm, last: number | null | undefined): number {
+  if (last === null) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (last === undefined) {
+    return WINDOW_SIZES[form];
+  }
+
+  return Math.max(1, Math.trunc(last));
 }
 
 /**
@@ -69,20 +107,91 @@ export function formOf(count: number): TimelineForm {
  * перестал бы показывать «вы здесь», ради чего на него и смотрят. Съезжает,
  * а не растягивается: растянутое от текущей до конца окно при текущей версии
  * в середине сотни показало бы полсотни строк и перестало быть окном.
+ *
+ * Отдаётся и начало окна: раз оно умеет съезжать, вычислить его снаружи
+ * по размеру набора нельзя.
  */
 export function windowOf<T>(
   items: T[],
   currentIndex: number | null,
   isExpanded: boolean,
+  size: number = LIST_WINDOW,
 ): TimelineWindow<T> {
-  if (isExpanded || items.length <= LIST_WINDOW) {
-    return { items, hidden: 0 };
+  if (isExpanded || items.length <= size) {
+    return { items, hidden: 0, start: 0 };
   }
 
-  const fromEnd = items.length - LIST_WINDOW;
+  const fromEnd = items.length - size;
   const start = currentIndex === null ? fromEnd : Math.min(fromEnd, Math.max(0, currentIndex));
 
-  return { items: items.slice(start, start + LIST_WINDOW), hidden: items.length - LIST_WINDOW };
+  return { items: items.slice(start, start + size), hidden: items.length - size, start };
+}
+
+/**
+ * Сколько версий умещается в строку серпантина.
+ *
+ * По измеренной ширине места, а не по зашитому порогу: внутренний экран
+ * даёт 976 px, публичная страница — 720, и выведенное из первой число
+ * уводило вторую в прокрутку. Ноль означает «ещё не измерено» — в этом
+ * случае берётся умолчание, а не нулевая строка.
+ */
+export function columnsFor(width: number): number {
+  if (width <= 0) {
+    return DEFAULT_COLUMNS;
+  }
+
+  return Math.max(1, Math.floor((width - TURN_WIDTH * 2) / STEP));
+}
+
+/**
+ * Раскладка серпантина: место каждой версии и перемычки между строками.
+ *
+ * Строки чередуют направление, поэтому место версии задаётся столбцом
+ * явно: переносом строк змейку не выразить, а разворот направления через
+ * CSS развернул бы заодно и подписи. Строки версий чередуются в сетке со
+ * строками поворота, и перемычка занимает три строки сетки подряд —
+ * строку, поворот и следующую строку, — соединяя центры отметок.
+ */
+export function serpentinePlan(count: number, columns: number): TimelinePlan {
+  const safeColumns = Math.max(1, columns);
+  const cells: TimelineCell[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const row = Math.floor(index / safeColumns);
+    const offset = index % safeColumns;
+    const isReversed = row % 2 === 1;
+    const column = isReversed ? safeColumns - 1 - offset : offset;
+
+    // Первый столбец сетки — поворот, поэтому версии начинаются со второго.
+    cells.push({ row, isReversed, gridColumn: column + 2, gridRow: row * 2 + 1 });
+  }
+
+  const rows = Math.max(1, Math.ceil(count / safeColumns));
+  const knees: TimelineKnee[] = [];
+
+  for (let row = 0; row + 1 < rows; row += 1) {
+    const side = row % 2 === 0 ? 'right' : 'left';
+
+    knees.push({
+      side,
+      gridColumn: side === 'right' ? safeColumns + 2 : 1,
+      gridRow: row * 2 + 1,
+    });
+  }
+
+  return { columns: safeColumns, rows, cells, knees };
+}
+
+/** Столбцы сетки серпантина: крайние под колено, остальные шагом оси. */
+export function columnsTemplate(columns: number): string {
+  return `${TURN_WIDTH}px repeat(${columns}, ${STEP}px) ${TURN_WIDTH}px`;
+}
+
+/** Строки сетки серпантина: строки версий через строки поворота. */
+export function rowsTemplate(rows: number): string {
+  return Array.from({ length: Math.max(1, rows) }, () => `${SLOT_HEIGHT}px`).join(
+    ` ${KNEE_HEIGHT}px `,
+  );
 }
 
 /**

@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { useQueryDomainMap } from '@/api/hooks';
 import { DomainMap } from '@/components/DomainMap';
 
@@ -8,7 +9,7 @@ export function DomainMapScreen() {
   const map = useQueryDomainMap();
 
   if (map.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (map.isError) {

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 import { PROJECT_SECTIONS } from './constants';
 import type { IProps } from './types';
+import { isSectionActive } from './utils';
 
 /**
  * Навигация внутри проекта: крошки и разделы.
@@ -16,13 +17,21 @@ import type { IProps } from './types';
  * Показываются только разделы с выдачей: отсутствие уровня означает, что
  * существование секции не раскрывается (ТЗ 4.2), поэтому недоступный раздел
  * отсутствует, а не выглядит заблокированным.
+ *
+ * Раздел определяется по префиксу адреса, а место в нём — точным
+ * равенством: у разделов есть вложенные страницы (отчёт по релизу внутри
+ * роадмапа), и на такой странице раздел обязан остаться текущим, но
+ * остаться и ссылкой — иначе из вложенного адреса некуда вернуться.
  */
 export function ProjectNav({ projectId, projectName, sections }: IProps) {
   const pathname = usePathname();
   const base = `/projects/${projectId}`;
   const available = PROJECT_SECTIONS.filter((item) => sections[item.section]);
-  const current = available.find((item) => pathname === `${base}${item.path}`);
+  const current = available.find((item) =>
+    isSectionActive(pathname, `${base}${item.path}`, item.path),
+  );
   const isOnProject = pathname === base;
+  const isOnSectionRoot = current !== undefined && pathname === `${base}${current.path}`;
 
   return (
     <nav aria-label="Навигация по проекту" className="space-y-3">
@@ -48,9 +57,20 @@ export function ProjectNav({ projectId, projectName, sections }: IProps) {
           <>
             <li aria-hidden>/</li>
             <li>
-              <span aria-current="page" className="text-foreground">
-                {current.label}
-              </span>
+              {/*
+                На вложенной странице раздел — звено пути, а не текущее
+                место: заголовок страницы называет себя сам, а крошка
+                обязана вести назад к разделу.
+              */}
+              {isOnSectionRoot ? (
+                <span aria-current="page" className="text-foreground">
+                  {current.label}
+                </span>
+              ) : (
+                <Link href={`${base}${current.path}`} className="hover:underline">
+                  {current.label}
+                </Link>
+              )}
             </li>
           </>
         )}
@@ -60,9 +80,12 @@ export function ProjectNav({ projectId, projectName, sections }: IProps) {
         {available.map((item) => {
           const href = `${base}${item.path}`;
           const isCurrent = pathname === href;
+          const isActive = item === current;
 
           // Текущий раздел не ссылка: щёлкать по месту, где уже находишься,
-          // незачем, а метка aria-current делает его слышимым.
+          // незачем, а метка aria-current делает его слышимым. На вложенной
+          // странице раздел выделен, но ссылкой остаётся — это путь назад,
+          // и `aria-current` там был бы неправдой: текущая страница другая.
           return (
             <li key={item.section}>
               {isCurrent ? (
@@ -75,7 +98,11 @@ export function ProjectNav({ projectId, projectName, sections }: IProps) {
               ) : (
                 <Link
                   href={href}
-                  className="rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong"
+                  className={
+                    isActive
+                      ? 'rounded-full border border-border-strong bg-surface-strong px-3 py-1 text-sm transition'
+                      : 'rounded-full border border-border bg-surface px-3 py-1 text-sm transition hover:border-border-strong hover:bg-surface-strong'
+                  }
                 >
                   {item.label}
                 </Link>

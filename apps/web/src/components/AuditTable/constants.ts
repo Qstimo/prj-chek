@@ -3,8 +3,16 @@ import { AuditSubjectKind } from '@cairn/shared';
 /**
  * Названия действий на русском.
  *
- * Ключи совпадают со значениями перечисления бэкенда. Действие без перевода
- * показывается как есть: пропущенный перевод не должен прятать событие.
+ * Ключи совпадают со значениями перечисления бэкенда (`AuditAction`).
+ * Таблица обязана покрывать его целиком: сторож в `constants.test.ts`
+ * вычитывает перечисление из исходника API и падает, когда новое
+ * действие заводят без названия. Действие без перевода показывается как
+ * есть — пропущенный перевод не должен прятать событие, — но сырой ключ
+ * вида `checkpoint.carried_over` человеку не говорит ничего.
+ *
+ * Формулировки без подробностей: метаданные записи на экране журнала не
+ * показываются, поэтому название отвечает только на вопрос «что
+ * произошло», а «над чем» читается из колонки объекта.
  */
 export const ACTION_LABELS: Record<string, string> = {
   'login.succeeded': 'Вход',
@@ -14,13 +22,56 @@ export const ACTION_LABELS: Record<string, string> = {
   'totp.challenge_exhausted': 'Попытки кода исчерпаны',
   'totp.enabled': 'Привязан второй фактор',
   'totp.reset': 'Сброшен второй фактор',
+  'push.subscribed': 'Подписка на уведомления',
+  'push.unsubscribed': 'Отписка от уведомлений',
   'project.created': 'Создан проект',
+  'project.updated': 'Изменён проект',
   'platform.created': 'Заведена платформа',
   'platform.updated': 'Переименована платформа',
   'platform.deleted': 'Удалена платформа',
   'platform_release.set': 'Выставлен выпуск платформы',
   'platform_release.cleared': 'Снят выпуск платформы',
-  'project.updated': 'Изменён проект',
+  'environment.created': 'Создано окружение',
+  'environment.updated': 'Изменено окружение',
+  'environment.deleted': 'Удалено окружение',
+  'chronicle_entry.created': 'Добавлена запись в хронику',
+  'chronicle_entry.updated': 'Изменена запись хроники',
+  'chronicle_entry.deleted': 'Удалена запись хроники',
+  'intake_address.created': 'Создан приёмный адрес',
+  'intake_address.revoked': 'Отозван приёмный адрес',
+  'variable.created': 'Создана переменная',
+  'variable.updated': 'Изменена переменная',
+  'variable.deleted': 'Удалена переменная',
+  'variable.revealed': 'Раскрыто значение переменной',
+  'variable.rolled_back': 'Переменная откатана к прежней версии',
+  'variables.imported': 'Импортированы переменные',
+  'variables.exported': 'Выгружены переменные',
+  'roadmap_version.created': 'Создана версия',
+  'roadmap_version.updated': 'Изменена версия',
+  'roadmap_version.deleted': 'Удалена версия',
+  'checkpoint.created': 'Добавлен чекпоинт',
+  'checkpoint.updated': 'Изменён чекпоинт',
+  'checkpoint.deleted': 'Удалён чекпоинт',
+  'checkpoint.carried_over': 'Чекпоинт перенесён в другую версию',
+  'roadmap.published': 'Роадмап открыт по ссылке',
+  'roadmap.unpublished': 'Публичная ссылка роадмапа снята',
+  'release_report.published': 'Отчёт по релизу открыт по ссылке',
+  'release_report.unpublished': 'Публичная ссылка отчёта снята',
+  'status_check.run': 'Запущены проверки статуса',
+  'domain.created': 'Заведён домен',
+  'domain.updated': 'Изменён домен',
+  'domain.deleted': 'Удалён домен',
+  'server.created': 'Заведён сервер',
+  'server.updated': 'Изменён сервер',
+  'server.deleted': 'Удалён сервер',
+  'doc_page.created': 'Создана страница документации',
+  'doc_page.updated': 'Изменена страница документации',
+  'doc_page.deleted': 'Удалена страница документации',
+  'agent_token.created': 'Создан токен агента',
+  'agent_token.updated': 'Изменён токен агента',
+  'agent_token.revoked': 'Отозван токен агента',
+  'agent.tool_called': 'Агент вызвал инструмент',
+  'user.updated': 'Изменена учётная запись',
   'grant.created': 'Выдан доступ',
   'grant.updated': 'Изменён доступ',
   'grant.revoked': 'Отозван доступ',
@@ -29,7 +80,6 @@ export const ACTION_LABELS: Record<string, string> = {
   'invitation.accepted': 'Приглашение принято',
   'password_reset.requested': 'Запрошен сброс пароля',
   'password_reset.completed': 'Пароль установлен',
-  'user.updated': 'Изменена учётная запись',
   'subject.revoked': 'Отозван доступ субъекту',
   'subject.restored': 'Доступ субъекта восстановлен',
   'superadmin.created': 'Создан суперадминистратор',

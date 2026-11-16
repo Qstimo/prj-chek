@@ -37,7 +37,19 @@ services:
       CAIRN_VAPID_PUBLIC_KEY: ${CAIRN_VAPID_PUBLIC_KEY:-}
       CAIRN_VAPID_PRIVATE_KEY: ${CAIRN_VAPID_PRIVATE_KEY:-}
       CAIRN_VAPID_SUBJECT: ${CAIRN_VAPID_SUBJECT:-}
+      # Автопроверки статуса. Переменные перечислены здесь все до одной:
+      # процесс в контейнере видит только то, что ему передали, а
+      # `CAIRN_STATUS_CHECK_INTERVAL_MINUTES` не передавалась — интервал в
+      # развёртывании всегда был пятнадцатиминутным, хотя README описывал
+      # настройку как рабочую.
+      CAIRN_STATUS_CHECK_INTERVAL_MINUTES: ${CAIRN_STATUS_CHECK_INTERVAL_MINUTES:-15}
       CAIRN_HEALTH_RECHECK_DELAY_SECONDS: ${CAIRN_HEALTH_RECHECK_DELAY_SECONDS:-30}
+      CAIRN_HEALTH_CHECK_TIMEOUT_SECONDS: ${CAIRN_HEALTH_CHECK_TIMEOUT_SECONDS:-10}
+      CAIRN_TLS_CHECK_TIMEOUT_SECONDS: ${CAIRN_TLS_CHECK_TIMEOUT_SECONDS:-10}
+      CAIRN_DNS_TIMEOUT_SECONDS: ${CAIRN_DNS_TIMEOUT_SECONDS:-10}
+      CAIRN_DNS_TRIES: ${CAIRN_DNS_TRIES:-2}
+      CAIRN_RDAP_TIMEOUT_SECONDS: ${CAIRN_RDAP_TIMEOUT_SECONDS:-10}
+      CAIRN_RDAP_CACHE_HOURS: ${CAIRN_RDAP_CACHE_HOURS:-24}
       NODE_ENV: production
     depends_on:
       postgres:

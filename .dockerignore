@@ -3,16 +3,25 @@
 # симлинки на локальный store) поверх результата `pnpm install` в слое выше —
 # сборка падала бы на битых ссылках.
 node_modules
+**/node_modules
 .next
+**/.next
 dist
+**/dist
 build
+**/build
 coverage
+**/coverage
 *.tsbuildinfo
+**/*.tsbuildinfo
 
 # Секреты не должны попадать в слои образа.
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 
 .git
 .claude

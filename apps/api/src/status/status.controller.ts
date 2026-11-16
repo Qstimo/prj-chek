@@ -43,13 +43,20 @@ export class StatusController {
     return this.status.summary(subject);
   }
 
-  /** Запускает все проверки сейчас. Право суперадмина, след в журнале. */
+  /**
+   * Запускает все проверки сейчас. Право суперадмина, след в журнале.
+   *
+   * `202`, а не `200`: прогон идёт в фоне, и ответ говорит лишь о том,
+   * что он начат. Результат приедет обновлением статуса — ждать его в
+   * этом запросе значит рвать его по таймауту. Идущий прогон отвечает
+   * `409`: второй поверх него не начинается.
+   */
   @Post('run')
   @HttpCode(202)
   @UseGuards(SessionGuard, SuperadminGuard)
-  async run(@CurrentSubject() subject: RequestSubject): Promise<{ ok: true }> {
+  async run(@CurrentSubject() subject: RequestSubject): Promise<{ accepted: true }> {
     await this.status.runNow(subject);
 
-    return { ok: true };
+    return { accepted: true };
   }
 }

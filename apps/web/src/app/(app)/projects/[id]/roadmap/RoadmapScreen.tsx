@@ -1,12 +1,20 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { AccessLevel, Section } from '@cairn/shared';
 import Link from 'next/link';
 import { useState } from 'react';
 
 import { useQueryRoadmap, useQuerySections } from '@/api/hooks';
+import { reportHrefOf } from '@/components/ReleaseReport';
 import { ReleaseSummary } from '@/components/ReleaseSummary';
-import { RoadmapTimeline } from '@/components/RoadmapTimeline';
+import {
+  formOf,
+  RoadmapTimeline,
+  TimelineControls,
+  TimelineHrefProvider,
+  useTimelineView,
+} from '@/components/RoadmapTimeline';
 
 import { CreateVersionPanel } from './CreateVersionPanel';
 import { RoadmapPublicLink } from './RoadmapPublicLink';
@@ -18,16 +26,23 @@ interface IProps {
   isSuperadmin: boolean;
 }
 
-/** Роадмап проекта: диаграмма, выезжающая панель версии, публичная ссылка. */
+/**
+ * Роадмап проекта: диаграмма, выезжающая панель версии, публичная ссылка.
+ *
+ * Вид и открытая версия живут в адресе (`?view`, `?last`, `?version`), а не
+ * в состоянии экрана: иначе на «покажи, где мы» нечего послать, а у панели
+ * версии нет ни ссылки, ни кнопки «назад». Панель создания — наоборот,
+ * состояние: ссылаться на пустую форму незачем.
+ */
 export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
   const roadmap = useQueryRoadmap(projectId);
   const sections = useQuerySections(projectId);
+  const view = useTimelineView();
 
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   if (roadmap.isPending || sections.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (roadmap.isError || sections.isError) {
@@ -44,10 +59,11 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
   const canRead = canWrite || level === AccessLevel.Read;
   const currentIndex = roadmap.data.stage.current !== null ? roadmap.data.stage.current - 1 : null;
   // Панель открыта, пока версия есть в данных: удалили в другой вкладке — закрылась.
-  const selectedIndex = roadmap.data.versions.findIndex(
-    (version) => version.id === selectedVersionId,
-  );
+  const selectedIndex = roadmap.data.versions.findIndex((version) => version.id === view.versionId);
   const selected = selectedIndex === -1 ? null : roadmap.data.versions[selectedIndex]!;
+  // Укладка из адреса, а без неё — умолчание по числу версий: ссылка без
+  // `?view` обязана открываться так же, как экран без переключений.
+  const form = view.form ?? formOf(roadmap.data.versions.length);
 
   return (
     <div className="space-y-6">
@@ -61,20 +77,42 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
         </p>
       )}
 
-      <RoadmapTimeline
-        versions={roadmap.data.versions}
-        currentIndex={currentIndex}
-        onSelect={(versionId) => {
-          setIsCreating(false);
-          setSelectedVersionId(versionId);
-        }}
-      />
+      {roadmap.data.versions.length > 0 && (
+        <TimelineControls
+          form={form}
+          isAll={view.last === null}
+          onChangeForm={view.setForm}
+          onChangeLast={view.setLast}
+        />
+      )}
+
+      {/*
+        Версия на полосе — ссылка на свой отчёт по релизу: Ctrl+клик
+        открывает его в новой вкладке, а адрес можно скопировать и
+        прислать. Простой щелчок по-прежнему открывает панель версии —
+        правка живёт в ней.
+      */}
+      <TimelineHrefProvider
+        hrefOf={(versionId) => reportHrefOf(projectId, versionId)}
+      >
+        <RoadmapTimeline
+          versions={roadmap.data.versions}
+          currentIndex={currentIndex}
+          form={form}
+          last={view.last}
+          onChangeLast={view.setLast}
+          onSelect={(versionId) => {
+            setIsCreating(false);
+            view.setVersionId(versionId);
+          }}
+        />
+      </TimelineHrefProvider>
 
       {canWrite && (
         <button
           type="button"
           onClick={() => {
-            setSelectedVersionId(null);
+            view.setVersionId(null);
             setIsCreating(true);
           }}
           className="rounded-md bg-primary px-4 py-2 text-primary-foreground"
@@ -93,7 +131,7 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
           platforms={platforms}
           isCurrent={selectedIndex === currentIndex}
           canWrite={canWrite}
-          onClose={() => setSelectedVersionId(null)}
+          onClose={() => view.setVersionId(null)}
         />
       )}
 

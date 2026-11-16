@@ -5,6 +5,7 @@ import {
   PlatformKind,
   Section,
   SubjectKind,
+  type EnvironmentDetail,
 } from '@cairn/shared';
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, asc, eq } from 'drizzle-orm';
@@ -709,6 +710,60 @@ describe('репозиторий окружений', () => {
       const [root] = await testDb.db.select().from(domains);
 
       expect(root?.owner).toBe('ООО Ромашка');
+    });
+
+    it('суперадмину отдаёт корни адресов с их идентификаторами', async () => {
+      // Переход в карточку корня возможен только по идентификатору записи
+      // реестра: имя адреса в адрес страницы не разрешается.
+      await testDb.db.transaction((tx) =>
+        repository.create(admin(), tx, projectId, {
+          name: 'Стейдж',
+          kind: EnvironmentKind.Staging,
+          domains: ['stage.example.com', 'api.shop.co.uk'],
+        }),
+      );
+
+      const [environment] = (await repository.findForProject(
+        admin(),
+        projectId,
+      )) as EnvironmentDetail[];
+      const [root] = await testDb.db.select().from(domains).orderBy(asc(domains.name));
+
+      expect(environment?.rootDomains.map((item) => item.name)).toEqual([
+        'example.com',
+        'shop.co.uk',
+      ]);
+      expect(environment?.rootDomains[0]?.id).toBe(root?.id);
+    });
+
+    it('не-суперадмину идентификаторы реестра наружу не отдаёт', async () => {
+      // Корневой домен межпроектен, и правит его только суперадмин:
+      // идентификатор его записи подрядчику не выходит (дизайн доводки, 5).
+      await grant(AccessLevel.Read);
+      await testDb.db.transaction((tx) =>
+        repository.create(admin(), tx, projectId, {
+          name: 'Стейдж',
+          kind: EnvironmentKind.Staging,
+          domains: ['stage.example.com'],
+        }),
+      );
+
+      const [environment] = (await repository.findForProject(
+        member(),
+        projectId,
+      )) as EnvironmentDetail[];
+
+      expect(environment?.rootDomains).toEqual([]);
+      // Сам адрес при этом на месте: он публично наблюдаем.
+      expect(environment?.domains).toEqual(['stage.example.com']);
+    });
+
+    it('корни отдаются и при чтении одного окружения', async () => {
+      const id = await createProd();
+
+      const environment = (await repository.findById(admin(), projectId, id)) as EnvironmentDetail;
+
+      expect(environment.rootDomains.map((item) => item.name)).toEqual(['example.com']);
     });
   });
 

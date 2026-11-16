@@ -12,6 +12,17 @@ export const STATUS_KEYS = {
 };
 
 /**
+ * Как часто перепрашивать статус и инциденты, в миллисекундах.
+ *
+ * Статус считается на сервере по расписанию (пятнадцать минут по
+ * умолчанию) и руками не задаётся, поэтому открытая страница без
+ * автообновления показывает прошлое: падение, которое уже закрылось, или
+ * зелёный адрес, который лежит десять минут. Минута — заметно чаще
+ * прогона, но не нагрузка: ответ собирается из уже посчитанных строк.
+ */
+export const STATUS_REFETCH_MS = 60_000;
+
+/**
  * Статус проекта. Отсутствие доступа к инфраструктуре — обычное
  * состояние экрана, а не ошибка загрузки: превращается в `null`.
  */
@@ -19,6 +30,7 @@ export function useQueryProjectStatus(projectId: string) {
   return useQuery({
     queryKey: STATUS_KEYS.forProject(projectId),
     retry: false,
+    refetchInterval: STATUS_REFETCH_MS,
     queryFn: async (): Promise<ProjectStatus | null> => {
       try {
         return await apiClient<ProjectStatus>(`/projects/${projectId}/status`);

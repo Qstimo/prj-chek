@@ -20,6 +20,39 @@ describe('EnvironmentList', () => {
     expect(screen.getByText('Прод')).toBeInTheDocument();
   });
 
+  it('передаёт карточке право на реестры', () => {
+    // Признак суперадмина проходит насквозь: решение «показывать ли
+    // ссылку в реестр» принимает карточка, а знает о праве экран.
+    render(
+      <EnvironmentList
+        environments={[
+          {
+            ...environment,
+            healthCheckPath: null,
+            notes: null,
+            server: {
+              id: '22222222-2222-2222-2222-222222222222',
+              name: 'hetzner-fsn-1',
+              owner: null,
+              host: null,
+              ip: null,
+              provider: null,
+              specs: null,
+            },
+            platforms: [],
+            createdAt: '2026-08-27T10:00:00.000Z',
+            updatedAt: '2026-08-27T10:00:00.000Z',
+          },
+        ]}
+        isSuperadmin
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'hetzner-fsn-1' })).toBeInTheDocument();
+  });
+
   it('объясняет пустую секцию', () => {
     render(<EnvironmentList environments={[]} onEdit={vi.fn()} onDelete={vi.fn()} />);
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { useState } from 'react';
 
 import { useQueryAudit } from '@/api/hooks/useQueryAudit';
@@ -32,7 +33,7 @@ export function AuditScreen() {
         />
       </div>
 
-      {audit.isPending && <p className="text-muted-foreground">Загрузка…</p>}
+      {audit.isPending && <Loader />}
 
       {audit.isError && (
         <p role="alert" className="text-destructive">

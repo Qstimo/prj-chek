@@ -1,18 +1,21 @@
-import type { AddressIncidents, DomainStatus, EnvironmentStatus } from '@cairn/shared';
+import type { DomainStatus, EnvironmentStatus } from '@cairn/shared';
 
-/** Пропсы списка статусов по окружениям. */
+/** Пропсы таблицы проверок по окружениям. */
 export interface IProps {
   /** Окружения проекта: здоровье каждого выведено из его адресов. */
   environments: EnvironmentStatus[];
   /** Адреса окружений с результатами всех трёх проверок. */
   addresses: DomainStatus[];
-  /** Инциденты адресов; пусто — истории ещё нет либо доступа к ней нет. */
-  incidents?: AddressIncidents[];
+  /**
+   * Открыть разбор адреса. Без обработчика адрес остаётся текстом.
+   *
+   * Мёртвая кнопка хуже текста: она обещает действие, которого нет.
+   */
+  onSelect?: (domainId: string) => void;
 }
 
 /** Пропсы строки адреса. */
 export interface IAddressProps {
   address: DomainStatus;
-  /** История падений этого адреса. */
-  incidents?: AddressIncidents;
+  onSelect?: (domainId: string) => void;
 }

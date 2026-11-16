@@ -188,10 +188,16 @@ describe('серверы по HTTP', () => {
 
     const status = await admin.get(`/projects/${projectId}/status`).expect(200);
 
-    expect(status.body.warnings).toContainEqual(
+    // Отдельным списком и только суперадмину: межпроектную машину правит
+    // он один, а индикатор проекта такое предупреждение не красит —
+    // красный, на который проекту нечем ответить, обесценивает красный,
+    // на который ответить можно.
+    expect(status.body.registryWarnings).toContainEqual(
       expect.objectContaining({ kind: 'server_expiring', subject: 'hetzner-fsn-1' }),
     );
-    expect(status.body.indicator).toBe('warning');
+    expect(status.body.warnings).toEqual([]);
+    // Ни один адрес проекта не проверялся — об этом индикатор и говорит.
+    expect(status.body.indicator).toBe('unknown');
   });
 
   it('карта показывает ребро между машиной и проектом', async () => {

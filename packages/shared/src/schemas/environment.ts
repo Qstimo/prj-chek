@@ -77,11 +77,37 @@ export const environmentServerSchema = z.object({
   specs: z.string().nullable(),
 });
 
+/**
+ * Корень одного из адресов окружения — ровно столько, сколько нужно ссылке.
+ *
+ * Владелец, регистратор и срок продления корня не отдаются: они
+ * принадлежат реестру доменов, то есть суперадмину, и у окружения им
+ * делать нечего. Здесь только имя и идентификатор, по которому и строится
+ * переход в карточку корня.
+ */
+export const environmentRootDomainSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+});
+
 /** Окружение на уровне чтения: машина, проверка, заметки и платформы. */
 export const environmentDetailSchema = environmentMetadataSchema.extend({
   healthCheckPath: z.string().nullable(),
   notes: z.string().nullable(),
   server: environmentServerSchema.nullable(),
+  /**
+   * Корни адресов окружения — только для суперадмина.
+   *
+   * Список, а не одно поле: адресов у окружения несколько, и корень у
+   * каждого свой — `stage.example.com` и `example.net` в одном окружении
+   * дают два разных корня, и выбирать из них «главный» было бы выдумкой.
+   *
+   * Остальным приходит пустой список: корневой домен — межпроектная
+   * сущность реестра, и идентификатор её записи наружу не выходит
+   * (дизайн доводки, раздел 5). Имена корней при этом не секрет — они
+   * выводятся из самих адресов, уже показанных в метаданных.
+   */
+  rootDomains: z.array(environmentRootDomainSchema),
   /**
    * Платформы, развёрнутые в этом окружении.
    *
@@ -154,6 +180,9 @@ export type EnvironmentDetail = z.infer<typeof environmentDetailSchema>;
 
 /** Машина, на которой живёт окружение. */
 export type EnvironmentServer = z.infer<typeof environmentServerSchema>;
+
+/** Корень адреса окружения. */
+export type EnvironmentRootDomain = z.infer<typeof environmentRootDomainSchema>;
 
 /** Данные для правки окружения. */
 export type EnvironmentUpdate = z.infer<typeof environmentUpdateSchema>;

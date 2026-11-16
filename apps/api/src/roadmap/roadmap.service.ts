@@ -1,8 +1,11 @@
 import {
   AuditSubjectKind,
+  type CheckpointCarryOver,
   type PlatformRelease,
   type PlatformReleaseSet,
+  type PublicReleaseReport,
   type PublicRoadmap,
+  type ReleaseReport,
   type RoadmapCheckpointCreate,
   type RoadmapCheckpointUpdate,
   type RoadmapResponse,
@@ -17,7 +20,11 @@ import { AuditAction, type AuditActor } from '../audit/audit.types';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import type { RoadmapCheckpointRow, RoadmapVersionRow } from '../db/schema';
-import { RoadmapRepository, type TaggedCheckpointRow } from './roadmap.repository';
+import {
+  RoadmapRepository,
+  type CarriedOverCheckpoint,
+  type TaggedCheckpointRow,
+} from './roadmap.repository';
 
 /**
  * Роадмап: изменения вместе с журналированием.
@@ -45,8 +52,80 @@ export class RoadmapService {
   }
 
   /** Токен публичной ссылки проекта либо `null`. */
-  async findPublicLink(projectId: string): Promise<string | null> {
-    return this.repository.findPublicLink(projectId);
+  async findPublicLink(subject: RequestSubject, projectId: string): Promise<string | null> {
+    return this.repository.findPublicLink(subject, projectId);
+  }
+
+  /** Отчёт по релизу версии. */
+  async report(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+  ): Promise<ReleaseReport> {
+    return this.repository.findReport(subject, projectId, versionId);
+  }
+
+  /** Публичный отчёт по токену. */
+  async publicReport(token: string): Promise<PublicReleaseReport | null> {
+    return this.repository.publicReport(token);
+  }
+
+  /** Токен публичной ссылки на отчёт версии либо `null`. */
+  async findReportLink(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+  ): Promise<string | null> {
+    return this.repository.findReportLink(subject, projectId, versionId);
+  }
+
+  /**
+   * Включает публикацию отчёта версии и возвращает токен.
+   *
+   * Своё действие журнала, а не общее с роадмапом: наружу открывается
+   * одна версия, и по журналу обязано быть видно какая. Сам токен в
+   * запись не попадает — журнал читают шире, чем рассылают ссылку.
+   */
+  async publishReport(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+  ): Promise<string> {
+    return this.db.transaction(async (tx) => {
+      const published = await this.repository.publishReport(subject, tx, projectId, versionId);
+
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.ReleaseReportPublished,
+        entityType: 'release_report_public_link',
+        // Отчёт опознаётся версией: своего идентификатора у него нет, а
+        // идентификатор строки ссылки после отключения ни на что не
+        // указывает.
+        entityId: versionId,
+        projectId,
+        metadata: { label: published.label },
+      });
+
+      return published.token;
+    });
+  }
+
+  /** Отключает публикацию отчёта: прежняя ссылка гаснет. */
+  async unpublishReport(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const unpublished = await this.repository.unpublishReport(subject, tx, projectId, versionId);
+
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.ReleaseReportUnpublished,
+        entityType: 'release_report_public_link',
+        entityId: versionId,
+        projectId,
+        metadata: { label: unpublished.label },
+      });
+    });
   }
 
   /** Создаёт версию. */
@@ -169,6 +248,46 @@ export class RoadmapService {
     });
   }
 
+  /**
+   * Переносит чекпоинт в другую версию.
+   *
+   * Своё действие журнала, а не `checkpoint.updated`: с общим действием
+   * перенос был бы неотличим от переименования, а метаданные записи на
+   * экране журнала не показываются.
+   */
+  async carryOverCheckpoint(
+    subject: RequestSubject,
+    projectId: string,
+    versionId: string,
+    checkpointId: string,
+    input: CheckpointCarryOver,
+  ): Promise<CarriedOverCheckpoint> {
+    return this.db.transaction(async (tx) => {
+      const carried = await this.repository.carryOverCheckpoint(
+        subject,
+        tx,
+        projectId,
+        versionId,
+        checkpointId,
+        input,
+      );
+
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.CheckpointCarriedOver,
+        entityType: 'checkpoint',
+        entityId: checkpointId,
+        projectId,
+        metadata: {
+          title: carried.checkpoint.title,
+          from: carried.fromLabel,
+          to: carried.toLabel,
+        },
+      });
+
+      return carried;
+    });
+  }
+
   /** Удаляет чекпоинт. */
   async removeCheckpoint(
     subject: RequestSubject,
@@ -259,7 +378,7 @@ export class RoadmapService {
   /** Включает публикацию и возвращает токен. */
   async publish(subject: RequestSubject, projectId: string): Promise<string> {
     return this.db.transaction(async (tx) => {
-      const token = await this.repository.publish(tx, projectId);
+      const token = await this.repository.publish(subject, tx, projectId);
 
       await this.audit.record(tx, actorOf(subject), {
         action: AuditAction.RoadmapPublished,
@@ -274,7 +393,7 @@ export class RoadmapService {
   /** Отключает публикацию: прежняя ссылка гаснет. */
   async unpublish(subject: RequestSubject, projectId: string): Promise<void> {
     await this.db.transaction(async (tx) => {
-      await this.repository.unpublish(tx, projectId);
+      await this.repository.unpublish(subject, tx, projectId);
 
       await this.audit.record(tx, actorOf(subject), {
         action: AuditAction.RoadmapUnpublished,

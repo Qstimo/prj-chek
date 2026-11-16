@@ -97,6 +97,88 @@ describe('сервис роадмапа', () => {
     expect(updated?.metadata).toMatchObject({ fields: ['isDone'] });
   });
 
+  it('перенос пишет своё действие с обозначениями «откуда» и «куда»', async () => {
+    // Общий checkpoint.updated сделал бы перенос неотличимым от
+    // переименования, а метаданные записи на экране журнала не видны.
+    const from = await service.createVersion(admin(), projectId, { label: 'v1.2' });
+    const to = await service.createVersion(admin(), projectId, { label: 'v1.3' });
+    const checkpoint = await service.createCheckpoint(admin(), projectId, from.id, {
+      title: 'Оплата',
+    });
+
+    await service.carryOverCheckpoint(admin(), projectId, from.id, checkpoint.id, {
+      targetVersionId: to.id,
+    });
+
+    const [entry] = await entriesOf(AuditAction.CheckpointCarriedOver);
+
+    expect(entry?.metadata).toMatchObject({ title: 'Оплата', from: 'v1.2', to: 'v1.3' });
+    expect(entry?.entityId).toBe(checkpoint.id);
+    expect(entry?.projectId).toBe(projectId);
+
+    // Переименованием перенос не прикидывается.
+    expect(await entriesOf(AuditAction.CheckpointUpdated)).toHaveLength(0);
+  });
+
+  it('отказ переноса не оставляет записи и не создаёт версию', async () => {
+    const from = await service.createVersion(admin(), projectId, { label: 'v1.2' });
+    await service.createVersion(admin(), projectId, { label: 'v1.3' });
+    const checkpoint = await service.createCheckpoint(admin(), projectId, from.id, {
+      title: 'Оплата',
+    });
+
+    await expect(
+      service.carryOverCheckpoint(admin(), projectId, from.id, checkpoint.id, {
+        newVersionLabel: 'v1.3',
+      }),
+    ).rejects.toThrow();
+
+    expect(await entriesOf(AuditAction.CheckpointCarriedOver)).toHaveLength(0);
+  });
+
+  it('публикация и отключение отчёта попадают в журнал своими действиями', async () => {
+    // Отдельные действия, а не общие с роадмапом: ссылка на отчёт
+    // раскрывает одну версию, и по журналу обязано быть видно какую.
+    const version = await service.createVersion(admin(), projectId, { label: 'v1.2' });
+
+    await service.publishReport(admin(), projectId, version.id);
+    await service.unpublishReport(admin(), projectId, version.id);
+
+    const [published] = await entriesOf(AuditAction.ReleaseReportPublished);
+    const [unpublished] = await entriesOf(AuditAction.ReleaseReportUnpublished);
+
+    expect(published?.entityType).toBe('release_report_public_link');
+    expect(published?.entityId).toBe(version.id);
+    expect(published?.projectId).toBe(projectId);
+    expect(published?.metadata).toMatchObject({ label: 'v1.2' });
+    expect(unpublished?.metadata).toMatchObject({ label: 'v1.2' });
+
+    // Публикацией роадмапа отчёт не прикидывается.
+    expect(await entriesOf(AuditAction.RoadmapPublished)).toHaveLength(0);
+  });
+
+  it('токен ссылки на отчёт в журнал не пишется', async () => {
+    // Токен — сам секрет ссылки: журнал читают шире, чем рассылают
+    // ссылку, и запись токена раскрыла бы отчёт всем читателям журнала.
+    const version = await service.createVersion(admin(), projectId, { label: 'v1.2' });
+
+    const token = await service.publishReport(admin(), projectId, version.id);
+
+    const [published] = await entriesOf(AuditAction.ReleaseReportPublished);
+
+    expect(token.length).toBeGreaterThanOrEqual(32);
+    expect(JSON.stringify(published)).not.toContain(token);
+  });
+
+  it('отказ публикации отчёта не оставляет записи', async () => {
+    const version = await service.createVersion(admin(), projectId, { label: 'v1.2' });
+    await service.publishReport(admin(), projectId, version.id);
+
+    await expect(service.publishReport(admin(), projectId, version.id)).rejects.toThrow();
+
+    expect(await entriesOf(AuditAction.ReleaseReportPublished)).toHaveLength(1);
+  });
+
   it('публикация и отключение попадают в журнал', async () => {
     await service.publish(admin(), projectId);
     await service.unpublish(admin(), projectId);

@@ -9,6 +9,10 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'CAIRN — реестр проектов',
   description: 'Где проект развёрнут, чем настроен и на какой стадии находится',
+  icons: {
+    icon: { url: '/cairn-raccoon.png', type: 'image/png' },
+    apple: '/cairn-raccoon.png',
+  },
 };
 
 /** Корневая разметка. Язык интерфейса — русский, без локализации (спека 9). */

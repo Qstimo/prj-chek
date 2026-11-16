@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import {
   useMutationDeleteDomain,
   useMutationRemoveEnvironmentDomain,
@@ -15,7 +16,7 @@ export function DomainsScreen() {
   const removeSubdomain = useMutationRemoveEnvironmentDomain();
 
   if (domains.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (domains.isError) {

@@ -32,9 +32,47 @@ const server: Server = {
 
 const domains = ['example.com'];
 
+const roots = [{ id: '44444444-4444-4444-4444-444444444444', name: 'example.com' }];
+
 describe('проекция окружения', () => {
+  it('на уровне чтения отдаёт корни адресов списком', () => {
+    const projected = environmentProjection(
+      row,
+      domains,
+      AccessLevel.Read,
+      server,
+      [],
+      roots,
+    ) as EnvironmentDetail;
+
+    expect(projected.rootDomains).toEqual(roots);
+  });
+
+  it('без корней отдаёт пустой список, а не отсутствие поля', () => {
+    // Пустой список означает «идентификаторы реестра вам не выходят»:
+    // отсутствующее поле веб прочитал бы как сломанный ответ.
+    const projected = environmentProjection(
+      row,
+      domains,
+      AccessLevel.Read,
+      server,
+      [],
+      [],
+    ) as EnvironmentDetail;
+
+    expect(projected.rootDomains).toEqual([]);
+  });
+
+  it('на уровне метаданных не раскрывает корни вовсе', () => {
+    // Идентификатор записи реестра не выходит наружу тем более на уровне,
+    // где не видно даже машины.
+    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server, [], roots);
+
+    expect('rootDomains' in projected).toBe(false);
+  });
+
   it('на уровне метаданных показывает имя, вид и домены', () => {
-    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server, []);
+    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server, [], []);
 
     expect(projected).toEqual({
       id: row.id,
@@ -46,7 +84,7 @@ describe('проекция окружения', () => {
 
   it('на уровне метаданных не раскрывает машину вовсе', () => {
     // Домен виден каждому, кто откроет сайт; машина и её владелец — нет.
-    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server, []);
+    const projected = environmentProjection(row, domains, AccessLevel.Metadata, server, [], []);
 
     expect('server' in projected).toBe(false);
     expect('notes' in projected).toBe(false);
@@ -58,6 +96,7 @@ describe('проекция окружения', () => {
       domains,
       AccessLevel.Read,
       server,
+      [],
       [],
     ) as EnvironmentDetail;
 
@@ -80,6 +119,7 @@ describe('проекция окружения', () => {
       AccessLevel.Read,
       server,
       [],
+      [],
     ) as EnvironmentDetail;
 
     expect(projected.server).not.toHaveProperty('notes');
@@ -93,6 +133,7 @@ describe('проекция окружения', () => {
       AccessLevel.Read,
       null,
       [],
+      [],
     ) as EnvironmentDetail;
 
     expect(projected.server).toBeNull();
@@ -104,6 +145,7 @@ describe('проекция окружения', () => {
       ['stage.example.com'],
       AccessLevel.Read,
       server,
+      [],
       [],
     ) as EnvironmentDetail;
 
@@ -120,6 +162,7 @@ describe('проекция окружения', () => {
       domains,
       AccessLevel.Read,
       server,
+      [],
       [],
     ) as EnvironmentDetail;
 

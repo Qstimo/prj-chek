@@ -1,18 +1,23 @@
 import {
   AccessLevel,
   Section,
+  checkpointCarryOverSchema,
   linkTitleRequestSchema,
   platformReleaseSetSchema,
   roadmapCheckpointCreateSchema,
   roadmapCheckpointUpdateSchema,
   roadmapVersionCreateSchema,
   roadmapVersionUpdateSchema,
+  type CheckpointCarryOver,
+  type CheckpointCarryOverResult,
   type LinkTitleRequest,
   type LinkTitleResponse,
   type PlatformRelease,
   type PlatformReleaseSet,
   type PublicLink,
+  type PublicReleaseReport,
   type PublicRoadmap,
+  type ReleaseReport,
   type RoadmapCheckpoint,
   type RoadmapCheckpointCreate,
   type RoadmapCheckpointUpdate,
@@ -162,6 +167,47 @@ export class RoadmapController {
     };
   }
 
+  /**
+   * Переносит чекпоинт в другую версию.
+   *
+   * Своя ручка, а не `PATCH` с новым `versionId`: «найти или создать
+   * целевую версию» обязано быть атомарным, и перенос обязан быть
+   * отличим от переименования в журнале.
+   *
+   * Тело необязательно: пустое означает «следующая открытая версия».
+   */
+  @Post('versions/:versionId/checkpoints/:checkpointId/carry-over')
+  async carryOverCheckpoint(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Param('checkpointId', ParseUUIDPipe) checkpointId: string,
+    @Body(new ZodValidationPipe(checkpointCarryOverSchema)) body: CheckpointCarryOver,
+  ): Promise<CheckpointCarryOverResult> {
+    const carried = await this.roadmap.carryOverCheckpoint(
+      subject,
+      projectId,
+      versionId,
+      checkpointId,
+      body,
+    );
+
+    return {
+      checkpoint: {
+        id: carried.checkpoint.id,
+        title: carried.checkpoint.title,
+        url: carried.checkpoint.url,
+        isDone: carried.checkpoint.isDone,
+        position: carried.checkpoint.position,
+        platformIds: carried.checkpoint.platformIds,
+      },
+      // Идентификатор берётся из самого чекпоинта: после переноса он и
+      // есть версия-получатель, и второго источника правды тут нет.
+      targetVersion: { id: carried.checkpoint.versionId, label: carried.toLabel },
+      versionCreated: carried.versionCreated,
+    };
+  }
+
   /** Удаляет чекпоинт. */
   @Delete('versions/:versionId/checkpoints/:checkpointId')
   @HttpCode(204)
@@ -205,15 +251,72 @@ export class RoadmapController {
     await this.roadmap.clearRelease(subject, projectId, versionId, platformId);
   }
 
-  /** Показывает ссылку читающим: им её и рассылать. */
+  /**
+   * Отчёт по релизу версии.
+   *
+   * Ручки «одна версия» в секции нет: отчёт — третья проекция поверх той
+   * же пачки данных, что роадмап, и своего адреса у версии не появляется.
+   */
+  @Get('versions/:versionId/report')
+  async report(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<ReleaseReport> {
+    return this.roadmap.report(subject, projectId, versionId);
+  }
+
+  /** Показывает ссылку на отчёт читающим: им её и рассылать. */
+  @Get('versions/:versionId/report/public-link')
+  async findReportLink(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<PublicLink> {
+    const token = await this.roadmap.findReportLink(subject, projectId, versionId);
+
+    if (!token) {
+      throw new NotFoundException('Отчёт не опубликован');
+    }
+
+    return linkForms(token, REPORT_PATH);
+  }
+
+  /** Публикует отчёт версии. Раскрытие наружу — решение суперадмина. */
+  @Post('versions/:versionId/report/public-link')
+  @UseGuards(SessionGuard, SuperadminGuard)
+  async publishReport(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<PublicLink> {
+    return linkForms(await this.roadmap.publishReport(subject, projectId, versionId), REPORT_PATH);
+  }
+
+  /** Отключает публикацию отчёта: прежняя ссылка гаснет. */
+  @Delete('versions/:versionId/report/public-link')
+  @HttpCode(204)
+  @UseGuards(SessionGuard, SuperadminGuard)
+  async unpublishReport(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<void> {
+    await this.roadmap.unpublishReport(subject, projectId, versionId);
+  }
+
+  /**
+   * Показывает ссылку читающим: им её и рассылать.
+   *
+   * Право проверяет выборка, а не контроллер (ТЗ 4.1): субъект уходит в
+   * репозиторий, и проверку нельзя забыть.
+   */
   @Get('public-link')
   async findPublicLink(
     @CurrentSubject() subject: RequestSubject,
     @Param('projectId', ParseUUIDPipe) projectId: string,
   ): Promise<PublicLink> {
-    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Read);
-
-    const token = await this.roadmap.findPublicLink(projectId);
+    const token = await this.roadmap.findPublicLink(subject, projectId);
 
     if (!token) {
       throw new NotFoundException('Роадмап не опубликован');
@@ -262,9 +365,41 @@ export class PublicRoadmapController {
   }
 }
 
-/** Ссылка в обеих формах: токен и готовый адрес страницы. */
-function linkForms(token: string): PublicLink {
+/**
+ * Публичный отчёт по релизу: чтение по токену без сессии.
+ *
+ * Своим контроллером, а не ручкой рядом с публичным роадмапом: у отчёта
+ * свой токен и своя таблица ссылок, и общий адрес сделал бы один токен
+ * годным для двух выдач.
+ */
+@Controller('public/roadmap-report')
+export class PublicReleaseReportController {
+  constructor(private readonly roadmap: RoadmapService) {}
+
+  /** Отчёт по токену. Мусорный и отключённый неразличимы. */
+  @Get(':token')
+  async get(@Param('token') token: string): Promise<PublicReleaseReport> {
+    const report = await this.roadmap.publicReport(token);
+
+    if (!report) {
+      throw new NotFoundException();
+    }
+
+    return report;
+  }
+}
+
+/**
+ * Ссылка в обеих формах: токен и готовый адрес страницы.
+ *
+ * Путь страницы аргументом: публичных страниц стало две, и второй
+ * экземпляр этой сборки разошёлся бы с первым при переносе адреса.
+ */
+function linkForms(token: string, path = 'roadmap'): PublicLink {
   const base = process.env.CAIRN_WEB_URL ?? 'http://localhost:3000';
 
-  return { token, url: `${base}/roadmap/${token}` };
+  return { token, url: `${base}/${path}/${token}` };
 }
+
+/** Путь публичной страницы отчёта на вебе. */
+const REPORT_PATH = 'roadmap/report';

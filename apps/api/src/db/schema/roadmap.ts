@@ -2,6 +2,7 @@ import { RoadmapVersionState } from '@cairn/shared';
 import {
   boolean,
   date,
+  foreignKey,
   index,
   integer,
   pgEnum,
@@ -67,10 +68,38 @@ export const roadmapCheckpoints = pgTable(
     url: text('url'),
     isDone: boolean('is_done').notNull().default(false),
     position: integer('position').notNull(),
+    /**
+     * Версия, из которой чекпоинт перенесли.
+     *
+     * Нужна отчёту по релизу: «перенесено в v1.3» в отчёте v1.2 иначе не
+     * собрать — после переноса чекпоинт этой версии уже не принадлежит, и
+     * никакого другого следа о нём в ней не остаётся.
+     *
+     * Ни исполнителя, ни оценки, ни даты у чекпоинта от этого не
+     * появляется (ТЗ 1.4): меняется только принадлежность версии, и
+     * колонка помнит, откуда он приехал.
+     *
+     * `set null` при удалении, а не `restrict`: исчезла версия-источник —
+     * исчезла и пометка, но сам чекпоинт остаётся на месте. `restrict`
+     * сделал бы версию неудаляемой из-за чужой строки.
+     *
+     * Ссылка объявлена ниже с явным именем: имя по соглашению drizzle
+     * («таблица_колонка_таблица_колонка_fk») выходит за предел 63 байтов,
+     * PostgreSQL молча его обрезает, и в снапшоте оставалось бы одно имя,
+     * а в базе — другое.
+     */
+    carriedFromVersionId: uuid('carried_from_version_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('roadmap_checkpoints_version_idx').on(table.versionId)],
+  (table) => [
+    index('roadmap_checkpoints_version_idx').on(table.versionId),
+    foreignKey({
+      columns: [table.carriedFromVersionId],
+      foreignColumns: [roadmapVersions.id],
+      name: 'roadmap_checkpoints_carried_from_fk',
+    }).onDelete('set null'),
+  ],
 );
 
 /**
@@ -92,6 +121,34 @@ export const roadmapPublicLinks = pgTable(
   (table) => [
     unique('roadmap_public_links_project').on(table.projectId),
     unique('roadmap_public_links_token').on(table.token),
+  ],
+);
+
+/**
+ * Публичная ссылка на отчёт по релизу одной версии (дизайн доводки, 6).
+ *
+ * Своя таблица, а не колонка у `roadmap_public_links`: отчёт раскрывают
+ * по одной версии — ту, что выпустили, — и общая со всем роадмапом ссылка
+ * раскрывала бы заодно все остальные версии и планы.
+ *
+ * Ссылка висит на версии, а не на проекте: проект публикует отчёты по
+ * разным версиям независимо, и уникум «одна ссылка на версию» это и
+ * означает. Токен хранится открыто: его показывают владельцу повторно и
+ * рассылают.
+ */
+export const roadmapReportPublicLinks = pgTable(
+  'roadmap_report_public_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => roadmapVersions.id, { onDelete: 'restrict' }),
+    token: text('token').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('roadmap_report_public_links_version').on(table.versionId),
+    unique('roadmap_report_public_links_token').on(table.token),
   ],
 );
 

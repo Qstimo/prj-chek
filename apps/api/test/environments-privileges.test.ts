@@ -55,6 +55,23 @@ describe('права роли приложения на окружения', () 
     await expect(
       testDb.appDb.execute(sql`SELECT count(*) FROM roadmap_public_links`),
     ).resolves.toBeDefined();
+    // Отчёт по релизу публикуется своей ссылкой, и это отдельная таблица
+    // со своей парной миграцией прав.
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM roadmap_report_public_links`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT carried_from_version_id FROM roadmap_checkpoints`),
+    ).resolves.toBeDefined();
+  });
+
+  it('роль приложения читает и пишет падения адресов и подписки на пуши', async () => {
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM address_incidents`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM push_subscriptions`),
+    ).resolves.toBeDefined();
   });
 
   it('роль приложения читает и пишет статусы адресов', async () => {
@@ -63,6 +80,13 @@ describe('права роли приложения на окружения', () 
     ).resolves.toBeDefined();
     await expect(
       testDb.appDb.execute(sql`SELECT health, latency_ms, health_error FROM domain_statuses`),
+    ).resolves.toBeDefined();
+    // Колонки разбора проверок: табличный GRANT покрывает их сам, но
+    // забытая структурная миграция иначе всплыла бы только в бою.
+    await expect(
+      testDb.appDb.execute(
+        sql`SELECT health_code, redirect_to, resolved_ips, tls_trusted, tls_code FROM domain_statuses`,
+      ),
     ).resolves.toBeDefined();
   });
 

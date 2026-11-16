@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader } from '@/components/Loader';
 import { AccessLevel, Section, type DocPageCreate } from '@cairn/shared';
 import { useState } from 'react';
 
@@ -37,7 +38,7 @@ export function DocsScreen({ projectId }: IProps) {
   const page = useQueryDocPage(projectId, selectedId);
 
   if (docs.isPending || sections.isPending) {
-    return <p className="text-muted-foreground">Загрузка…</p>;
+    return <Loader />;
   }
 
   if (docs.isError || sections.isError) {
@@ -102,7 +103,7 @@ export function DocsScreen({ projectId }: IProps) {
         }}
       />
 
-      {selectedId && page.isPending && <p className="text-muted-foreground">Загрузка страницы…</p>}
+      {selectedId && page.isPending && <Loader label="Загрузка страницы…" />}
 
       {selectedContent && !isEditing && (
         <article className="space-y-3 rounded-md border border-border p-4">

@@ -13,6 +13,11 @@ export function AddressIncidents({ incidents }: IProps) {
     return null;
   }
 
+  // Открытое падение входит в счёт окна, но лежит отдельно от закрытых:
+  // без поправки на него подвал «показаны последние N» вылезал бы на
+  // полной истории.
+  const shown = incidents.past.length + (incidents.open ? 1 : 0);
+
   return (
     <div className="text-xs text-muted-foreground">
       {incidents.open && (
@@ -21,8 +26,11 @@ export function AddressIncidents({ incidents }: IProps) {
 
       {incidents.past.length > 0 && (
         <details>
-          {/* Счёт — из `pastTotal`, а не из длины списка: список усечён сервером. */}
-          <summary className="cursor-pointer">{fallCountTextOf(incidents.pastTotal)}</summary>
+          {/* Счёт — из `fallsInWindow`, а не из длины списка: список усечён
+              сервером, и счёт по нему застывал бы на пределе выдачи. */}
+          <summary className="cursor-pointer">
+            {fallCountTextOf(incidents.fallsInWindow, incidents.windowDays)}
+          </summary>
           <ul className="space-y-0.5 pl-4">
             {incidents.past.map((incident) => (
               <li key={incident.id}>
@@ -31,7 +39,7 @@ export function AddressIncidents({ incidents }: IProps) {
               </li>
             ))}
           </ul>
-          {incidents.pastTotal > incidents.past.length && (
+          {incidents.fallsInWindow > shown && (
             <p className="pl-4">Показаны последние {incidents.past.length}.</p>
           )}
         </details>

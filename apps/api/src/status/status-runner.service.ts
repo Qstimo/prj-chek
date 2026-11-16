@@ -6,14 +6,16 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
+import { sql } from 'drizzle-orm';
 
 import { HealthState, ProjectLifecycle } from '@cairn/shared';
 
+import type { Database } from '../db/db.types';
 import { IncidentsService } from '../incidents/incidents.service';
 import { ServersRepository } from '../servers/servers.repository';
 import { decideMachine } from '../servers/server-discovery';
 import { resolveAddress } from './checkers/address.checker';
-import { checkDomainExpiry } from './checkers/domain.checker';
+import { checkDomainExpiry, type DomainExpiryResult } from './checkers/domain.checker';
 import { checkHealth, type HealthResult } from './checkers/health.checker';
 import { checkTls } from './checkers/tls.checker';
 import { INCIDENT_NOTIFIER, type IncidentNotifier } from './notifier';
@@ -34,8 +36,37 @@ export interface RunOptions {
   isManual?: boolean;
 }
 
+/** Чем кончился запрос на прогон. */
+export enum StatusRunOutcome {
+  /** Прогон состоялся целиком. */
+  Done = 'done',
+  /** Прогон уже идёт — этот не начался и ничего не изменил. */
+  Busy = 'busy',
+  /** Прогон принят и идёт в фоне: ответа о его итоге не будет. */
+  Accepted = 'accepted',
+}
+
 /** Токен внедрения набора проверщиков. */
 export const STATUS_CHECKERS = Symbol('STATUS_CHECKERS');
+
+/**
+ * Токен соединения, на котором держится замок прогона.
+ *
+ * Отдельно от рабочего подключения, потому что замок занимает соединение
+ * на весь прогон: в боевом пуле (десяток) одного не жалко, а в тестах
+ * рабочий пул состоит из единственного соединения — занять его значило бы
+ * запереть сам прогон. В развёртывании это тот же пул, что и `DATABASE`.
+ */
+export const STATUS_RUN_LOCK_DB = Symbol('STATUS_RUN_LOCK_DB');
+
+/**
+ * Ключ замка прогона: класс «CAIRN», объект «прогон проверок».
+ *
+ * Пара чисел, а не одно: так ключ читается глазами и не столкнётся с
+ * чужим замком, если он у системы когда-нибудь появится.
+ */
+const LOCK_CLASS = 0x4341_4952;
+const LOCK_OBJECT = 1;
 
 /** Боевой набор проверщиков. */
 export const REAL_CHECKERS: Checkers = {
@@ -52,13 +83,34 @@ export const REAL_CHECKERS: Checkers = {
  * `CAIRN_STATUS_CHECK_INTERVAL_MINUTES` (по умолчанию 15, `0` — выключено:
  * так в тестах и локальной разработке). Фоновые прогоны в журнал действий
  * не пишутся: это не действия субъекта.
+ *
+ * Первый прогон идёт сразу при подъёме приложения, а не через интервал:
+ * иначе после каждого деплоя статус устаревал на четверть часа, а только
+ * что вписанный адрес до того же срока оставался «неизвестно».
+ *
+ * Два прогона одновременно не идут: оба читают открытые инциденты как
+ * пустые, и либо второй ловит нарушение частичного уникума, либо
+ * успевший получить `up` закрывает только что открытый инцидент ложным
+ * «отвечает снова». Замок лежит в базе (`pg_try_advisory_xact_lock`), а
+ * не в памяти процесса: в памяти он не защитил бы от второго экземпляра
+ * API за прокси.
  */
 @Injectable()
 export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(StatusRunnerService.name);
   private timer: NodeJS.Timeout | null = null;
+  /**
+   * Идущий прогон, если он есть.
+   *
+   * Признак в памяти рядом с замком в базе, а не вместо него: замок
+   * узнаётся только запросом, а ручке «Проверить сейчас» ответ нужен
+   * сразу и без похода в базу. Поле же даёт ответ «занято» в том
+   * процессе, где прогон и идёт, — а это обычный случай.
+   */
+  private current: Promise<StatusRunOutcome> | null = null;
 
   constructor(
+    @Inject(STATUS_RUN_LOCK_DB) private readonly lockDb: Database,
     private readonly repository: StatusRepository,
     private readonly servers: ServersRepository,
     @Optional() @Inject(STATUS_CHECKERS) private readonly checkers: Checkers = REAL_CHECKERS,
@@ -75,17 +127,106 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    this.timer = setInterval(() => {
-      void this.runAll().catch((cause) => this.logger.error(`Прогон проверок упал: ${cause}`));
-    }, minutes * 60 * 1000);
+    // Прогон при старте не держит подъём приложения: оно обязано начать
+    // отвечать на запросы, не дожидаясь обхода сети.
+    this.start();
+
+    this.timer = setInterval(() => this.start(), minutes * 60 * 1000);
     // Процесс не должен жить ради таймера.
     this.timer.unref();
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     if (this.timer) {
       clearInterval(this.timer);
     }
+
+    // Гасимся не посреди прогона: иначе замок снялся бы вместе с
+    // соединением, а записи половины адресов не стало бы вовсе.
+    await this.settled();
+  }
+
+  /**
+   * Запускает прогон в фоне и сразу отвечает, принят ли он.
+   *
+   * Для ручки «Проверить сейчас»: она объявлена `202`, а прогон идёт
+   * минуты — запрос браузера рвался по таймауту при живом прогоне.
+   * Признак занятости проверяется и выставляется синхронно, поэтому два
+   * одновременных запроса не могут оба получить «принято».
+   */
+  start(options: RunOptions = {}): StatusRunOutcome {
+    if (this.current) {
+      return StatusRunOutcome.Busy;
+    }
+
+    void this.claim(options).catch((cause) =>
+      this.logger.error(`Прогон проверок упал: ${cause}`),
+    );
+
+    return StatusRunOutcome.Accepted;
+  }
+
+  /**
+   * Прогоняет проверки и ждёт их конца.
+   *
+   * Отдаёт {@link StatusRunOutcome.Busy}, если прогон уже идёт — здесь
+   * или в другом экземпляре API.
+   */
+  async runAll(options: RunOptions = {}): Promise<StatusRunOutcome> {
+    if (this.current) {
+      return StatusRunOutcome.Busy;
+    }
+
+    return this.claim(options);
+  }
+
+  /** Ждёт конца идущего прогона; без прогона — возвращается сразу. */
+  async settled(): Promise<void> {
+    await this.current;
+  }
+
+  /**
+   * Занимает признак прогона синхронно и отпускает его в конце.
+   *
+   * Синхронно — обязательное условие: признак, выставленный после первого
+   * `await`, два одновременных запроса обошли бы оба.
+   */
+  private claim(options: RunOptions): Promise<StatusRunOutcome> {
+    const running = this.locked(options).finally(() => {
+      this.current = null;
+    });
+
+    this.current = running;
+
+    return running;
+  }
+
+  /**
+   * Берёт замок прогона и под ним обходит адреса.
+   *
+   * Транзакция здесь — держатель замка, а не единица записи: сеансовый
+   * `pg_try_advisory_lock` принадлежит соединению, а соединение из пула
+   * нам не принадлежит — снимать замок пришлось бы на чужом. Замок
+   * уровня транзакции снимается её концом, чем бы прогон ни кончился:
+   * исключением, падением процесса, обрывом связи. Записи прогона идут
+   * своими соединениями и этой транзакции не касаются.
+   */
+  private async locked(options: RunOptions): Promise<StatusRunOutcome> {
+    return this.lockDb.transaction(async (tx) => {
+      const rows = (await tx.execute(
+        sql`select pg_try_advisory_xact_lock(${LOCK_CLASS}, ${LOCK_OBJECT}) as locked`,
+      )) as unknown as { locked: boolean }[];
+
+      if (rows[0]?.locked !== true) {
+        this.logger.log('Прогон проверок уже идёт: этот пропущен.');
+
+        return StatusRunOutcome.Busy;
+      }
+
+      await this.sweep(options);
+
+      return StatusRunOutcome.Done;
+    });
   }
 
   /**
@@ -103,35 +244,43 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    * Последовательно: масштаб системы — десятки проектов, и простота
    * важнее скорости (ТЗ 9). Падение одного адреса не прерывает обход.
    */
-  async runAll(options: RunOptions = {}): Promise<void> {
+  private async sweep(options: RunOptions): Promise<void> {
     const targets = await this.repository.listTargets();
     const health = new Map<string, HealthResult>();
     const suspects: AddressTarget[] = [];
+    const registryByRoot = new Map<string, DomainExpiryResult>();
 
     for (const address of targets.addresses) {
       try {
         const result = await this.checkers.checkHealth(address.name, address.healthCheckPath);
         const resolved = await this.checkers.resolveAddress(address.name);
         const tls = await this.checkers.checkTls(address.name);
-        const registry = await this.checkers.checkDomainExpiry(address.name);
-
-        health.set(address.id, result);
-
-        if (result.health === HealthState.Down) {
-          suspects.push(address);
-        }
+        const registry = await this.registryOf(address.rootDomain, registryByRoot);
 
         await this.repository.upsertAddressStatus(address.id, {
           health: result.health,
           latencyMs: result.latencyMs,
           healthError: result.error,
-          resolvedIp: resolved.ip,
+          healthCode: result.code,
+          redirectTo: result.redirectTo,
+          resolvedIps: resolved.ips,
           resolveError: resolved.error,
           tlsValidTo: tls.validTo,
+          tlsTrusted: tls.trusted,
+          tlsCode: tls.code,
           tlsError: tls.error,
           registryExpiresAt: registry.expiresAt,
           registryError: registry.error,
         });
+
+        // Сначала база, потом память. Обратный порядок открывал инцидент
+        // по падению, запись которого не состоялась: человек на экране
+        // видел прежнее состояние, а пуш говорил о новом.
+        health.set(address.id, result);
+
+        if (result.health === HealthState.Down) {
+          suspects.push(address);
+        }
       } catch (cause) {
         this.logger.warn(`Проверка адреса ${address.name} упала: ${cause}`);
       }
@@ -140,6 +289,32 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
     await this.recheck(suspects, health, options.isManual ?? false);
     await this.adoptMachines();
     await this.settleIncidents(targets.addresses, health);
+  }
+
+  /**
+   * Срок регистрации корня: один вопрос реестру на корень за прогон.
+   *
+   * Реестр знает корень, а не адрес, и у корня один срок на все свои
+   * поддомены: три адреса одного домена — это одна оплата. Проверщик
+   * помнит ответ и между прогонами, но память прогона нужна и без неё —
+   * кэш выключаем настройкой, а правило «один вопрос на корень» от
+   * настройки зависеть не должно.
+   */
+  private async registryOf(
+    rootDomain: string,
+    asked: Map<string, DomainExpiryResult>,
+  ): Promise<DomainExpiryResult> {
+    const remembered = asked.get(rootDomain);
+
+    if (remembered) {
+      return remembered;
+    }
+
+    const answer = await this.checkers.checkDomainExpiry(rootDomain);
+
+    asked.set(rootDomain, answer);
+
+    return answer;
   }
 
   /**
@@ -164,14 +339,27 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
     for (const address of suspects) {
       try {
         const result = await this.checkers.checkHealth(address.name, address.healthCheckPath);
-
-        health.set(address.id, result);
-        await this.repository.updateAddressHealth(address.id, {
+        const written = await this.repository.updateAddressHealth(address.id, {
           health: result.health,
           latencyMs: result.latencyMs,
           healthError: result.error,
+          healthCode: result.code,
+          redirectTo: result.redirectTo,
         });
+
+        if (!written) {
+          // Адрес сняли между фазами. Память следует базе: сводить
+          // инцидент по вердикту, которого в базе нет, значит обещать
+          // человеку экран, на котором ничего не будет.
+          this.logger.warn(`Статус адреса ${address.name} писать некуда: строки больше нет`);
+          health.delete(address.id);
+          continue;
+        }
+
+        health.set(address.id, result);
       } catch (cause) {
+        // Вердикт первой фазы остаётся в силе: он записан, и экран
+        // показывает именно его.
         this.logger.warn(`Переспрос адреса ${address.name} упал: ${cause}`);
       }
     }
@@ -214,6 +402,9 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
         projectName: address.projectName,
         environmentName: address.environmentName,
         isPaused: address.lifecycle === ProjectLifecycle.Paused,
+        // Архивные адреса сюда и не доезжают — их отсекают цели обхода, —
+        // но правило об инциденте одно, и обойти его прогон не вправе.
+        isArchived: address.lifecycle === ProjectLifecycle.Archived,
         health: health.get(address.id)?.health ?? null,
         healthError: health.get(address.id)?.error ?? null,
       })),
@@ -280,12 +471,11 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    * беспорядок реестра, а не состояние чужого проекта.
    */
   private warnAboutDuplicates(
-    addresses: { resolvedIp: string | null }[],
+    addresses: { resolvedIps: string[] }[],
     machinesByIp: Map<string, { id: string }[]>,
   ): void {
     const duplicated = addresses
-      .map((address) => address.resolvedIp)
-      .filter((ip): ip is string => ip !== null)
+      .flatMap((address) => address.resolvedIps)
       .find((ip) => (machinesByIp.get(ip) ?? []).length > 1);
 
     if (duplicated) {

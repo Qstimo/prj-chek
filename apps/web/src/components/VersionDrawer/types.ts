@@ -41,6 +41,19 @@ export type ReleaseOp =
   | { platformId: string; kind: 'set'; input: PlatformReleaseSet }
   | { platformId: string; kind: 'clear' };
 
+/**
+ * Исход переноса чекпоинта в другую версию.
+ *
+ * Размеченное объединение, а не исключение: «открытой версии нет» — не
+ * ошибка, а вопрос к человеку, и панель обязана отличать его от отказа
+ * по существу. Разбор ответа сервера остаётся у того, кто зовёт API:
+ * панель о кодах HTTP не знает.
+ */
+export type CarryOverOutcome =
+  | { kind: 'done'; targetLabel: string; versionCreated: boolean }
+  | { kind: 'needs-label' }
+  | { kind: 'failed'; message: string };
+
 /** Действия уровня записи. Отсутствие блока — панель только на просмотр. */
 export interface IVersionActions {
   onToggleCheckpoint: (checkpointId: string, isDone: boolean) => void;
@@ -54,6 +67,18 @@ export interface IVersionActions {
   onEditCheckpoint?: (checkpointId: string, input: RoadmapCheckpointCreate) => void;
   /** Чтение заголовка задачи по ссылке: подставляется в пустую формулировку. */
   onReadCheckpointTitle?: (url: string) => Promise<string | null>;
+  /**
+   * Перенос чекпоинта в другую версию.
+   *
+   * Обещание, а не «выстрелил и забыл»: по исходу панель либо называет
+   * версию-получателя, либо спрашивает обозначение новой и повторяет
+   * перенос с ним. Необязательно, как и правка: фабрики действий в тестах
+   * не обязаны знать о каждой возможности панели.
+   */
+  onCarryOverCheckpoint?: (
+    checkpointId: string,
+    newVersionLabel?: string,
+  ) => Promise<CarryOverOutcome>;
   onDeleteCheckpoint: (checkpointId: string) => void;
   /**
    * Сохранение черновика: патч версии и операции над клетками выпусков.
@@ -81,6 +106,23 @@ export interface IProps {
    * и не требует доступа к «Инфо».
    */
   platforms?: Platform[];
+  /**
+   * Обозначение версии, в которую уедет чекпоинт по умолчанию.
+   *
+   * Данные, а не действие: кнопка обязана ответить «куда» до нажатия.
+   * `null` или отсутствие означает «цель посчитает сервер» — тогда кнопка
+   * говорит о следующей версии словами.
+   */
+  carryOverTargetLabel?: string | null;
+  /**
+   * Адрес страницы отчёта по релизу этой версии.
+   *
+   * Снаружи, а не собирается здесь: панель не знает ни проекта, ни того,
+   * внутреннее это приложение или публичная страница. Без адреса ссылки
+   * нет вовсе — на публичной странице роадмапа внутренних адресов не
+   * бывает.
+   */
+  reportHref?: string;
   isOpen: boolean;
   onClose: () => void;
   actions?: IVersionActions;

@@ -3,6 +3,8 @@ import {
   HealthState,
   ProjectLifecycle,
   Section,
+  StatusCheckCode,
+  StatusWarningKind,
   type DomainStatus,
   type EnvironmentStatus,
   type ProjectStatus,
@@ -10,7 +12,7 @@ import {
   type StatusWarning,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { asc, eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray, ne } from 'drizzle-orm';
 
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
@@ -38,9 +40,24 @@ export interface AddressStatusInput {
   health: HealthState;
   latencyMs: number | null;
   healthError: string | null;
-  resolvedIp: string | null;
+  /** Что увидела проверка доступности; `null` — чистый `2xx`. */
+  healthCode: StatusCheckCode | null;
+  /** Куда ведёт перенаправление, если оно было. */
+  redirectTo: string | null;
+  /**
+   * Все адреса, в которые разрешилось имя.
+   *
+   * Множество, а не выбранный адрес: выбор канонического делает
+   * репозиторий — привязка у окружения одна, и правило выбора должно быть
+   * одно. Пустой список при непустом `resolveError` означает «не узнали
+   * сейчас», и прежнее знание не затирается.
+   */
+  resolvedIps: string[];
   resolveError: string | null;
   tlsValidTo: Date | null;
+  /** Приняла ли система сертификат; `null` — рукопожатия не было. */
+  tlsTrusted: boolean | null;
+  tlsCode: StatusCheckCode | null;
   tlsError: string | null;
   registryExpiresAt: Date | null;
   registryError: string | null;
@@ -50,6 +67,16 @@ export interface AddressStatusInput {
 export interface AddressTarget {
   id: string;
   name: string;
+  /**
+   * Корень, из которого растёт адрес: его и спрашивают у реестра.
+   *
+   * Реестры знают только то, за что платят, и пока вопрос задавался по
+   * имени адреса, у каждого поддомена висело вечное «реестр ответил
+   * HTTP 404». Корень берётся связью `environment_domains.domainId`, а не
+   * разбором имени: список зон с именами третьего уровня у нас закрытый
+   * и неполон по устройству, а эта связь — то, что сказал человек.
+   */
+  rootDomain: string;
   healthCheckPath: string | null;
   /** Проект адреса: по нему считаются адресаты уведомления. */
   projectId: string;
@@ -64,6 +91,8 @@ export interface AddressHealthInput {
   health: HealthState;
   latencyMs: number | null;
   healthError: string | null;
+  healthCode: StatusCheckCode | null;
+  redirectTo: string | null;
 }
 
 /** Окружение со своими адресами: цель второго прохода прогона. */
@@ -71,7 +100,14 @@ export interface DiscoveryTarget {
   environmentId: string;
   environmentName: string;
   serverId: string | null;
-  addresses: { name: string; resolvedIp: string | null }[];
+  /**
+   * Адреса окружения со всеми адресами разрешения.
+   *
+   * Множество, а не выбранный адрес: правило о машине решает по нему —
+   * имя с двумя адресами не говорит, какая из машин та самая, а имя за
+   * CDN не говорит о машине вовсе.
+   */
+  addresses: { name: string; resolvedIps: string[] }[];
 }
 
 /**
@@ -88,14 +124,33 @@ export class StatusRepository {
     private readonly access: AccessService,
   ) {}
 
-  /** Пишет результат проверок адреса: одна строка на адрес. */
+  /**
+   * Пишет результат проверок адреса: одна строка на адрес.
+   *
+   * Выбор канонического адреса из множества делается здесь, а не в
+   * прогоне: привязка у окружения одна, и выбирать её надо так, чтобы
+   * выбор не менялся от прогона к прогону — наименьший из упорядоченного
+   * множества выполняет это условие сам.
+   *
+   * Отказ разрешения не затирает прежние адреса: потерянный ответ DNS не
+   * повод объявить, что имя никуда не смотрит. Причина при этом
+   * записывается — человек увидит и адрес, и то, что сейчас его не
+   * подтвердили.
+   */
   async upsertAddressStatus(domainId: string, input: AddressStatusInput): Promise<void> {
+    const { resolvedIps, ...rest } = input;
+    const checkedAt = new Date();
+    const resolution = { resolvedIp: canonicalIpOf(resolvedIps), resolvedIps };
+    // Отказ при пустом множестве — «не узнали сейчас», а не «никуда не
+    // смотрит»: прежнюю запись о разрешении такой прогон не трогает.
+    const keepsResolution = resolvedIps.length === 0 && input.resolveError !== null;
+
     await this.db
       .insert(domainStatuses)
-      .values({ domainId, ...input, checkedAt: new Date() })
+      .values({ domainId, ...rest, ...resolution, checkedAt })
       .onConflictDoUpdate({
         target: domainStatuses.domainId,
-        set: { ...input, checkedAt: new Date() },
+        set: { ...rest, ...(keepsResolution ? {} : resolution), checkedAt },
       });
   }
 
@@ -106,15 +161,21 @@ export class StatusRepository {
    * health: TLS, разрешение имени и срок регистрации за полминуты не
    * меняются, а перезапись их пустыми затёрла бы работу первой фазы.
    *
-   * Строки может не оказаться — первая фаза могла упасть до записи. Тогда
-   * обновление не затронет ничего, и это верно: итог переспроса всё равно
-   * лежит в памяти прогона, и инцидент будет сведён по нему.
+   * Строки может не оказаться — адрес сняли между фазами прогона. Тогда
+   * обновление не затронет ничего, и об этом говорит возвращаемое
+   * значение: молчаливый `UPDATE` читался вызывающим как успех, и прогон
+   * сводил инцидент по вердикту, которого в базе нет.
+   *
+   * @returns была ли строка статуса, которую обновили.
    */
-  async updateAddressHealth(domainId: string, input: AddressHealthInput): Promise<void> {
-    await this.db
+  async updateAddressHealth(domainId: string, input: AddressHealthInput): Promise<boolean> {
+    const updated = await this.db
       .update(domainStatuses)
       .set({ ...input, checkedAt: new Date() })
-      .where(eq(domainStatuses.domainId, domainId));
+      .where(eq(domainStatuses.domainId, domainId))
+      .returning({ id: domainStatuses.id });
+
+    return updated.length > 0;
   }
 
   /**
@@ -126,12 +187,19 @@ export class StatusRepository {
    * Проект приезжает вместе с адресом: сведение инцидентов решает по его
    * жизненному циклу, а текст уведомления называет проект и окружение, —
    * отдельный запрос за теми же полями был бы лишним.
+   *
+   * Архивные проекты в цели не попадают: архив никто не чинит и не
+   * поднимает, а снятый домен мёртвого проекта открывал инцидент и будил
+   * человека пушем каждые четверть часа. Пауза, в отличие от архива,
+   * проверяется: вернуться из неё обещано, и о том, что стенд поднялся,
+   * человеку сказать есть что.
    */
   async listTargets(): Promise<{ addresses: AddressTarget[] }> {
     const addresses = await this.db
       .select({
         id: environmentDomains.id,
         name: environmentDomains.name,
+        rootDomain: domains.name,
         healthCheckPath: environments.healthCheckPath,
         projectId: projects.id,
         projectName: projects.name,
@@ -141,6 +209,10 @@ export class StatusRepository {
       .from(environmentDomains)
       .innerJoin(environments, eq(environments.id, environmentDomains.environmentId))
       .innerJoin(projects, eq(projects.id, environments.projectId))
+      // Корень есть у каждого адреса: его заводит сам факт появления
+      // адреса в окружении, поэтому соединение внутреннее.
+      .innerJoin(domains, eq(domains.id, environmentDomains.domainId))
+      .where(ne(projects.lifecycle, ProjectLifecycle.Archived))
       .orderBy(asc(environmentDomains.name));
 
     return { addresses };
@@ -159,7 +231,7 @@ export class StatusRepository {
         environmentName: environments.name,
         serverId: environments.serverId,
         name: environmentDomains.name,
-        resolvedIp: domainStatuses.resolvedIp,
+        resolvedIps: domainStatuses.resolvedIps,
       })
       .from(environmentDomains)
       .innerJoin(environments, eq(environments.id, environmentDomains.environmentId))
@@ -176,14 +248,23 @@ export class StatusRepository {
         addresses: [],
       };
 
-      target.addresses.push({ name: row.name, resolvedIp: row.resolvedIp });
+      // Строка, записанная до появления колонки, множества не знает:
+      // пустой список — честный ответ «адресов не видели».
+      target.addresses.push({ name: row.name, resolvedIps: row.resolvedIps ?? [] });
       grouped.set(row.environmentId, target);
     }
 
     return [...grouped.values()];
   }
 
-  /** Агрегированный статус проекта. Право — метаданные инфраструктуры. */
+  /**
+   * Агрегированный статус проекта. Право — метаданные инфраструктуры.
+   *
+   * Предупреждения реестров собираются только суперадмину: имя машины и
+   * имя корня принадлежат реестрам, закрытым его правом целиком, и
+   * уровень «метаданные» на секции проекта к ним доступа не даёт. Запрос
+   * за ними в этом случае не делается вовсе — нечего и фильтровать.
+   */
   async statusForProject(subject: RequestSubject, projectId: string): Promise<ProjectStatus> {
     await this.access.requireLevel(
       subject,
@@ -192,7 +273,7 @@ export class StatusRepository {
       AccessLevel.Metadata,
     );
 
-    return this.buildStatus(projectId);
+    return this.buildStatus(projectId, { withRegistry: subject.isSuperadmin });
   }
 
   /**
@@ -200,6 +281,12 @@ export class StatusRepository {
    *
    * Проекты без такого уровня опускаются молча: их статус — часть
    * секции, на которую доступа нет.
+   *
+   * Предупреждений реестров в сводке нет ни у кого, включая суперадмина:
+   * у строки сводки нет для них отдельного места, а индикатор они не
+   * красят — показать их здесь значило бы вернуть красный, на который
+   * проекту нечем ответить. Сроки машин и корней живут на своих экранах,
+   * у тех, кто их и продлевает.
    */
   async summary(subject: RequestSubject): Promise<StatusSummaryRow[]> {
     const visibleIds = await this.access.visibleProjectIds(subject);
@@ -217,7 +304,7 @@ export class StatusRepository {
         .from(projects)
         .where(eq(projects.id, projectId))
         .limit(1);
-      const status = await this.buildStatus(projectId);
+      const status = await this.buildStatus(projectId, { withRegistry: false });
 
       rows.push({
         projectId,
@@ -309,7 +396,7 @@ export class StatusRepository {
           : null,
         addresses: addresses
           .filter((address) => address.environmentId === row.environment.id)
-          .map((address) => ({ name: address.name, resolvedIp: address.resolvedIp })),
+          .map((address) => ({ name: address.name, resolvedIps: address.resolvedIps })),
       }),
     );
   }
@@ -338,8 +425,17 @@ export class StatusRepository {
     return new Map(rows.map((row) => [row.id, row.ip]));
   }
 
-  /** Собирает агрегат проекта из таблиц статусов. */
-  private async buildStatus(projectId: string): Promise<ProjectStatus> {
+  /**
+   * Собирает агрегат проекта из таблиц статусов.
+   *
+   * @param options.withRegistry собирать ли предупреждения реестров —
+   * сроки машин, сроки корней, расхождение привязки. Решение о праве
+   * принято выше: здесь только работа.
+   */
+  private async buildStatus(
+    projectId: string,
+    options: { withRegistry: boolean },
+  ): Promise<ProjectStatus> {
     const [project] = await this.db
       .select({ lifecycle: projects.lifecycle })
       .from(projects)
@@ -369,9 +465,16 @@ export class StatusRepository {
       health: row.status?.health ?? null,
       latencyMs: row.status?.latencyMs ?? null,
       healthError: row.status?.healthError ?? null,
+      healthCode: row.status?.healthCode ?? null,
+      redirectTo: row.status?.redirectTo ?? null,
       resolvedIp: row.status?.resolvedIp ?? null,
+      // Строка, записанная до появления колонки, множества не знает:
+      // пустой список — честный ответ «адресов не видели».
+      resolvedIps: row.status?.resolvedIps ?? [],
       resolveError: row.status?.resolveError ?? null,
       tlsValidTo: row.status?.tlsValidTo?.toISOString() ?? null,
+      tlsTrusted: row.status?.tlsTrusted ?? null,
+      tlsCode: row.status?.tlsCode ?? null,
       tlsError: row.status?.tlsError ?? null,
       registryExpiresAt: row.status?.registryExpiresAt?.toISOString() ?? null,
       registryError: row.status?.registryError ?? null,
@@ -386,16 +489,78 @@ export class StatusRepository {
     );
 
     const now = new Date();
-    const serverWarnings = await this.serverWarningsFor(environmentRows, now);
-    const domainWarnings = await this.domainWarningsFor(environmentIds, now);
-    const machineWarnings = await this.machineWarningsFor(environmentRows, domainStatusesView);
-    const registryWarnings = [...serverWarnings, ...domainWarnings, ...machineWarnings];
+    const lifecycle = project!.lifecycle;
+    const registryWarnings = options.withRegistry
+      ? [
+          ...(await this.serverWarningsFor(environmentRows, now)),
+          ...(await this.domainWarningsFor(environmentIds, now)),
+          ...(await this.machineWarningsFor(environmentRows, domainStatusesView)),
+        ]
+      : [];
 
     return {
-      indicator: indicatorOf(project!.lifecycle, domainStatusesView, now, registryWarnings),
+      // Предупреждения реестра в индикатор не входят: межпроектную машину
+      // и корневой домен правит суперадмин, и проекту по такому
+      // предупреждению делать нечего.
+      indicator: indicatorOf(lifecycle, observedOf(lifecycle, domainStatusesView), now),
       environments: environmentStatusesView,
       domains: domainStatusesView,
-      warnings: [...warningsOf(domainStatusesView, now), ...registryWarnings],
+      warnings: addressWarningsOf(lifecycle, domainStatusesView, now),
+      registryWarnings,
     };
   }
+}
+
+/**
+ * Предупреждения по адресам с оглядкой на жизненный цикл проекта.
+ *
+ * Жизненный цикл — это заявленное намерение, и предупреждение обязано
+ * ему не противоречить. Приостановленный стенд погашен нарочно: красное
+ * «не отвечает» рядом с индикатором «Приостановлен» спорило с ним же в
+ * одном ответе. Об истекающем сертификате того же стенда сказать по-
+ * прежнему есть что — это не авария, а срок, который придётся продлить
+ * до возвращения.
+ *
+ * Архив молчит целиком: его адреса больше не проверяются (см.
+ * {@link StatusRepository.listTargets}), и показывать предупреждения по
+ * последнему известному состоянию значило бы просить о действии там, где
+ * действовать уже никто не станет.
+ */
+function addressWarningsOf(
+  lifecycle: ProjectLifecycle,
+  domains: DomainStatus[],
+  now: Date,
+): StatusWarning[] {
+  if (lifecycle === ProjectLifecycle.Archived) {
+    return [];
+  }
+
+  const warnings = warningsOf(domains, now);
+
+  return lifecycle === ProjectLifecycle.Paused
+    ? warnings.filter((warning) => warning.kind !== StatusWarningKind.HealthDown)
+    : warnings;
+}
+
+/**
+ * Адреса, по которым индикатору позволено судить.
+ *
+ * У архива — ни одного: его никто не проверяет, и последнее известное
+ * «не отвечает» так и осталось бы красным навсегда. Индикатор в этом
+ * случае отвечает «неизвестно» — ровно то, что система об архиве и
+ * знает. Пауза отсекается самим правилом индикатора раньше адресов.
+ */
+function observedOf(lifecycle: ProjectLifecycle, domains: DomainStatus[]): DomainStatus[] {
+  return lifecycle === ProjectLifecycle.Archived ? [] : domains;
+}
+
+/**
+ * Какой из адресов имени считать тем самым.
+ *
+ * Наименьший: привязка у окружения одна, а резолверы ротируют порядок
+ * ответа — пока бралась первая запись, привязка плясала от прогона к
+ * прогону вместе с ней. Правило живёт здесь одно на запись и на чтение.
+ */
+function canonicalIpOf(ips: string[]): string | null {
+  return [...ips].sort()[0] ?? null;
 }

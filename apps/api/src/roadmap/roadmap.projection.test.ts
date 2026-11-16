@@ -30,6 +30,7 @@ const checkpoints: RoadmapCheckpointRow[] = [
     url: 'https://tracker.example.com/TASK-17',
     isDone: true,
     position: 1,
+    carriedFromVersionId: null,
     createdAt: new Date('2026-08-28T10:00:00Z'),
     updatedAt: new Date('2026-08-28T10:00:00Z'),
   },
@@ -40,6 +41,7 @@ const checkpoints: RoadmapCheckpointRow[] = [
     url: null,
     isDone: false,
     position: 2,
+    carriedFromVersionId: null,
     createdAt: new Date('2026-08-28T10:00:00Z'),
     updatedAt: new Date('2026-08-28T10:00:00Z'),
   },
@@ -57,6 +59,8 @@ describe('проекция версии', () => {
       releasedDate: null,
       position: 1,
       progress: { done: 1, total: 2 },
+      unfinished: 1,
+      hasUnfinishedOnRelease: false,
     });
     expect(JSON.stringify(projected)).not.toContain('Готов вход');
   });
@@ -80,6 +84,55 @@ describe('проекция версии', () => {
       done: 0,
       total: 0,
     });
+  });
+});
+
+describe('выпущено, но не закрыто', () => {
+  const released = { ...version, state: RoadmapVersionState.Released };
+
+  it('считает незакрытые чекпоинты', () => {
+    expect(versionProjection(version, checkpoints, [], AccessLevel.Metadata).unfinished).toBe(1);
+  });
+
+  it('у выпущенной версии с незакрытыми поднимает признак', () => {
+    // Отказа нет: выпуск разрешён, расхождение лишь помечается.
+    const projected = versionProjection(released, checkpoints, [], AccessLevel.Metadata);
+
+    expect(projected.hasUnfinishedOnRelease).toBe(true);
+  });
+
+  it('у выпущенной версии без незакрытых признак снят', () => {
+    const closed = checkpoints.map((checkpoint) => ({ ...checkpoint, isDone: true }));
+
+    expect(
+      versionProjection(released, closed, [], AccessLevel.Metadata).hasUnfinishedOnRelease,
+    ).toBe(false);
+  });
+
+  it('у версии в работе незакрытые расхождением не считаются', () => {
+    // Незакрытый чекпоинт в работе — это норма, а не расхождение.
+    const projected = versionProjection(version, checkpoints, [], AccessLevel.Metadata);
+
+    expect(projected.unfinished).toBe(1);
+    expect(projected.hasUnfinishedOnRelease).toBe(false);
+  });
+
+  it('признак виден на уровне метаданных, а не только чтения', () => {
+    // Публичная схема расширяет метаданные, и уровень «метаданные»
+    // обязан видеть расхождение, не видя формулировок.
+    const metadata = versionProjection(released, checkpoints, [], AccessLevel.Metadata);
+    const read = versionProjection(released, checkpoints, [], AccessLevel.Read);
+
+    expect(metadata.hasUnfinishedOnRelease).toBe(true);
+    expect(read.hasUnfinishedOnRelease).toBe(true);
+    expect(JSON.stringify(metadata)).not.toContain('Готов вход');
+  });
+
+  it('версия без чекпоинтов расхождения не имеет', () => {
+    const projected = versionProjection(released, [], [], AccessLevel.Metadata);
+
+    expect(projected.unfinished).toBe(0);
+    expect(projected.hasUnfinishedOnRelease).toBe(false);
   });
 });
 

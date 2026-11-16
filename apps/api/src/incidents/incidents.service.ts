@@ -13,6 +13,8 @@ export interface AddressState {
   projectName: string;
   environmentName: string;
   isPaused: boolean;
+  /** Проект в архиве: его никто не чинит и не поднимает. */
+  isArchived: boolean;
   health: HealthState | null;
   healthError: string | null;
 }
@@ -66,6 +68,7 @@ export class IncidentsService {
       const action = decideIncident({
         health: state.health,
         isPaused: state.isPaused,
+        isArchived: state.isArchived,
         hasOpenIncident: open.has(state.domainId),
       });
 
@@ -73,16 +76,19 @@ export class IncidentsService {
         continue;
       }
 
+      if (action === IncidentAction.Open) {
+        const incident = await this.openUnlessRaced(state);
+
+        if (incident) {
+          events.push(eventOf(IncidentEventKind.Opened, state, incident));
+        }
+
+        continue;
+      }
+
       try {
         // Отказ одного адреса не прерывает обход — то же правило, что
         // у прогона проверок.
-        if (action === IncidentAction.Open) {
-          const incident = await this.repository.open(state.domainId, state.healthError);
-
-          events.push(eventOf(IncidentEventKind.Opened, state, incident));
-          continue;
-        }
-
         const incident = await this.repository.resolve(state.domainId, now);
 
         if (incident) {
@@ -94,6 +100,39 @@ export class IncidentsService {
     }
 
     return events;
+  }
+
+  /**
+   * Открывает инцидент, разбирая проигранную гонку как гонку.
+   *
+   * Защита от повтора лежит в базе — частичный уникум «один открытый
+   * инцидент на адрес», — и его нарушение означает ровно одно: инцидент
+   * уже открыл другой прогон, он же и разослал уведомление. Пока это
+   * гасилось в `logger.warn`, состояние «кто-то успел раньше» было
+   * неотличимо от настоящего отказа записи; поэтому открытый инцидент
+   * перечитывается, и событие не выдаётся — второй пуш по одному и тому
+   * же падению хуже, чем ни одного.
+   *
+   * @returns строку инцидента, если его открыл именно этот прогон.
+   */
+  private async openUnlessRaced(
+    state: AddressState,
+  ): Promise<{ startedAt: Date; resolvedAt: Date | null; cause: string | null } | null> {
+    try {
+      return await this.repository.open(state.domainId, state.healthError);
+    } catch (cause) {
+      const raced = (await this.repository.openByDomain()).get(state.domainId);
+
+      if (raced) {
+        this.logger.log(`Инцидент адреса ${state.name} уже открыт другим прогоном.`);
+
+        return null;
+      }
+
+      this.logger.warn(`Инцидент адреса ${state.name} не записан: ${cause}`);
+
+      return null;
+    }
   }
 }
 

@@ -1,8 +1,13 @@
 import { z } from 'zod';
 
-import { RoadmapVersionState } from '../enums';
+import { PlatformReleaseState, RoadmapVersionState } from '../enums';
 import { dayDateSchema } from './day-date';
-import { platformIdsSchema, platformReleaseSchema, releaseSummaryRowSchema } from './platform';
+import {
+  platformIdsSchema,
+  platformReleaseSchema,
+  platformSchema,
+  releaseSummaryRowSchema,
+} from './platform';
 
 /** Адрес задачи во внешнем трекере. */
 const checkpointUrlSchema = z.string().trim().url().max(2000).nullable();
@@ -50,6 +55,23 @@ export const roadmapVersionMetadataSchema = z.object({
   releasedDate: dayDateSchema,
   position: z.number().int().positive(),
   progress: roadmapProgressSchema,
+  /**
+   * Незакрытые чекпоинты версии. Вычисляется, не хранится (ТЗ 3.5).
+   *
+   * Поле рядом с прогрессом, а не «total − done» на вызывающей стороне:
+   * признак расхождения считается из него же, и два разных вычитания
+   * разошлись бы в тот момент, когда прогресс станет считаться иначе.
+   */
+  unfinished: z.number().int().nonnegative(),
+  /**
+   * Версия выпущена, а незакрытые чекпоинты остались.
+   *
+   * Это пометка, а не отказ: выпуск с незакрытыми чекпоинтами разрешён —
+   * решение владельца продукта. Признак живёт в метаданных: публичная
+   * выдача расширяет их, и уровень «метаданные» тоже обязан видеть
+   * расхождение.
+   */
+  hasUnfinishedOnRelease: z.boolean(),
 });
 
 /** Версия на уровне чтения: плюс формулировки чекпоинтов и выпуски. */
@@ -118,6 +140,57 @@ export const roadmapCheckpointUpdateSchema = z
   })
   .strict();
 
+/**
+ * Код отказа переноса: открытой версии нет, а обозначения не дали.
+ *
+ * Код, а не разбор текста ответа: по нему интерфейс спрашивает обозначение
+ * новой версии и повторяет перенос. Фразу можно переписать, код — нет.
+ */
+export const CARRY_OVER_NEEDS_LABEL = 'carry_over_needs_label';
+
+/**
+ * Перенос чекпоинта в другую версию.
+ *
+ * Три формы одного действия: указанная версия, новая версия с заданным
+ * обозначением и пустое тело — «следующая открытая». Обе формы сразу
+ * отвергаются: сервер не решает за человека, какое из двух намерений
+ * главнее.
+ *
+ * Своего `versionId` в теле нет: исходная версия приходит адресом, и
+ * второе место для неё разошлось бы с первым.
+ */
+export const checkpointCarryOverSchema = z
+  .preprocess(
+    // Тела может не быть вовсе: «следующая открытая версия» — это запрос
+    // без тела, и разборщик HTTP отдаёт в этом случае `undefined`, а не
+    // пустой объект. Отсутствие тела обязано значить то же, что `{}`.
+    (body) => body ?? {},
+    z
+      .object({
+        targetVersionId: z.string().uuid().optional(),
+        newVersionLabel: z.string().trim().min(1).max(100).optional(),
+      })
+      .strict(),
+  )
+  .refine(
+    (body) => !(body.targetVersionId !== undefined && body.newVersionLabel !== undefined),
+    'Укажите либо существующую версию, либо обозначение новой',
+  );
+
+/**
+ * Результат переноса: куда уехал чекпоинт.
+ *
+ * Обозначение версии-получателя в ответе обязательно: без него интерфейсу
+ * нечего показать в «перенесено в v1.3», а второй запрос за роадмапом
+ * показал бы состояние уже после чужих правок.
+ */
+export const checkpointCarryOverResultSchema = z.object({
+  checkpoint: roadmapCheckpointSchema,
+  targetVersion: z.object({ id: z.string().uuid(), label: z.string() }),
+  /** Версия-получатель создана этим же действием. */
+  versionCreated: z.boolean(),
+});
+
 /** Запрос заголовка по ссылке на задачу. */
 export const linkTitleRequestSchema = z
   .object({ url: z.string().trim().url().max(2000) })
@@ -159,6 +232,91 @@ export const publicRoadmapSchema = z.object({
   summary: z.array(releaseSummaryRowSchema),
 });
 
+/**
+ * Выпуск платформы в отчёте по релизу: строка на каждую платформу проекта.
+ *
+ * Пустое состояние означает «идёт вместе с версией», а не «неизвестно»:
+ * строки выпуска у такой платформы нет вовсе, и отчёт обязан сказать это
+ * словами. Молчание о платформе читалось бы как «про неё забыли».
+ *
+ * Платформа целиком, а не ссылкой: отчёту нужен и `kind` — у серверной
+ * платформы модерации не бывает, и говорить о ней в этих словах нельзя.
+ */
+export const reportReleaseSchema = z.object({
+  platform: platformSchema,
+  state: z.nativeEnum(PlatformReleaseState).nullable(),
+  releasedDate: dayDateSchema,
+  buildLabel: z.string().nullable(),
+});
+
+/**
+ * Чекпоинт в отчёте: то же, что в роадмапе, плюс след переноса.
+ *
+ * `carriedFrom` — обозначение версии, из которой чекпоинт приехал, а не её
+ * идентификатор: отчёт читают глазами, и второй запрос за обозначением
+ * показал бы роадмап уже после чужих правок.
+ */
+export const reportCheckpointSchema = roadmapCheckpointSchema.extend({
+  carriedFrom: z.string().nullable(),
+});
+
+/**
+ * Чекпоинт, уехавший из версии в другую.
+ *
+ * Отдельный список, а не признак у чекпоинта версии: после переноса
+ * чекпоинт этой версии уже не принадлежит, и в её собственном списке его
+ * нет. Без этого списка отчёт умолчал бы о том, что из релиза выпало.
+ *
+ * `carriedTo` обязательно: строка попадает в список ровно потому, что
+ * известна версия-получатель.
+ */
+export const carriedOutCheckpointSchema = roadmapCheckpointSchema.extend({
+  carriedTo: z.string(),
+});
+
+/**
+ * Отчёт по релизу версии (дизайн доводки, раздел 6).
+ *
+ * Третья проекция поверх тех же данных, что роадмап: паспорт версии,
+ * выпуски по платформам, сводка «что в релизе, что в пути», чекпоинты с
+ * отметкой готовности и следы переносов в обе стороны.
+ *
+ * Имён окружений и их здоровья здесь нет и быть не может: роадмап не
+ * читает окружения — это секция «Инфраструктура» (инвариант ТЗ 4.1).
+ *
+ * Текст собран на сервере и приходит готовым в двух видах: иначе внутренняя
+ * страница, публичная страница и буфер обмена разошлись бы при первой же
+ * правке правила сборки.
+ */
+export const releaseReportSchema = z.object({
+  version: roadmapVersionMetadataSchema,
+  releases: z.array(reportReleaseSchema),
+  summary: z.array(releaseSummaryRowSchema),
+  checkpoints: z.array(reportCheckpointSchema),
+  carriedOut: z.array(carriedOutCheckpointSchema),
+  /** Тот же отчёт разметкой Markdown. */
+  markdown: z.string(),
+  /** Тот же отчёт без разметки — для буфера обмена и писем. */
+  text: z.string(),
+});
+
+/**
+ * Публичный отчёт по релизу: то же, без ссылок на задачи.
+ *
+ * Схема строгая на всех уровнях: лишнее поле — ошибка, а не молчаливое
+ * отбрасывание. `url: null` для неё такая же ошибка, как настоящий адрес, —
+ * проекция обязана поле **не добавлять**, а не обнулять, и строгость это
+ * показывает вместо того, чтобы скрыть.
+ */
+export const publicReleaseReportSchema = releaseReportSchema
+  .extend({
+    projectName: z.string(),
+    version: roadmapVersionMetadataSchema.strict(),
+    checkpoints: z.array(reportCheckpointSchema.omit({ url: true }).strict()),
+    carriedOut: z.array(carriedOutCheckpointSchema.omit({ url: true }).strict()),
+  })
+  .strict();
+
 /** Чекпоинт. */
 export type RoadmapCheckpoint = z.infer<typeof roadmapCheckpointSchema>;
 
@@ -189,6 +347,12 @@ export type RoadmapCheckpointCreate = z.infer<typeof roadmapCheckpointCreateSche
 /** Правка чекпоинта. */
 export type RoadmapCheckpointUpdate = z.infer<typeof roadmapCheckpointUpdateSchema>;
 
+/** Перенос чекпоинта. */
+export type CheckpointCarryOver = z.infer<typeof checkpointCarryOverSchema>;
+
+/** Результат переноса чекпоинта. */
+export type CheckpointCarryOverResult = z.infer<typeof checkpointCarryOverResultSchema>;
+
 /** Запрос заголовка по ссылке. */
 export type LinkTitleRequest = z.infer<typeof linkTitleRequestSchema>;
 
@@ -206,3 +370,18 @@ export type PublicVersion = z.infer<typeof publicVersionSchema>;
 
 /** Публичный роадмап. */
 export type PublicRoadmap = z.infer<typeof publicRoadmapSchema>;
+
+/** Выпуск платформы в отчёте. */
+export type ReportRelease = z.infer<typeof reportReleaseSchema>;
+
+/** Чекпоинт в отчёте. */
+export type ReportCheckpoint = z.infer<typeof reportCheckpointSchema>;
+
+/** Чекпоинт, уехавший в другую версию. */
+export type CarriedOutCheckpoint = z.infer<typeof carriedOutCheckpointSchema>;
+
+/** Отчёт по релизу версии. */
+export type ReleaseReport = z.infer<typeof releaseReportSchema>;
+
+/** Публичный отчёт по релизу. */
+export type PublicReleaseReport = z.infer<typeof publicReleaseReportSchema>;
