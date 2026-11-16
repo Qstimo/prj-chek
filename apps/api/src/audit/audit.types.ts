@@ -24,6 +24,22 @@ export enum AuditAction {
   ChronicleEntryCreated = 'chronicle_entry.created',
   ChronicleEntryUpdated = 'chronicle_entry.updated',
   ChronicleEntryDeleted = 'chronicle_entry.deleted',
+  SummaryCreated = 'summary.created',
+  /**
+   * Пишется **до** обращения к предложителю задач, в своей короткой
+   * транзакции, и означает ровно одно: «текст ушёл на такой-то адрес».
+   *
+   * Отступление от правила «журнал в одной транзакции с действием»
+   * названное: действие здесь — не изменение в базе, а исходящая
+   * передача, и запись после успеха потерялась бы при падении процесса,
+   * оставив текст созвона ушедшим наружу без следа. Обратный порядок даёт
+   * обратную гарантию: нет записи — нет и передачи. Цена — запись, после
+   * которой может не оказаться пары; это читается как «исход неизвестен»,
+   * а не как «отказ», и так честнее. Удача отдельной записи не получает.
+   */
+  SummaryTasksSuggested = 'summary.tasks_suggested',
+  SummaryTasksSuggestionFailed = 'summary.tasks_suggestion_failed',
+  SummaryDeleted = 'summary.deleted',
   IntakeAddressCreated = 'intake_address.created',
   IntakeAddressRevoked = 'intake_address.revoked',
   VariableCreated = 'variable.created',

@@ -210,6 +210,95 @@ export class SummariesRepository {
   }
 
   /**
+   * Текст саммари и момент его последней правки.
+   *
+   * Отдельно от {@link findById}: шагу разбивки нужен не весь паспорт с
+   * подсказками роадмапа, а текст, его длина и момент правки — он уедет
+   * в `suggested_text_at`, по которому потом считается «текст поправили
+   * после разбивки». Момент берётся **до** обращения к предложителю: в
+   * нём и есть тот текст, который ушёл наружу.
+   */
+  async sourceTextOf(
+    subject: RequestSubject,
+    executor: Executor,
+    projectId: string,
+    summaryId: string,
+  ): Promise<{ text: string; textUpdatedAt: Date; isReleased: boolean }> {
+    const row = await this.requireForWrite(subject, executor, projectId, summaryId);
+
+    const [entry] = await executor
+      .select({ content: chronicleEntries.content, updatedAt: chronicleEntries.updatedAt })
+      .from(chronicleEntries)
+      .where(eq(chronicleEntries.id, row.chronicleEntryId))
+      .limit(1);
+
+    if (!entry) {
+      // Ссылка `not null` с `restrict`: охрана инварианта, а не случай.
+      throw new SectionNotVisibleError();
+    }
+
+    return {
+      text: entry.content,
+      textUpdatedAt: entry.updatedAt,
+      isReleased: row.releasedVersionId !== null,
+    };
+  }
+
+  /**
+   * Заменяет черновик предложенными задачами и ставит отметку разбивки.
+   *
+   * Отдельный метод, а не {@link replaceTasks} с чужим происхождением:
+   * тот нумерует строки без `id` как набранные человеком, и пометка
+   * «предложено моделью» (ТЗ 5.3) через него не выставляется вовсе.
+   *
+   * Отметка пишется той же транзакцией, что и строки: `suggester_*` без
+   * задач читались бы как «разбивка была, задач не предложено», а задачи
+   * без отметки — как набранные руками.
+   */
+  async replaceWithSuggested(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    titles: string[],
+    stamp: { name: string; model: string; textUpdatedAt: Date },
+  ): Promise<SummaryDetail> {
+    const row = await this.requireForWrite(subject, tx, projectId, summaryId);
+
+    if (row.releasedVersionId !== null) {
+      throw new ConflictException(SUMMARY_ALREADY_RELEASED);
+    }
+
+    await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
+
+    if (titles.length > 0) {
+      await tx.insert(summaryTaskDrafts).values(
+        titles.map((title, index) => ({
+          summaryId,
+          title,
+          position: index + 1,
+          origin: SummaryTaskOrigin.Model,
+        })),
+      );
+    }
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(summaries)
+      .set({
+        suggesterName: stamp.name,
+        suggesterModel: stamp.model,
+        suggestedAt: now,
+        suggestedTextAt: stamp.textUpdatedAt,
+        updatedAt: now,
+      })
+      .where(eq(summaries.id, summaryId))
+      .returning();
+
+    return this.detailOf(subject, tx, updated!);
+  }
+
+  /**
    * Удаляет саммари с черновиком и возвращает удалённое.
    *
    * Запись хроники остаётся: текст — артефакт проекта, и его удаление —

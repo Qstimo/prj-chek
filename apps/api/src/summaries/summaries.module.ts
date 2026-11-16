@@ -11,6 +11,7 @@ import { OpenAiCompatibleSuggester } from './suggester/openai-compatible.suggest
 import { suggesterSettings } from './suggester/settings';
 import { TASK_SUGGESTER, type TaskSuggester } from './suggester/task-suggester';
 import { SummariesRepository } from './summaries.repository';
+import { SummariesService } from './summaries.service';
 
 /**
  * Модуль конструктора задач из саммари созвона.
@@ -22,6 +23,7 @@ import { SummariesRepository } from './summaries.repository';
   imports: [DbModule, AccessModule, AuditModule, AuthModule, ChronicleModule, RoadmapModule],
   providers: [
     SummariesRepository,
+    SummariesService,
     {
       provide: TASK_SUGGESTER,
       useFactory: (): TaskSuggester => {
@@ -37,6 +39,6 @@ import { SummariesRepository } from './summaries.repository';
       },
     },
   ],
-  exports: [SummariesRepository, TASK_SUGGESTER],
+  exports: [SummariesRepository, SummariesService, TASK_SUGGESTER],
 })
 export class SummariesModule {}
