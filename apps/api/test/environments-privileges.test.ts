@@ -90,6 +90,24 @@ describe('права роли приложения на окружения', () 
     ).resolves.toBeDefined();
   });
 
+  it('роль приложения читает и пишет саммари и черновик задач', async () => {
+    // Парная миграция прав: без неё поток упал бы отказом в правах на
+    // первом же сохранении текста созвона.
+    await expect(testDb.appDb.execute(sql`SELECT count(*) FROM summaries`)).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM summary_task_drafts`),
+    ).resolves.toBeDefined();
+  });
+
+  it('источник записи хроники принимает «саммари»', async () => {
+    // Значение добавлено в существующий перечень: `ALTER TYPE … ADD VALUE`
+    // в репозитории встречается впервые, и проверить его нужно на
+    // применённой миграции, а не на схеме в коде.
+    await expect(
+      testDb.appDb.execute(sql`SELECT 'summary'::chronicle_source`),
+    ).resolves.toBeDefined();
+  });
+
   it('роль приложения читает и пишет документацию', async () => {
     await expect(
       testDb.appDb.execute(sql`SELECT count(*) FROM doc_pages`),
