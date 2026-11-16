@@ -40,6 +40,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'summary.created': 'Создано саммари',
   'summary.tasks_suggested': 'Запрошена разбивка саммари на задачи',
   'summary.tasks_suggestion_failed': 'Разбивка саммари не удалась',
+  'summary.released': 'Из саммари сформирован релиз',
   'summary.deleted': 'Удалено саммари',
   'intake_address.created': 'Создан приёмный адрес',
   'intake_address.revoked': 'Отозван приёмный адрес',

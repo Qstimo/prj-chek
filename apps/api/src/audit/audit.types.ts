@@ -39,6 +39,7 @@ export enum AuditAction {
    */
   SummaryTasksSuggested = 'summary.tasks_suggested',
   SummaryTasksSuggestionFailed = 'summary.tasks_suggestion_failed',
+  SummaryReleased = 'summary.released',
   SummaryDeleted = 'summary.deleted',
   IntakeAddressCreated = 'intake_address.created',
   IntakeAddressRevoked = 'intake_address.revoked',

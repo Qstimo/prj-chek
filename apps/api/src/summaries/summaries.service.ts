@@ -4,6 +4,10 @@ import {
   SUGGESTER_DISABLED,
   SUMMARY_ALREADY_RELEASED,
   SUMMARY_TEXT_TOO_LONG,
+  SUMMARY_TASKS_EMPTY,
+  SummaryTaskOrigin,
+  type RoadmapVersionCreate,
+  type SummaryReleaseResult,
   type SummaryCreate,
   type SummaryDetail,
   type SummaryListItem,
@@ -28,6 +32,7 @@ import {
   type SuggestResult,
   type TaskSuggester,
 } from './suggester/task-suggester';
+import { RoadmapRepository } from '../roadmap/roadmap.repository';
 import { SummariesRepository } from './summaries.repository';
 
 /**
@@ -57,6 +62,7 @@ export class SummariesService implements OnModuleDestroy {
     private readonly repository: SummariesRepository,
     private readonly audit: AuditService,
     @Inject(TASK_SUGGESTER) private readonly suggester: TaskSuggester,
+    private readonly roadmap: RoadmapRepository,
   ) {}
 
   /** История саммари проекта. Чтение в журнал не пишется. */
@@ -135,6 +141,43 @@ export class SummariesService implements OnModuleDestroy {
     return this.db.transaction((tx) =>
       this.repository.replaceTasks(subject, tx, projectId, summaryId, input),
     );
+  }
+
+  /** Формирует версию и чекпоинты атомарно: половина релиза не сохраняется. */
+  async release(
+    subject: RequestSubject,
+    projectId: string,
+    summaryId: string,
+    input: RoadmapVersionCreate,
+  ): Promise<SummaryReleaseResult> {
+    return this.db.transaction(async (tx) => {
+      const summary = await this.repository.lockForRelease(subject, tx, projectId, summaryId);
+      if (summary.releasedVersionId !== null) {
+        throw new ConflictException({ code: SUMMARY_ALREADY_RELEASED, message: 'Релиз уже сформирован.' });
+      }
+      const tasks = await this.repository.tasksOf(tx, summaryId);
+      if (tasks.length === 0) {
+        throw new ConflictException({ code: SUMMARY_TASKS_EMPTY, message: 'Добавьте задачи в черновик.' });
+      }
+      const version = await this.roadmap.createVersion(subject, tx, projectId, input);
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.RoadmapVersionCreated, entityType: 'roadmap_version',
+        entityId: version.id, projectId, metadata: { label: version.label },
+      });
+      for (const task of tasks) {
+        const checkpoint = await this.roadmap.createCheckpoint(subject, tx, projectId, version.id, { title: task.title });
+        await this.audit.record(tx, actorOf(subject), {
+          action: AuditAction.CheckpointCreated, entityType: 'checkpoint',
+          entityId: checkpoint.id, projectId, metadata: { title: checkpoint.title },
+        });
+      }
+      await this.repository.markReleased(tx, summaryId, version.id);
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.SummaryReleased, entityType: 'summary', entityId: summaryId, projectId,
+        metadata: { label: version.label, tasks: tasks.length, fromModel: tasks.filter(task => task.origin === SummaryTaskOrigin.Model).length },
+      });
+      return { versionId: version.id, label: version.label, checkpointCount: tasks.length };
+    });
   }
 
   /** Удаляет саммари с черновиком. Запись хроники остаётся. */

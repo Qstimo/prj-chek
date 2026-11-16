@@ -322,6 +322,28 @@ export class SummariesRepository {
   }
 
   /**
+   * Блокирует строку саммари, чтобы повторное нажатие увидело отметку первого.
+   * Уровень роадмапа требует его репозиторий; здесь проверяется только видимость,
+   * иначе низкий уровень хроники раскрыл бы секцию при отсутствии второй выдачи.
+   */
+  async lockForRelease(subject: RequestSubject, tx: Transaction, projectId: string, summaryId: string): Promise<SummaryRow> {
+    const roadmapLevel = await this.access.resolveLevel(subject, projectId, Section.Roadmap, tx);
+    if (roadmapLevel === null || roadmapLevel === undefined) throw new SectionNotVisibleError();
+    await this.requireWrite(subject, projectId, tx);
+    const [row] = await tx.select().from(summaries)
+      .where(and(eq(summaries.id, summaryId), eq(summaries.projectId, projectId)))
+      .for('no key update');
+    if (!row) throw new SectionNotVisibleError();
+    return row;
+  }
+
+  /** Сохраняет получателя тем же исполнителем, которым создана версия. */
+  async markReleased(tx: Transaction, summaryId: string, versionId: string): Promise<void> {
+    await tx.update(summaries).set({ releasedVersionId: versionId, updatedAt: new Date() })
+      .where(eq(summaries.id, summaryId));
+  }
+
+  /**
    * Задачи черновика по порядку позиций.
    *
    * Субъекта не принимает намеренно: единственный путь сюда — через

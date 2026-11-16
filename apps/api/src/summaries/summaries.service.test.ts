@@ -1,4 +1,8 @@
 import {
+  AccessLevel,
+  Section,
+  PlatformKind,
+  SUMMARY_TASKS_EMPTY,
   SUGGESTER_DISABLED,
   SUMMARY_ALREADY_RELEASED,
   SUGGESTER_UNAVAILABLE,
@@ -22,6 +26,10 @@ import {
   chronicleEntries,
   projects,
   roadmapVersions,
+  roadmapCheckpoints,
+  checkpointPlatforms,
+  projectPlatforms,
+  grants,
   subjects,
   summaries,
   users,
@@ -85,7 +93,7 @@ describe('служба саммари', () => {
       new RoadmapRepository(testDb.db, access),
     );
     audit = new AuditService();
-    service = new SummariesService(testDb.db, repository, audit, suggesterStub);
+    service = new SummariesService(testDb.db, repository, audit, suggesterStub, new RoadmapRepository(testDb.db, access));
     // Вторая служба на выключенном порте: адаптер выбирается при старте,
     // и подменять его на ходу нельзя — так же, как в боевом коде.
     disabledService = new SummariesService(
@@ -93,6 +101,7 @@ describe('служба саммари', () => {
       repository,
       audit,
       new DisabledSuggester(),
+      new RoadmapRepository(testDb.db, access),
     );
   });
 
@@ -172,6 +181,101 @@ describe('служба саммари', () => {
       (cause: unknown) => cause,
     );
   }
+
+  describe('формирование релиза', () => {
+    beforeEach(async () => {
+      await service.suggest(writer(), projectId, summaryId);
+      const detail = await service.findById(writer(), projectId, summaryId);
+      await service.replaceTasks(writer(), projectId, summaryId, {
+        tasks: [...detail.tasks.map(({ id, title }) => ({ id, title })), { title: 'три' }],
+      });
+    });
+
+    it('создаёт версию, упорядоченные незакрытые чекпоинты и полный журнал', async () => {
+      const result = await service.release(writer(), projectId, summaryId, { label: 'v1.3' });
+      expect(result).toEqual({ versionId: expect.any(String), label: 'v1.3', checkpointCount: 3 });
+      const rows = await testDb.db.select().from(roadmapCheckpoints).orderBy(asc(roadmapCheckpoints.position));
+      expect(rows.map(({ position, title, isDone, url }) => [position, title, isDone, url])).toEqual([
+        [1, 'раз', false, null], [2, 'два', false, null], [3, 'три', false, null],
+      ]);
+      expect(await testDb.db.select().from(checkpointPlatforms)).toEqual([]);
+      expect((await testDb.db.select().from(summaries))[0]?.releasedVersionId).toBe(result.versionId);
+      expect((await auditRecords(AuditAction.SummaryReleased))[0]?.metadata).toEqual({ label: 'v1.3', tasks: 3, fromModel: 2 });
+      expect(await auditRecords(AuditAction.RoadmapVersionCreated)).toHaveLength(1);
+      expect((await auditRecords(AuditAction.CheckpointCreated)).map(row => row.metadata)).toEqual([
+        { title: 'раз' }, { title: 'два' }, { title: 'три' },
+      ]);
+    });
+
+    it('повторный релиз — 409 с кодом', async () => {
+      await service.release(writer(), projectId, summaryId, { label: 'v1.3' });
+      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.4' })).rejects.toMatchObject({
+        status: 409, response: expect.objectContaining({ code: SUMMARY_ALREADY_RELEASED }),
+      });
+    });
+
+    it('пустой черновик — 409 с кодом', async () => {
+      await service.replaceTasks(writer(), projectId, summaryId, { tasks: [] });
+      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).rejects.toMatchObject({
+        status: 409, response: expect.objectContaining({ code: SUMMARY_TASKS_EMPTY }),
+      });
+    });
+
+    it('ошибка второго чекпоинта откатывает версию, чекпоинты, журнал и отметку', async () => {
+      const original = RoadmapRepository.prototype.createCheckpoint;
+      let calls = 0;
+      vi.spyOn(RoadmapRepository.prototype, 'createCheckpoint').mockImplementation(async function (this: RoadmapRepository, ...args) {
+        if (++calls === 2) throw new Error('второй чекпоинт');
+        return original.apply(this, args);
+      });
+      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).rejects.toThrow('второй чекпоинт');
+      expect(await testDb.db.select().from(roadmapVersions)).toEqual([]);
+      expect(await testDb.db.select().from(roadmapCheckpoints)).toEqual([]);
+      expect(await auditRecords(AuditAction.RoadmapVersionCreated)).toEqual([]);
+      expect(await auditRecords(AuditAction.CheckpointCreated)).toEqual([]);
+      expect(await auditRecords(AuditAction.SummaryReleased)).toEqual([]);
+      expect((await testDb.db.select().from(summaries))[0]?.releasedVersionId).toBeNull();
+    });
+
+    it('одновременные нажатия дают одну версию и один конфликт', async () => {
+      const results = await Promise.allSettled(['v1.3', 'v1.4'].map(label => service.release(writer(), projectId, summaryId, { label })));
+      expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+      expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { status: 409, response: expect.objectContaining({ code: SUMMARY_ALREADY_RELEASED }) } });
+      expect(await testDb.db.select().from(roadmapVersions)).toHaveLength(1);
+    });
+
+    it('занятое обозначение отвергает репозиторий роадмапа', async () => {
+      await testDb.db.insert(roadmapVersions).values({ projectId, label: 'v1.3', position: 1 });
+      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('releasedDate при платформе отвергает репозиторий роадмапа', async () => {
+      await testDb.db.insert(projectPlatforms).values({ projectId, name: 'Веб', kind: PlatformKind.Server, position: 1 });
+      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3', releasedDate: null })).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('устаревший текст не блокирует релиз', async () => {
+      await testDb.db.update(chronicleEntries).set({ updatedAt: new Date(Date.now() + 60_000) });
+      expect((await service.findById(writer(), projectId, summaryId)).isTextStale).toBe(true);
+      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).resolves.toBeDefined();
+    });
+
+    it.each([
+      [AccessLevel.Write, undefined, 404],
+      [AccessLevel.Write, AccessLevel.Read, 403],
+      [undefined, AccessLevel.Write, 404],
+      [AccessLevel.Read, AccessLevel.Write, 403],
+      [AccessLevel.Read, undefined, 404],
+      [undefined, AccessLevel.Read, 404],
+    ])('права хроники %s и роадмапа %s дают %s', async (chronicle, roadmap, status) => {
+      const [member] = await testDb.db.insert(subjects).values({ kind: SubjectKind.User, label: 'участник' }).returning();
+      const [admin] = await testDb.db.select().from(users).where(eq(users.subjectId, adminSubjectId));
+      for (const [section, level] of [[Section.Chronicle, chronicle], [Section.Roadmap, roadmap]] as const) {
+        if (level) await testDb.db.insert(grants).values({ subjectId: member!.id, projectId, section, level, grantedBy: admin!.id });
+      }
+      await expect(service.release({ ...writer(), id: member!.id, isSuperadmin: false }, projectId, summaryId, { label: 'v1.3' })).rejects.toMatchObject({ status });
+    });
+  });
 
   describe('создание', () => {
     it('пишет в журнал заголовок, дату и длину текста, но не текст', async () => {
