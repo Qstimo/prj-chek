@@ -1,11 +1,25 @@
-import { AccessLevel, ChronicleSource, Section, SubjectKind } from '@cairn/shared';
+import {
+  AccessLevel,
+  ChronicleSource,
+  Section,
+  SubjectKind,
+  SummaryTaskOrigin,
+} from '@cairn/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessService } from '../access/access.service';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
-import { chronicleEntries, grants, projects, subjects, users } from '../db/schema';
+import {
+  chronicleEntries,
+  grants,
+  projects,
+  subjects,
+  summaries,
+  summaryTaskDrafts,
+  users,
+} from '../db/schema';
 import { ChronicleRepository } from './chronicle.repository';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
@@ -256,6 +270,36 @@ describe('репозиторий хроники', () => {
 
       expect(removed.title).toBe('Встреча');
       expect(await testDb.db.select().from(chronicleEntries)).toHaveLength(0);
+    });
+
+    it('удаление записи уносит саммари с его черновиком', async () => {
+      // Каскадов в проекте нет, ссылка restrict: не унесём — удаление
+      // упадёт на внешнем ключе, и запись станет неудаляемой.
+      const id = await createEntry();
+      const [summary] = await testDb.db
+        .insert(summaries)
+        .values({ projectId, chronicleEntryId: id, createdBySubjectId: adminSubjectId })
+        .returning();
+      await testDb.db.insert(summaryTaskDrafts).values({
+        summaryId: summary!.id,
+        title: 'Сделать',
+        position: 1,
+        origin: SummaryTaskOrigin.Model,
+      });
+
+      await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id));
+
+      expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(0);
+      expect(await testDb.rowsOf(summaries)).toHaveLength(0);
+      expect(await testDb.rowsOf(chronicleEntries)).toHaveLength(0);
+    });
+
+    it('удаление записи без саммари работает как раньше', async () => {
+      const id = await createEntry();
+
+      await expect(
+        testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id)),
+      ).resolves.toMatchObject({ id });
     });
 
     it('сообщает «не найдено» об уже удалённой записи', async () => {
