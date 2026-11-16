@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -45,6 +45,60 @@ describe('AppNav', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Выйти' }));
 
     expect(onLogout).toHaveBeenCalled();
+  });
+
+  describe('меню на телефоне', () => {
+    // Разделы и выход в полосе скрыты правилом `sm:`, а media queries
+    // Tailwind в jsdom не применяются. Поэтому проверяется поведение
+    // меню — то, что от раскладки не зависит; сама раскладка смотрится
+    // глазами.
+
+    it('закрытым меню ничего не задваивает', async () => {
+      // Разметка панели появляется только открытой, иначе «Проекты»
+      // и «Выйти» были бы в документе дважды всегда.
+      render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
+
+      expect(screen.getAllByRole('link', { name: 'Проекты' })).toHaveLength(1);
+      expect(screen.getAllByRole('button', { name: 'Выйти' })).toHaveLength(1);
+    });
+
+    it('открывает меню с разделами и выходом', async () => {
+      render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Меню' }));
+
+      const menu = within(screen.getByRole('dialog', { name: 'Меню' }));
+
+      expect(menu.getByRole('link', { name: 'Проекты' })).toBeInTheDocument();
+      expect(menu.getByRole('link', { name: 'Журнал' })).toBeInTheDocument();
+      expect(menu.getByRole('button', { name: 'Выйти' })).toBeInTheDocument();
+      expect(menu.getByText('user@cairn.local')).toBeInTheDocument();
+    });
+
+    it('выход из меню вызывает выход', async () => {
+      const onLogout = vi.fn();
+      render(<AppNav subject={subject} onLogout={onLogout} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Меню' }));
+      const menu = within(screen.getByRole('dialog', { name: 'Меню' }));
+      await userEvent.click(menu.getByRole('button', { name: 'Выйти' }));
+
+      expect(onLogout).toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('переход по разделу закрывает меню', async () => {
+      // Навигация живёт в разметке раздела и смену страницы переживает,
+      // поэтому панель сама не закроется и осталась бы висеть поверх
+      // того, куда только что перешли.
+      render(<AppNav subject={subject} onLogout={vi.fn()} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Меню' }));
+      const menu = within(screen.getByRole('dialog', { name: 'Меню' }));
+      await userEvent.click(menu.getByRole('link', { name: 'Проекты' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 
   it('размечен как навигация', () => {

@@ -1,6 +1,7 @@
 import type { ProjectDetail, ProjectMetadata } from '@cairn/shared';
 
 import { PlatformChips } from '../PlatformChips';
+import { TagChips } from '../TagChips';
 import { FIELD_LABELS } from './constants';
 import type { IProps } from './types';
 
@@ -21,6 +22,14 @@ export function ProjectSections({ project, platforms = [] }: IProps) {
 
       {detail ? (
         <dl className="grid gap-3">
+          {detail.tags.length > 0 && (
+            <div>
+              <dt className="text-sm text-muted-foreground">{FIELD_LABELS.tags}</dt>
+              <dd className="pt-1">
+                <TagChips tags={detail.tags} />
+              </dd>
+            </div>
+          )}
           {detail.purpose && <Field label={FIELD_LABELS.purpose} value={detail.purpose} />}
           {detail.stack && <Field label={FIELD_LABELS.stack} value={detail.stack} />}
           {detail.repoUrl && (

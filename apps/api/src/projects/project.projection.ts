@@ -1,4 +1,4 @@
-import { AccessLevel, type ProjectDetail, type ProjectMetadata } from '@cairn/shared';
+import { AccessLevel, type ProjectDetail, type ProjectMetadata, type Tag } from '@cairn/shared';
 
 import type { Project } from '../db/schema';
 
@@ -7,10 +7,15 @@ import type { Project } from '../db/schema';
  *
  * Применяется в сервисном слое до сериализации, поэтому скрытые поля
  * не доходят до контроллера и не могут просочиться в ответ по недосмотру.
+ *
+ * Теги приходят отдельным аргументом: они лежат в своих таблицах, и
+ * проекция их не добывает — она решает, что показать. На уровне
+ * метаданных они гаснут вместе с остальным паспортом.
  */
 export function projectProjection(
   project: Project,
   level: AccessLevel,
+  tags: Tag[] = [],
 ): ProjectMetadata | ProjectDetail {
   const metadata: ProjectMetadata = {
     id: project.id,
@@ -25,6 +30,7 @@ export function projectProjection(
 
   return {
     ...metadata,
+    tags,
     purpose: project.purpose,
     stack: project.stack,
     repoUrl: project.repoUrl,

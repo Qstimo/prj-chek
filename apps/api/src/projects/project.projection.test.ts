@@ -1,4 +1,4 @@
-import { AccessLevel, ProjectLifecycle } from '@cairn/shared';
+import { AccessLevel, ProjectLifecycle, type Tag } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
 import { projectProjection } from './project.projection';
@@ -18,9 +18,11 @@ const project: Project = {
   updatedAt: new Date('2026-01-02T00:00:00Z'),
 };
 
+const tags: Tag[] = [{ id: '22222222-2222-2222-2222-222222222222', slug: 'web', label: 'Web' }];
+
 describe('projectProjection', () => {
   describe('уровень метаданных', () => {
-    const result = projectProjection(project, AccessLevel.Metadata);
+    const result = projectProjection(project, AccessLevel.Metadata, tags);
 
     it('отдаёт название и состояние', () => {
       expect(result).toMatchObject({ name: 'Проект', lifecycle: ProjectLifecycle.Active });
@@ -35,10 +37,16 @@ describe('projectProjection', () => {
     it('скрывает ссылку на репозиторий', () => {
       expect(result).not.toHaveProperty('repoUrl');
     });
+
+    it('скрывает теги', () => {
+      // Уровень метаданных раскрывает существование проекта, а не его
+      // паспорт: тег стоит в одном ряду с назначением и стеком.
+      expect(result).not.toHaveProperty('tags');
+    });
   });
 
   describe('уровень чтения', () => {
-    const result = projectProjection(project, AccessLevel.Read);
+    const result = projectProjection(project, AccessLevel.Read, tags);
 
     it('отдаёт все поля паспорта', () => {
       expect(result).toMatchObject({
@@ -46,7 +54,13 @@ describe('projectProjection', () => {
         stack: 'Next.js',
         repoUrl: 'https://example.com/repo',
         notes: 'Заметки',
+        tags,
       });
+    });
+
+    it('без тегов отдаёт пустой набор, а не отсутствие поля', () => {
+      // Иначе форме пришлось бы различать «тегов нет» и «поля нет».
+      expect(projectProjection(project, AccessLevel.Read)).toMatchObject({ tags: [] });
     });
 
     it('отдаёт даты строками', () => {
@@ -56,8 +70,8 @@ describe('projectProjection', () => {
 
   describe('уровень записи', () => {
     it('отдаёт то же, что и чтение', () => {
-      expect(projectProjection(project, AccessLevel.Write)).toEqual(
-        projectProjection(project, AccessLevel.Read),
+      expect(projectProjection(project, AccessLevel.Write, tags)).toEqual(
+        projectProjection(project, AccessLevel.Read, tags),
       );
     });
   });

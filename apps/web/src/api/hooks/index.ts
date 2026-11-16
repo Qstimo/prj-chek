@@ -37,3 +37,4 @@ export * from './useQueryUsers';
 export * from './useQueryVariables';
 export * from './useReport';
 export * from './useStatus';
+export * from './useTags';

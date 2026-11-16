@@ -1,6 +1,6 @@
 'use client';
 
-import type { Platform, ProjectUpdate } from '@cairn/shared';
+import type { Platform, ProjectUpdate, Tag } from '@cairn/shared';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -8,12 +8,15 @@ import { describeApiError } from '@/api';
 import {
   useMutationCreatePlatform,
   useMutationDeletePlatform,
+  useMutationSetProjectTags,
   useMutationUpdateProject,
   useQueryPlatforms,
+  useQueryTagVocabulary,
 } from '@/api/hooks';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { PlatformsField } from '@/components/PlatformsField';
 import { ProjectForm, type ProjectFormValues } from '@/components/ProjectForm';
+import { TagsField } from '@/components/TagsField';
 
 /** Пропсы панели правки проекта. */
 interface IProps {
@@ -29,6 +32,13 @@ interface IProps {
   canWrite: boolean;
   /** Платформы, уже полученные страницей: подставляются в кэш запроса. */
   initialPlatforms?: Platform[];
+  /**
+   * Теги, уже пришедшие в паспорте проекта.
+   *
+   * Пропом, а не запросом: набор лежит в самой проекции проекта, и
+   * второй источник того же разошёлся бы с ней.
+   */
+  initialTags: Tag[];
 }
 
 /**
@@ -36,19 +46,41 @@ interface IProps {
  *
  * Платформы приходят из запроса, а чипы действуют мутациями сразу — как
  * галочки чекпоинтов. Поэтому список перерисовывается от кэша, а не от
- * состояния формы, которое с пропом не ресинхронизируется.
+ * состояния формы, которое с пропом не ресинхронизируется. Теги устроены
+ * так же, только набор уходит целиком одной ручкой.
  */
-export function EditProjectPanel({ projectId, initial, canWrite, initialPlatforms }: IProps) {
+export function EditProjectPanel({
+  projectId,
+  initial,
+  canWrite,
+  initialPlatforms,
+  initialTags,
+}: IProps) {
   const router = useRouter();
   const mutation = useMutationUpdateProject(projectId);
   const platforms = useQueryPlatforms(projectId, { initialData: initialPlatforms });
   const createPlatform = useMutationCreatePlatform(projectId);
   const deletePlatform = useMutationDeletePlatform(projectId);
+  const setTags = useMutationSetProjectTags(projectId);
   const [isOpen, setIsOpen] = useState(false);
+  const vocabulary = useQueryTagVocabulary({ enabled: isOpen });
 
   if (!canWrite) {
     return null;
   }
+
+  /**
+   * Показываемый набор тегов.
+   *
+   * Пока запрос в пути — отправленное: чип обязан появиться по щелчку,
+   * а не через круг по сети. Отказ сам возвращает прежний набор, потому
+   * что `variables` перестаёт читаться с концом запроса, — отдельного
+   * откатывающего состояния для этого не нужно.
+   */
+  const tags =
+    setTags.isPending && setTags.variables
+      ? setTags.variables
+      : (setTags.data ?? initialTags).map((tag) => tag.label);
 
   function submit(input: ProjectUpdate): void {
     mutation.mutate(input, {
@@ -79,7 +111,19 @@ export function EditProjectPanel({ projectId, initial, canWrite, initialPlatform
           initial={initial}
           onSubmit={submit}
           isSubmitting={mutation.isPending}
-          error={describeApiError(mutation.error)}
+          // Отказ в тегах показывается там же: действуют они своей
+          // ручкой, но для человека это одна форма.
+          error={describeApiError(mutation.error) ?? describeApiError(setTags.error)}
+          tagsSlot={
+            <TagsField
+              tags={tags}
+              // `router.refresh()` и здесь: паспорт под панелью
+              // отрисован на сервере, и без него чипы в нём остались бы
+              // прежними до перезагрузки страницы.
+              onChange={(next) => setTags.mutate(next, { onSuccess: () => router.refresh() })}
+              suggestions={(vocabulary.data ?? []).map((tag) => tag.label)}
+            />
+          }
           platformsSlot={
             <PlatformsField
               platforms={platforms.data ?? []}

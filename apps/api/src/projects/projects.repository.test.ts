@@ -23,6 +23,7 @@ import {
   subjects,
   users,
 } from '../db/schema';
+import { TagsRepository } from '../tags/tags.repository';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
 describe('ProjectsRepository', () => {
@@ -34,7 +35,8 @@ describe('ProjectsRepository', () => {
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
-    repository = new ProjectsRepository(testDb.db, new AccessService(testDb.db));
+    const access = new AccessService(testDb.db);
+    repository = new ProjectsRepository(testDb.db, access, new TagsRepository(testDb.db, access));
   });
 
   afterAll(async () => {

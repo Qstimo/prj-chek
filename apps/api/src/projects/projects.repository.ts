@@ -8,6 +8,7 @@ import {
   type ProjectListItem,
   type ProjectMetadata,
   type ProjectUpdate,
+  type Tag,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { asc, eq, inArray, sql } from 'drizzle-orm';
@@ -25,6 +26,7 @@ import {
   servers,
   type Project,
 } from '../db/schema';
+import { TagsRepository } from '../tags/tags.repository';
 import { projectListItemProjection } from './project-list.projection';
 import { projectProjection } from './project.projection';
 import { generateSlug } from './slug';
@@ -48,6 +50,7 @@ export class ProjectsRepository {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly access: AccessService,
+    private readonly tags: TagsRepository,
   ) {}
 
   /** Возвращает проект в проекции, соответствующей уровню доступа субъекта. */
@@ -68,7 +71,12 @@ export class ProjectsRepository {
       throw new SectionNotVisibleError();
     }
 
-    return projectProjection(project, level);
+    // Спрашиваются без оглядки на уровень: что из них показать, решает
+    // проекция, и повторять её решение здесь значило бы развести два
+    // гейта на одно поле.
+    const tags = await this.tags.forProjects(this.db, [projectId]);
+
+    return projectProjection(project, level, tags.get(projectId) ?? []);
   }
 
   /**
@@ -93,6 +101,7 @@ export class ProjectsRepository {
 
     const levelsByProject = await this.access.levelsForProjects(subject, ids);
     const platformsByProject = await this.platformsByProject(ids);
+    const tagsByProject = await this.tags.forProjects(this.db, ids);
     const productionByProject = await this.productionOverviewByProject(ids);
 
     return rows.map((row) => {
@@ -102,6 +111,7 @@ export class ProjectsRepository {
         row,
         levelsByProject.get(row.id) ?? {},
         platformsByProject.get(row.id) ?? [],
+        tagsByProject.get(row.id) ?? [],
         production?.domain ?? null,
         production?.serverName ?? null,
       );
@@ -119,9 +129,10 @@ export class ProjectsRepository {
       throw new InsufficientLevelError();
     }
 
-    // Платформы — не колонка таблицы: Drizzle молча пропустил бы лишнее
-    // поле, и проект создался бы без них незаметно. Их заводит служба.
-    const { platforms: _platforms, ...fields } = input;
+    // Платформы и теги — не колонки таблицы: Drizzle молча пропустил бы
+    // лишнее поле, и проект создался бы без них незаметно. Их заводит
+    // служба.
+    const { platforms: _platforms, tags: _tags, ...fields } = input;
     const slug = await this.findFreeSlug(tx, generateSlug(fields.name));
 
     const [created] = await tx
