@@ -232,6 +232,20 @@
       "when": 1794824483478,
       "tag": "0032_roadmap_report_privileges",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794843151096,
+      "tag": "0033_project_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794843151097,
+      "tag": "0034_project_tag_privileges",
+      "breakpoints": true
     }
   ]
 }

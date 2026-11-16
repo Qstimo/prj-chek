@@ -14,6 +14,7 @@ export function ProjectForm({
   error,
   isSubmitting = false,
   platformsSlot,
+  tagsSlot,
 }: IProps) {
   const [values, setValues] = useState<ProjectFormValues>(initial);
 
@@ -43,6 +44,10 @@ export function ProjectForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <ProjectFields values={values} onChange={change} />
+
+      {/* Теги выше платформ: тег — верхнеуровневая метка, а платформа —
+          подробность поставки, и читаться они обязаны в этом порядке. */}
+      {tagsSlot}
 
       {platformsSlot}
 

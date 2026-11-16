@@ -26,6 +26,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'push.unsubscribed': 'Отписка от уведомлений',
   'project.created': 'Создан проект',
   'project.updated': 'Изменён проект',
+  'project_tags.set': 'Изменены теги проекта',
   'platform.created': 'Заведена платформа',
   'platform.updated': 'Переименована платформа',
   'platform.deleted': 'Удалена платформа',

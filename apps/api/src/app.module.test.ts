@@ -10,6 +10,7 @@ import { PushNotifier } from './push/push.notifier';
 import { INCIDENT_NOTIFIER } from './status/notifier';
 import { PlatformsService } from './platforms/platforms.service';
 import { ProjectsService } from './projects/projects.service';
+import { TagsService } from './tags/tags.service';
 
 describe('AppModule', () => {
   it('собирается со всеми модулями', async () => {
@@ -21,6 +22,7 @@ describe('AppModule', () => {
     expect(moduleRef.get(AuthService)).toBeDefined();
     expect(moduleRef.get(ProjectsService)).toBeDefined();
     expect(moduleRef.get(PlatformsService)).toBeDefined();
+    expect(moduleRef.get(TagsService)).toBeDefined();
     // Проверка живости должна быть собрана в приложении: без неё docker-compose
     // считал бы контейнер нездоровым и перезапускал его по кругу.
     expect(moduleRef.get(HealthController)).toBeDefined();

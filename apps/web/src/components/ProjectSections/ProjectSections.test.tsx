@@ -13,6 +13,7 @@ const metadataOnly = {
 
 const detailed = {
   ...metadataOnly,
+  tags: [],
   purpose: 'Назначение проекта',
   stack: 'Next.js',
   repoUrl: 'https://example.com/repo',
@@ -88,5 +89,22 @@ describe('ProjectSections', () => {
     render(<ProjectSections project={detailed} platforms={[]} />);
 
     expect(screen.queryByText('RuStore')).not.toBeInTheDocument();
+  });
+
+  it('показывает теги паспорта', () => {
+    render(
+      <ProjectSections
+        project={{ ...detailed, tags: [{ id: 't1', slug: 'web', label: 'Web' }] }}
+      />,
+    );
+
+    expect(screen.getByText('Теги')).toBeInTheDocument();
+    expect(screen.getByText('Web')).toBeInTheDocument();
+  });
+
+  it('без тегов строки «Теги» не рисует', () => {
+    render(<ProjectSections project={detailed} />);
+
+    expect(screen.queryByText('Теги')).not.toBeInTheDocument();
   });
 });

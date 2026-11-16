@@ -5,29 +5,36 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { describeApiError } from '@/api';
-import { useMutationCreateProject } from '@/api/hooks';
+import { useMutationCreateProject, useQueryTagVocabulary } from '@/api/hooks';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { PlatformsField } from '@/components/PlatformsField';
 import { ProjectForm } from '@/components/ProjectForm';
+import { TagsField } from '@/components/TagsField';
 
 import { EMPTY_PROJECT } from './constants';
 
 /**
  * Создание проекта в выезжающей панели.
  *
- * Платформы живут в состоянии панели и уходят вместе с проектом: при
- * создании затирать нечего, а требовать сначала создать проект и лишь
- * потом вернуться за платформами — лишний шаг.
+ * Платформы и теги живут в состоянии панели и уходят вместе с проектом:
+ * при создании затирать нечего, а требовать сначала создать проект и лишь
+ * потом вернуться за ними — лишний шаг.
  */
 export function CreateProjectPanel() {
   const router = useRouter();
   const mutation = useMutationCreateProject();
   const [isOpen, setIsOpen] = useState(false);
   const [platforms, setPlatforms] = useState<PlatformCreate[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
+  // Словарь спрашивается только с открытой панелью: на самой сводке
+  // кнопки фильтра собираются из её же строк, и второй запрос за теми
+  // же словами там не нужен.
+  const vocabulary = useQueryTagVocabulary({ enabled: isOpen });
 
   function close(): void {
     setIsOpen(false);
     setPlatforms([]);
+    setTags([]);
   }
 
   return (
@@ -54,11 +61,19 @@ export function CreateProjectPanel() {
               }
             />
           }
+          tagsSlot={
+            <TagsField
+              tags={tags}
+              onChange={setTags}
+              suggestions={(vocabulary.data ?? []).map((tag) => tag.label)}
+            />
+          }
           onSubmit={(input) =>
             mutation.mutate(
               {
                 ...input,
                 ...(platforms.length > 0 ? { platforms } : {}),
+                ...(tags.length > 0 ? { tags } : {}),
               } as ProjectCreate,
               {
                 onSuccess: (created) => {

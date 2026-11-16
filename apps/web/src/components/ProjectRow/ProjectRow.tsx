@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { LIFECYCLE_LABELS, LIFECYCLE_STYLES } from '../ProjectCard/constants';
 import { StatusIndicator } from '../StatusIndicator';
+import { TagChips } from '../TagChips';
 import { formatUpdatedAt } from './formatUpdatedAt';
 import type { IProps } from './types';
 
@@ -23,6 +24,13 @@ export function ProjectRow({ project, indicator }: IProps) {
         <Link href={`/projects/${project.id}`} className="font-medium hover:underline">
           {project.name}
         </Link>
+      </td>
+      <td className="max-w-[12rem] px-3 py-2.5">
+        {project.tags.length > 0 ? (
+          <TagChips tags={project.tags} />
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
         <span className={`rounded-full px-2 py-0.5 text-xs ${LIFECYCLE_STYLES[project.lifecycle]}`}>

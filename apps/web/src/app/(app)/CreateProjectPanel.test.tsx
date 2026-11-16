@@ -28,10 +28,16 @@ function mutation() {
   return { mutate: vi.fn(), isPending: false, error: null } as never;
 }
 
+/** Успешный query-результат для мока. */
+function query<T>(data: T) {
+  return { data, isPending: false, isError: false } as never;
+}
+
 beforeEach(() => {
   push.mockClear();
   refresh.mockClear();
   vi.mocked(hooks.useMutationCreateProject).mockReturnValue(mutation());
+  vi.mocked(hooks.useQueryTagVocabulary).mockReturnValue(query([]));
 });
 
 describe('CreateProjectPanel', () => {
@@ -87,5 +93,57 @@ describe('CreateProjectPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     expect(mutate.mock.calls[0]?.[0]).not.toHaveProperty('platforms');
+  });
+
+  it('отправляет теги вместе с новым проектом', async () => {
+    // При создании затирать нечего, и требовать сначала создать проект,
+    // а потом вернуться за тегами — лишний шаг.
+    const mutate = vi.fn();
+    vi.mocked(hooks.useMutationCreateProject).mockReturnValue({
+      mutate,
+      isPending: false,
+      error: null,
+    } as never);
+
+    render(<CreateProjectPanel />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать проект' }));
+    await userEvent.type(screen.getByLabelText('Название'), 'Касса');
+    await userEvent.type(screen.getByLabelText('Свой тег'), 'Web');
+    await userEvent.click(screen.getByRole('button', { name: 'Добавить тег' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(mutate.mock.calls[0]?.[0]).toMatchObject({ name: 'Касса', tags: ['Web'] });
+  });
+
+  it('без тегов поля в запросе нет вовсе', async () => {
+    const mutate = vi.fn();
+    vi.mocked(hooks.useMutationCreateProject).mockReturnValue({
+      mutate,
+      isPending: false,
+      error: null,
+    } as never);
+
+    render(<CreateProjectPanel />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать проект' }));
+    await userEvent.type(screen.getByLabelText('Название'), 'Касса');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(mutate.mock.calls[0]?.[0]).not.toHaveProperty('tags');
+  });
+
+  it('предлагает теги из словаря видимых паспортов', async () => {
+    // Без общего словаря свободные теги расходятся — рядом с «Web»
+    // появляется «Вэб», — и фильтр начинает делить сводку.
+    vi.mocked(hooks.useQueryTagVocabulary).mockReturnValue(
+      query([{ id: 't1', slug: 'web', label: 'Web' }]),
+    );
+
+    render(<CreateProjectPanel />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Создать проект' }));
+
+    expect(screen.getByRole('button', { name: '+ Web' })).toBeInTheDocument();
   });
 });
