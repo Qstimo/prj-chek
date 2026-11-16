@@ -5,7 +5,7 @@ import {
   type PublicReleaseReport,
   type ReleaseReport as ReleaseReportData,
 } from '@cairn/shared';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -140,6 +140,25 @@ describe('ReleaseReport', () => {
     expect(checkpoints).toHaveTextContent('App Store');
     expect(checkpoints).toHaveTextContent('не закрыт');
     expect(checkpoints).toHaveTextContent('принято из v1.1');
+  });
+
+  it('держит формулировку, теги и след переноса одним текстовым блоком', () => {
+    // Соседними элементами гибкой строки они ломали вёрстку: длинная
+    // формулировка — один неразрывный элемент, она уезжала на свою
+    // строку, а теги со следом переноса переносились под отметку и
+    // читались как начало следующего чекпоинта. Проверяется разметкой:
+    // ширины и переносы в jsdom не считаются.
+    render(<ReleaseReport report={report} />);
+
+    const carried = screen.getByText(/принято из v1\.1/);
+    const line = carried.closest('li');
+    const mark = within(line!).getByText('не закрыт');
+
+    // Отметка — сосед текстового блока, а не его часть.
+    expect(carried.parentElement).not.toBe(line);
+    expect(mark.parentElement).toBe(line);
+    expect(carried.parentElement).toHaveTextContent('Отчёты');
+    expect(carried.parentElement).not.toHaveTextContent('не закрыт');
   });
 
   it('перечисляет унесённое в другие версии', () => {

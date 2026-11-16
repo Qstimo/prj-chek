@@ -105,16 +105,12 @@ export function ReleaseReport({ report }: IProps) {
           </h3>
           <ul aria-labelledby={HEADING_IDS.checkpoints} className="space-y-1 text-sm">
             {checkpoints.map((checkpoint) => (
-              <li key={checkpoint.id} className="flex flex-wrap items-baseline gap-2">
-                <Mark isDone={checkpoint.isDone} />
-                <CheckpointTitle checkpoint={checkpoint} />
-                <Tags platformIds={checkpoint.platformIds} names={names} />
-                {checkpoint.carriedFrom && (
-                  <span className="text-muted-foreground">
-                    принято из {checkpoint.carriedFrom}
-                  </span>
-                )}
-              </li>
+              <CheckpointLine
+                key={checkpoint.id}
+                checkpoint={checkpoint}
+                names={names}
+                note={checkpoint.carriedFrom ? `принято из ${checkpoint.carriedFrom}` : null}
+              />
             ))}
           </ul>
         </section>
@@ -132,14 +128,12 @@ export function ReleaseReport({ report }: IProps) {
           </h3>
           <ul aria-labelledby={HEADING_IDS.carriedOut} className="space-y-1 text-sm">
             {carriedOut.map((checkpoint) => (
-              <li key={checkpoint.id} className="flex flex-wrap items-baseline gap-2">
-                <Mark isDone={checkpoint.isDone} />
-                <CheckpointTitle checkpoint={checkpoint} />
-                <Tags platformIds={checkpoint.platformIds} names={names} />
-                <span className="text-muted-foreground">
-                  перенесено в {checkpoint.carriedTo}
-                </span>
-              </li>
+              <CheckpointLine
+                key={checkpoint.id}
+                checkpoint={checkpoint}
+                names={names}
+                note={`перенесено в ${checkpoint.carriedTo}`}
+              />
             ))}
           </ul>
         </section>
@@ -193,14 +187,56 @@ function PassportRow({ name, children }: { name: string; children: ReactNode }) 
   );
 }
 
+/**
+ * Строка чекпоинта: отметка слева, остальное — связный текст.
+ *
+ * Формулировка, платформы и след переноса лежат в одном текстовом блоке,
+ * а не стоят соседними элементами гибкой строки. Соседними они и ломали
+ * вёрстку: длинная формулировка — один неразрывный элемент, он не влезал
+ * в строку и уезжал на свою, а платформы со следом переноса переносились
+ * под отметку и читались как начало следующего чекпоинта.
+ *
+ * Отметка остаётся отдельным элементом и не сжимается: она колонка слева,
+ * по которой список читается сверху вниз. `min-w-0` обязателен — без него
+ * у элемента гибкой строки ширина не опускается ниже содержимого, и
+ * длинная строка снова полезла бы за край.
+ */
+function CheckpointLine({
+  checkpoint,
+  names,
+  note,
+}: {
+  checkpoint: ReportCheckpointView | CarriedOutCheckpointView;
+  names: Map<string, string>;
+  note: string | null;
+}) {
+  const tags = tagsOf(checkpoint.platformIds, names);
+
+  return (
+    <li className="flex items-baseline gap-2">
+      <Mark isDone={checkpoint.isDone} />
+      {/* Пробелы перед скобкой и следом переноса стоят внутри текста
+          элементов: между соседними элементами JSX пробел не ставит,
+          а здесь всё обязано читаться одной фразой. */}
+      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
+        <CheckpointTitle checkpoint={checkpoint} />
+        {tags.length > 0 && (
+          <span className="text-xs text-muted-foreground"> ({tags.join(', ')})</span>
+        )}
+        {note && <span className="text-muted-foreground"> {note}</span>}
+      </span>
+    </li>
+  );
+}
+
 /** Отметка готовности словами: цвет — подсказка, а не носитель смысла. */
 function Mark({ isDone }: { isDone: boolean }) {
   return (
     <span
       className={
         isDone
-          ? 'rounded bg-green-500/15 px-2 py-0.5 text-xs text-green-500'
-          : 'rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground'
+          ? 'shrink-0 rounded bg-green-500/15 px-2 py-0.5 text-xs text-green-500'
+          : 'shrink-0 rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground'
       }
     >
       {isDone ? DONE_LABEL : NOT_DONE_LABEL}
@@ -237,13 +273,3 @@ function CheckpointTitle({
   );
 }
 
-/** Теги платформ: куда поедет результат. */
-function Tags({ platformIds, names }: { platformIds: string[]; names: Map<string, string> }) {
-  const tags = tagsOf(platformIds, names);
-
-  if (tags.length === 0) {
-    return null;
-  }
-
-  return <span className="text-xs text-muted-foreground">({tags.join(', ')})</span>;
-}
