@@ -244,6 +244,39 @@ describe('служба саммари', () => {
       expect(await testDb.db.select().from(roadmapVersions)).toHaveLength(1);
     });
 
+    it.each(['ручная', 'предложенная'])('замена %s после чтения до релиза получает конфликт и не меняет выпущенный черновик', async (kind) => {
+      let signalRead = (): void => {};
+      let resumeWrite = (): void => {};
+      const read = new Promise<void>((resolve) => { signalRead = resolve; });
+      const resume = new Promise<void>((resolve) => { resumeWrite = resolve; });
+      const requireForWrite = repository.requireForWrite.bind(repository);
+      vi.spyOn(repository, 'requireForWrite').mockImplementationOnce(async (...args) => {
+        const row = await requireForWrite(...args);
+        // Обе транзакции реально читают базу: задерживаем только возврат
+        // старой строки, чтобы релиз гарантированно успел закоммититься.
+        signalRead();
+        await resume;
+        return row;
+      });
+      const replacement = testDb.appDb.transaction((tx) => kind === 'ручная'
+        ? repository.replaceTasks(writer(), tx, projectId, summaryId, { tasks: [{ title: 'Опоздавшая правка' }] })
+        : repository.replaceWithSuggested(writer(), tx, projectId, summaryId, ['Опоздавшая разбивка'], {
+          name: 'local', model: 'тест', textUpdatedAt: new Date(),
+        }));
+      const outcome = replacement.then(() => null, (cause: unknown) => cause);
+      try {
+        await read;
+        await service.release(writer(), projectId, summaryId, { label: 'v1.3' });
+      } finally {
+        resumeWrite();
+      }
+      expect(await outcome).toBeInstanceOf(ConflictException);
+      const detail = await service.findById(writer(), projectId, summaryId);
+      const checkpoints = await testDb.db.select().from(roadmapCheckpoints).orderBy(asc(roadmapCheckpoints.position));
+      expect(detail.tasks.map(task => task.title)).toEqual(checkpoints.map(checkpoint => checkpoint.title));
+      expect(detail.tasks.map(task => task.title)).toEqual(['раз', 'два', 'три']);
+    });
+
     it('занятое обозначение отвергает репозиторий роадмапа', async () => {
       await testDb.db.insert(roadmapVersions).values({ projectId, label: 'v1.3', position: 1 });
       await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).rejects.toBeInstanceOf(ConflictException);

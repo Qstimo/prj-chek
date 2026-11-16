@@ -184,7 +184,8 @@ export class SummariesRepository {
     summaryId: string,
     input: SummaryTasksReplace,
   ): Promise<SummaryDetail> {
-    const row = await this.requireForWrite(subject, tx, projectId, summaryId);
+    await this.requireForWrite(subject, tx, projectId, summaryId);
+    const row = await this.lockSummary(tx, projectId, summaryId);
 
     if (row.releasedVersionId !== null) {
       throw new ConflictException(SUMMARY_ALREADY_RELEASED);
@@ -279,7 +280,8 @@ export class SummariesRepository {
     titles: string[],
     stamp: { name: string; model: string; textUpdatedAt: Date },
   ): Promise<SummaryDetail> {
-    const row = await this.requireForWrite(subject, tx, projectId, summaryId);
+    await this.requireForWrite(subject, tx, projectId, summaryId);
+    const row = await this.lockSummary(tx, projectId, summaryId);
 
     if (row.releasedVersionId !== null) {
       throw new ConflictException(SUMMARY_ALREADY_RELEASED);
@@ -346,6 +348,18 @@ export class SummariesRepository {
     const roadmapLevel = await this.access.resolveLevel(subject, projectId, Section.Roadmap, tx);
     if (roadmapLevel === null || roadmapLevel === undefined) throw new SectionNotVisibleError();
     await this.requireWrite(subject, projectId, tx);
+    return this.lockSummary(tx, projectId, summaryId);
+  }
+
+  /**
+   * Один замок для релиза и обеих замен: проверять отметку до него нельзя,
+   * поскольку ожидавшая транзакция могла прочитать ещё не выпущенную строку.
+   */
+  private async lockSummary(
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+  ): Promise<SummaryRow> {
     const [row] = await tx.select().from(summaries)
       .where(and(eq(summaries.id, summaryId), eq(summaries.projectId, projectId)))
       .for('no key update');
