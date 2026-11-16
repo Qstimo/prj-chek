@@ -18,6 +18,21 @@ describe('AppNav', () => {
     expect(screen.getByRole('link', { name: 'Проекты' })).toBeInTheDocument();
   });
 
+  it('показывает вкладку «Саммари» обычному пользователю', () => {
+    // Поток нужен не администратору, а тому, кто ведёт проект: пункт
+    // живёт в COMMON_LINKS. Прятать его по выдачам значило бы считать
+    // права при отрисовке навигации, а пустой экран ничего не раскрывает.
+    render(<AppNav subject={subject} onLogout={vi.fn()} />);
+
+    expect(screen.getByRole('link', { name: 'Саммари' })).toHaveAttribute('href', '/summaries');
+  });
+
+  it('в пунктах суперадмина её нет второй раз', () => {
+    render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
+
+    expect(screen.getAllByRole('link', { name: 'Саммари' })).toHaveLength(1);
+  });
+
   it('не показывает разделы администрирования обычному пользователю', () => {
     render(<AppNav subject={subject} onLogout={vi.fn()} />);
 
