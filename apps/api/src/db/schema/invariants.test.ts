@@ -28,6 +28,7 @@ import { servers } from './servers';
 import { sessions } from './sessions';
 import { domainStatuses } from './status';
 import { subjects } from './subjects';
+import { summaries, summaryTaskDrafts } from './summaries';
 import { totpChallenges } from './totp-challenges';
 import { users } from './users';
 import { variableVersions, variables } from './variables';
@@ -49,6 +50,8 @@ const ALL_TABLES = [
   { name: 'version_platform_releases', table: versionPlatformReleases },
   { name: 'checkpoint_platforms', table: checkpointPlatforms },
   { name: 'chronicle_entries', table: chronicleEntries },
+  { name: 'summaries', table: summaries },
+  { name: 'summary_task_drafts', table: summaryTaskDrafts },
   { name: 'doc_pages', table: docPages },
   { name: 'agent_tokens', table: agentTokens },
   { name: 'variables', table: variables },
