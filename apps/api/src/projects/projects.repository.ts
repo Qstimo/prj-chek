@@ -10,7 +10,7 @@ import {
   type ProjectUpdate,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
 
 import { AccessService } from '../access/access.service';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
@@ -182,8 +182,9 @@ export class ProjectsRepository {
   }
 
   /**
-   * Прод-обзор по проектам: одно production-окружение (name ASC),
-   * первый домен (name ASC), имя машины.
+   * Адрес и машина для обзора: сначала production с адресом, затем
+   * остальные окружения с адресом. Внутри приоритета — name ASC.
+   * Пока адресов нет, машина берётся из первого окружения по тому же порядку.
    */
   private async productionOverviewByProject(
     projectIds: string[],
@@ -196,23 +197,14 @@ export class ProjectsRepository {
         name: environments.name,
       })
       .from(environments)
-      .where(
-        and(
-          inArray(environments.projectId, projectIds),
-          eq(environments.kind, EnvironmentKind.Production),
-        ),
-      )
-      .orderBy(asc(environments.name));
+      .where(inArray(environments.projectId, projectIds))
+      .orderBy(
+        sql`case when ${environments.kind} = ${EnvironmentKind.Production} then 0 else 1 end`,
+        asc(environments.name),
+        asc(environments.id),
+      );
 
-    const chosenEnv = new Map<string, (typeof envRows)[number]>();
-
-    for (const row of envRows) {
-      if (!chosenEnv.has(row.projectId)) {
-        chosenEnv.set(row.projectId, row);
-      }
-    }
-
-    const envIds = [...chosenEnv.values()].map((row) => row.id);
+    const envIds = envRows.map((row) => row.id);
     const domainByEnv = new Map<string, string>();
 
     if (envIds.length > 0) {
@@ -229,6 +221,15 @@ export class ProjectsRepository {
         if (!domainByEnv.has(row.environmentId)) {
           domainByEnv.set(row.environmentId, row.name);
         }
+      }
+    }
+
+    const chosenEnv = new Map<string, (typeof envRows)[number]>();
+
+    for (const row of envRows) {
+      const chosen = chosenEnv.get(row.projectId);
+      if (!chosen || (!domainByEnv.has(chosen.id) && domainByEnv.has(row.id))) {
+        chosenEnv.set(row.projectId, row);
       }
     }
 

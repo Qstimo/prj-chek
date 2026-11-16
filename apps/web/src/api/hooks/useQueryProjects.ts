@@ -12,9 +12,11 @@ export const PROJECT_KEYS = {
 };
 
 /** Список видимых проектов (строки сводки). */
-export function useQueryProjects() {
+export function useQueryProjects(initialData?: ProjectListItem[]) {
   return useQuery({
     queryKey: PROJECT_KEYS.all,
     queryFn: () => apiClient<ProjectListItem[]>('/projects'),
+    initialData,
+    refetchOnMount: 'always',
   });
 }

@@ -18,7 +18,7 @@ export function ReleaseSummary({ summary }: IProps) {
   }
 
   return (
-    <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-3">
+    <dl className="grid grid-cols-[minmax(5rem,8rem)_minmax(0,1fr)] items-start gap-x-4 gap-y-3 sm:grid-cols-[minmax(5rem,10rem)_minmax(0,1fr)]">
       {summary.map((row) => (
         <SummaryRow key={row.platform.id} row={row} />
       ))}

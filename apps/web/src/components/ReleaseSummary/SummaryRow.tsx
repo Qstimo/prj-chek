@@ -14,8 +14,8 @@ interface IProps {
 export function SummaryRow({ row }: IProps) {
   return (
     <>
-      <dt className="font-medium">{row.platform.name}</dt>
-      <dd className="flex flex-wrap items-center gap-2 sm:col-span-2">
+      <dt className="min-w-0 break-words font-medium">{row.platform.name}</dt>
+      <dd className="flex min-w-0 flex-wrap items-center gap-2">
         {row.released ? (
           <>
             <ReleaseBadge

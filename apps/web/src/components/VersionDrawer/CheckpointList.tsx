@@ -55,7 +55,7 @@ export function CheckpointList({
   }
 
   return (
-    <ul className="grid gap-1">
+    <ul className="checkpoint-list grid gap-1">
       {checkpoints.map((checkpoint) =>
         checkpoint.id === editingId && onEdit ? (
           <li key={checkpoint.id}>

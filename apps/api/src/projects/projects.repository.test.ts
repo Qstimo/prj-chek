@@ -199,6 +199,50 @@ describe('ProjectsRepository', () => {
       });
     });
 
+    it('показывает домен разработки, пока у проекта нет адреса прода', async () => {
+      const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
+      const [dev] = await testDb.db.insert(environments).values({
+        projectId, name: 'Разработка', kind: EnvironmentKind.Development,
+      }).returning();
+      await testDb.db.insert(environmentDomains).values({
+        environmentId: dev!.id, domainId: root!.id, name: 'dev.example.com',
+      });
+
+      const [item] = await repository.findVisible(subject({ isSuperadmin: true }));
+      expect(item?.productionDomain).toBe('dev.example.com');
+    });
+
+    it('не теряет адрес второго прода, если первый пока без домена', async () => {
+      const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
+      await testDb.db.insert(environments).values({
+        projectId, name: 'Альфа', kind: EnvironmentKind.Production,
+      });
+      const [prod] = await testDb.db.insert(environments).values({
+        projectId, name: 'Бета', kind: EnvironmentKind.Production,
+      }).returning();
+      await testDb.db.insert(environmentDomains).values({
+        environmentId: prod!.id, domainId: root!.id, name: 'example.com',
+      });
+
+      const [item] = await repository.findVisible(subject({ isSuperadmin: true }));
+      expect(item?.productionDomain).toBe('example.com');
+    });
+
+    it('предпочитает адрес прода адресу разработки', async () => {
+      const [root] = await testDb.db.insert(domains).values({ name: 'example.com' }).returning();
+      for (const [name, kind, address] of [
+        ['Альфа', EnvironmentKind.Development, 'dev.example.com'],
+        ['Бета', EnvironmentKind.Production, 'example.com'],
+      ] as const) {
+        const [env] = await testDb.db.insert(environments).values({ projectId, name, kind }).returning();
+        await testDb.db.insert(environmentDomains).values({
+          environmentId: env!.id, domainId: root!.id, name: address,
+        });
+      }
+      const [item] = await repository.findVisible(subject({ isSuperadmin: true }));
+      expect(item?.productionDomain).toBe('example.com');
+    });
+
     it('при Infra Metadata отдаёт домен и прячет имя сервера', async () => {
       await testDb.db.insert(grants).values({
         subjectId,

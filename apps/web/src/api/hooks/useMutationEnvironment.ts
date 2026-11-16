@@ -6,6 +6,7 @@ import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-q
 import { apiClient } from '../client';
 import { DOMAIN_KEYS } from './useQueryDomains';
 import { ENVIRONMENT_KEYS } from './useQueryEnvironments';
+import { PROJECT_KEYS } from './useQueryProjects';
 
 /** Создание окружения. Требуется уровень записи на секции. */
 export function useMutationCreateEnvironment(projectId: string) {
@@ -15,7 +16,7 @@ export function useMutationCreateEnvironment(projectId: string) {
     mutationFn: (input: EnvironmentCreate) =>
       apiClient(`/projects/${projectId}/environments`, { method: 'POST', body: input }),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ENVIRONMENT_KEYS.forProject(projectId) });
+      await invalidateAddressViews(client, projectId);
     },
   });
 }
@@ -28,7 +29,7 @@ export function useMutationUpdateEnvironment(projectId: string) {
     mutationFn: ({ id, input }: { id: string; input: EnvironmentUpdate }) =>
       apiClient(`/projects/${projectId}/environments/${id}`, { method: 'PATCH', body: input }),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ENVIRONMENT_KEYS.forProject(projectId) });
+      await invalidateAddressViews(client, projectId);
     },
   });
 }
@@ -41,7 +42,7 @@ export function useMutationDeleteEnvironment(projectId: string) {
     mutationFn: (id: string) =>
       apiClient(`/projects/${projectId}/environments/${id}`, { method: 'DELETE' }),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ENVIRONMENT_KEYS.forProject(projectId) });
+      await invalidateAddressViews(client, projectId);
     },
   });
 }
@@ -105,4 +106,5 @@ async function invalidateAddressViews(client: QueryClient, projectId: string): P
   await client.invalidateQueries({ queryKey: ENVIRONMENT_KEYS.forProject(projectId) });
   await client.invalidateQueries({ queryKey: DOMAIN_KEYS.all });
   await client.invalidateQueries({ queryKey: ['status'] });
+  await client.invalidateQueries({ queryKey: PROJECT_KEYS.all });
 }

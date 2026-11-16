@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { ApiError } from '@/api';
 import { apiServer } from '@/api/server';
-import { ProjectList } from '@/components/ProjectList';
+import { ProjectListContainer } from '@/components/ProjectList/ProjectListContainer';
 
 import { CreateProjectPanel } from './CreateProjectPanel';
 import { PushTogglePanel } from './PushTogglePanel';
@@ -47,7 +47,7 @@ export default async function HomePage() {
       <WarningsPanel title="Не отвечает" tone={WarningTone.Critical} warnings={critical} />
       <WarningsPanel title="Требует внимания" warnings={attention} />
 
-      <ProjectList
+      <ProjectListContainer
         projects={projects}
         indicators={indicators}
         createSlot={subject.isSuperadmin ? <CreateProjectPanel /> : undefined}

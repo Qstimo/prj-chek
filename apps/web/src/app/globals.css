@@ -3,6 +3,49 @@
 @tailwind utilities;
 
 @layer components {
+  .checkpoint-list {
+    container-type: inline-size;
+  }
+
+  .checkpoint-item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .checkpoint-item__content {
+    grid-column: 2 / 4;
+    grid-row: 1;
+  }
+
+  .checkpoint-item__platforms {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .checkpoint-item__actions {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  @container (min-width: 36rem) {
+    .checkpoint-item {
+      grid-template-columns: auto minmax(0, 1fr) 8rem auto;
+    }
+
+    .checkpoint-item__content {
+      grid-column: 2;
+    }
+
+    .checkpoint-item__platforms {
+      grid-column: 3;
+      grid-row: 1;
+    }
+
+    .checkpoint-item__actions {
+      grid-column: 4;
+      grid-row: 1;
+    }
+  }
+
   .cairn-loader {
     display: flex;
     align-items: center;

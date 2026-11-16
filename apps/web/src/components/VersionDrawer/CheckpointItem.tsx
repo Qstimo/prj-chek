@@ -65,9 +65,9 @@ export function CheckpointItem({
     .filter((platform): platform is Platform => platform !== undefined);
 
   return (
-    <li className="flex min-w-0 flex-wrap items-start gap-2 py-2">
+    <li className="checkpoint-item grid min-w-0 items-start gap-x-3 gap-y-2 py-2">
       <input
-        className="mt-1 shrink-0"
+        className="col-start-1 row-start-1 mt-1 shrink-0"
         type="checkbox"
         id={`checkpoint-${checkpoint.id}`}
         checked={checkpoint.isDone}
@@ -76,97 +76,106 @@ export function CheckpointItem({
         aria-label={checkpoint.title}
       />
 
-      {checkpoint.url ? (
-        <a
-          href={checkpoint.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`min-w-0 flex-1 basis-40 break-words [overflow-wrap:anywhere] hover:underline ${doneClassName}`}
-        >
-          {checkpoint.title}
-        </a>
-      ) : (
-        <label
-          htmlFor={`checkpoint-${checkpoint.id}`}
-          className={`min-w-0 flex-1 basis-40 break-words [overflow-wrap:anywhere] ${doneClassName}`}
-        >
-          {checkpoint.title}
-        </label>
-      )}
+      <div className="checkpoint-item__content min-w-0 space-y-2">
+        {checkpoint.url ? (
+          <a
+            href={checkpoint.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`block min-w-0 break-words [overflow-wrap:anywhere] hover:underline ${doneClassName}`}
+          >
+            {checkpoint.title}
+          </a>
+        ) : (
+          <label
+            htmlFor={`checkpoint-${checkpoint.id}`}
+            className={`block min-w-0 break-words [overflow-wrap:anywhere] ${doneClassName}`}
+          >
+            {checkpoint.title}
+          </label>
+        )}
 
-      {tags.length > 0 && (
-        <ul className="flex max-w-full min-w-0 flex-wrap gap-1 sm:max-w-36">
+        {((markUnfinished && !checkpoint.isDone) || (canWrite && onCarryOver && !checkpoint.isDone)) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {markUnfinished && !checkpoint.isDone && (
+              <span
+                {...triggerProps}
+                tabIndex={0}
+                aria-label="Не закрыт после выпуска"
+                aria-describedby={noticeId}
+                className="group shrink-0 rounded bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600 outline-offset-2 dark:text-amber-500"
+              >
+                <span aria-hidden="true" className="font-bold">! </span>
+                {UNFINISHED_MARK}
+                <span
+                  id={noticeId}
+                  role="tooltip"
+                  hidden={!isVisible}
+                  {...tooltipProps}
+                  className="fixed bottom-4 left-4 right-4 z-[60] mx-auto w-fit max-w-[calc(100vw-2rem)] whitespace-normal break-words rounded-md border bg-background p-3 text-left text-sm font-normal text-foreground shadow-lg"
+                >
+                  {explanation}
+                </span>
+              </span>
+            )}
+
+            {/* Перенести можно только то, что ещё не закрыто: у закрытого
+                чекпоинта переезд ничего не меняет. */}
+            {canWrite && onCarryOver && !checkpoint.isDone && (
+              <button
+                type="button"
+                aria-label={carryOverActionOf(checkpoint.title, carryOverTargetLabel)}
+                title={carryOverActionOf(checkpoint.title, carryOverTargetLabel)}
+                disabled={isCarryingOver}
+                onClick={() => onCarryOver(checkpoint.id)}
+                className="h-9 w-36 max-w-full shrink-0 truncate rounded-md border px-2 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {carryOverTargetLabel ? `→ ${carryOverTargetLabel}` : '→ следующая версия'}
+              </button>
+            )}
+
+          </div>
+        )}
+      </div>
+
+      <div className="checkpoint-item__platforms min-w-0">
+        <ul className="flex min-w-0 flex-col gap-1">
           {tags.map((tag) => (
             <li
               key={tag.id}
               tabIndex={0}
               title={tag.name}
-              className="w-32 max-w-full shrink-0 truncate rounded bg-muted px-2 py-1 text-xs focus:whitespace-normal focus:break-words focus:[overflow-wrap:anywhere]"
+              className="w-full min-w-0 truncate rounded bg-muted px-2 py-1 text-xs focus:whitespace-normal focus:break-words focus:[overflow-wrap:anywhere]"
             >
               {tag.name}
             </li>
           ))}
         </ul>
-      )}
+      </div>
 
-      {markUnfinished && !checkpoint.isDone && (
-        <span
-          {...triggerProps}
-          tabIndex={0}
-          aria-label="Не закрыт после выпуска"
-          aria-describedby={noticeId}
-          className="group shrink-0 rounded bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600 outline-offset-2 dark:text-amber-500"
-        >
-          <span aria-hidden="true" className="font-bold">! </span>
-          {UNFINISHED_MARK}
-          <span
-            id={noticeId}
-            role="tooltip"
-            hidden={!isVisible}
-            {...tooltipProps}
-            className="fixed bottom-4 left-4 right-4 z-[60] mx-auto w-fit max-w-[calc(100vw-2rem)] whitespace-normal break-words rounded-md border bg-background p-3 text-left text-sm font-normal text-foreground shadow-lg"
+      <div className="checkpoint-item__actions flex shrink-0 gap-2">
+        {canWrite && onEdit && (
+          <button
+            type="button"
+            aria-label={`Править ${checkpoint.title}`}
+            onClick={() => onEdit(checkpoint.id)}
+            className="h-9 w-9 shrink-0 rounded-md border text-sm text-muted-foreground"
           >
-            {explanation}
-          </span>
-        </span>
-      )}
+            ✎
+          </button>
+        )}
 
-      {/* Перенести можно только то, что ещё не закрыто: у закрытого
-          чекпоинта переезд ничего не меняет. */}
-      {canWrite && onCarryOver && !checkpoint.isDone && (
-        <button
-          type="button"
-          aria-label={carryOverActionOf(checkpoint.title, carryOverTargetLabel)}
-          title={carryOverActionOf(checkpoint.title, carryOverTargetLabel)}
-          disabled={isCarryingOver}
-          onClick={() => onCarryOver(checkpoint.id)}
-          className="h-9 w-36 max-w-full shrink-0 truncate rounded-md border px-2 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
-        >
-          {carryOverTargetLabel ? `→ ${carryOverTargetLabel}` : '→ следующая версия'}
-        </button>
-      )}
-
-      {canWrite && onEdit && (
-        <button
-          type="button"
-          aria-label={`Править ${checkpoint.title}`}
-          onClick={() => onEdit(checkpoint.id)}
-          className="h-9 w-9 shrink-0 rounded-md border text-sm text-muted-foreground"
-        >
-          ✎
-        </button>
-      )}
-
-      {canWrite && (
-        <button
-          type="button"
-          aria-label={`Убрать ${checkpoint.title}`}
-          onClick={() => onDelete(checkpoint.id)}
-          className="h-9 w-9 shrink-0 rounded-md border text-sm text-muted-foreground"
-        >
-          ×
-        </button>
-      )}
+        {canWrite && (
+          <button
+            type="button"
+            aria-label={`Убрать ${checkpoint.title}`}
+            onClick={() => onDelete(checkpoint.id)}
+            className="h-9 w-9 shrink-0 rounded-md border text-sm text-muted-foreground"
+          >
+            ×
+          </button>
+        )}
+      </div>
     </li>
   );
 }

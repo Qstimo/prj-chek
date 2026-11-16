@@ -118,4 +118,20 @@ describe('мутации окружения', () => {
     );
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'DELETE' });
   });
+
+  it('после добавления адреса помечает сводку проектов устаревшей', async () => {
+    const client = new QueryClient();
+    client.setQueryData(['projects'], [{ id: PROJECT_ID, productionDomain: null }]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 201, json: async () => ({}) }));
+    const { result } = renderHook(() => useMutationAddEnvironmentDomain(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+
+    result.current.mutate({ projectId: PROJECT_ID, environmentId: ENVIRONMENT_ID, name: 'example.com' });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(client.getQueryState(['projects'])?.isInvalidated).toBe(true);
+  });
 });
