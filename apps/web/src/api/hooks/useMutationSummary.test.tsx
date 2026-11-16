@@ -4,8 +4,8 @@ import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { summaryFailureOf } from '../summary-failure';
 import {
-  summaryFailureOf,
   useMutationCreateSummary,
   useMutationReleaseSummary,
   useMutationSaveSummaryTasks,
@@ -45,13 +45,18 @@ describe('мутации саммари', () => {
     vi.unstubAllGlobals();
   });
 
-  it('создание уходит по адресу проекта', async () => {
+  it('создание уходит по адресу выбранного в форме проекта', async () => {
+    // Проект — аргумент вызова: его выбирают в форме, и хук, получивший
+    // его при отрисовке, отправил бы запрос по прежнему выбору.
     const fetchMock = okFetch();
     vi.stubGlobal('fetch', fetchMock);
 
-    const { result } = renderHook(() => useMutationCreateSummary(PROJECT_ID), { wrapper });
+    const { result } = renderHook(() => useMutationCreateSummary(), { wrapper });
 
-    result.current.mutate({ occurredOn: '2026-11-16', title: 'Созвон', text: 'обсудили сроки' });
+    result.current.mutate({
+      projectId: PROJECT_ID,
+      input: { occurredOn: '2026-11-16', title: 'Созвон', text: 'обсудили сроки' },
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 

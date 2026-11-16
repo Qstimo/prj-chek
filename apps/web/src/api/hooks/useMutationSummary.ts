@@ -10,41 +10,9 @@ import type {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
-import { ApiError } from '../errors';
 import { CHRONICLE_KEYS } from './useQueryChronicle';
 import { ROADMAP_KEYS } from './useQueryRoadmap';
 import { SUMMARY_KEYS } from './useQuerySummaries';
-
-/** Отказ потока саммари, разобранный по контракту. */
-export interface ISummaryFailure {
-  /** Код из тела отказа; отсутствует у сетевых и прочих ответов без него. */
-  code?: string;
-  /** Предел объёма предложителя — только у `summary_text_too_long`. */
-  maxChars?: number;
-}
-
-/**
- * Достаёт код отказа из ответа сервера.
- *
- * Код, а не разбор текста: фразу в ответе можно переписать, код — нет
- * (`CARRY_OVER_NEEDS_LABEL` заведён по той же причине). Предел объёма
- * берётся оттуда же, потому что он настройка узла: подставить своё число
- * значило бы соврать о чужой настройке.
- *
- * Кода нет — поле пустое, и экран говорит общими словами: подменять
- * сетевой сбой кодом порта значило бы объяснить не то, что случилось.
- */
-export function summaryFailureOf(error: unknown): ISummaryFailure {
-  if (!(error instanceof ApiError)) {
-    return {};
-  }
-
-  const details = error.details as { code?: unknown; maxChars?: unknown } | null;
-  const code = typeof details?.code === 'string' ? details.code : undefined;
-  const maxChars = typeof details?.maxChars === 'number' ? details.maxChars : undefined;
-
-  return { ...(code === undefined ? {} : { code }), ...(maxChars === undefined ? {} : { maxChars }) };
-}
 
 /**
  * Сброс кэшей после правки саммари.
@@ -65,16 +33,21 @@ function useSummaryInvalidation(projectId: string, summaryId?: string) {
   };
 }
 
-/** Создание саммари: текст ложится в хронику той же транзакцией. */
-export function useMutationCreateSummary(projectId: string) {
+/**
+ * Создание саммари: текст ложится в хронику той же транзакцией.
+ *
+ * Проект — аргумент вызова, а не хука, в отличие от остальных мутаций
+ * потока: его выбирают в самой форме, и хук, получивший его при отрисовке,
+ * отправил бы запрос по прежнему выбору.
+ */
+export function useMutationCreateSummary() {
   const client = useQueryClient();
-  const invalidate = useSummaryInvalidation(projectId);
 
   return useMutation({
-    mutationFn: (input: SummaryCreate) =>
+    mutationFn: ({ projectId, input }: { projectId: string; input: SummaryCreate }) =>
       apiClient<SummaryDetail>(`/projects/${projectId}/summaries`, { method: 'POST', body: input }),
-    onSuccess: async () => {
-      await invalidate();
+    onSuccess: async (_created, { projectId }) => {
+      await client.invalidateQueries({ queryKey: SUMMARY_KEYS.all });
       // В ленте проекта появилась запись: её источник — «Саммари созвона».
       await client.invalidateQueries({ queryKey: CHRONICLE_KEYS.forProject(projectId) });
     },
