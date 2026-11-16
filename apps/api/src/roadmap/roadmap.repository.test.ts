@@ -320,6 +320,43 @@ describe('репозиторий роадмапа', () => {
     });
   });
 
+  describe('обозначения версий', () => {
+    it('отдаёт обозначения и позиции по порядку', async () => {
+      await createVersion('v1.1');
+      await createVersion('v1.2');
+
+      expect(await repository.labelsForProject(admin(), projectId)).toEqual([
+        { label: 'v1.1', position: 1 },
+        { label: 'v1.2', position: 2 },
+      ]);
+    });
+
+    it('хватает уровня метаданных: обозначения видны и на нём', async () => {
+      // ТЗ 4.3: обозначение версии — метаданные роадмапа, а не его
+      // содержимое.
+      await createVersion('v1.1');
+      await createVersion('v1.2');
+      await grant(AccessLevel.Metadata);
+
+      await expect(repository.labelsForProject(member(), projectId)).resolves.toHaveLength(2);
+    });
+
+    it('без выдачи на роадмап проект не раскрывается', async () => {
+      // Отсутствие доступа — 404, а не 403.
+      await createVersion('v1.1');
+
+      await expect(repository.labelsForProject(member(), projectId)).rejects.toBeInstanceOf(
+        SectionNotVisibleError,
+      );
+    });
+
+    it('версий чужого проекта не отдаёт', async () => {
+      await createVersion('v1.1');
+
+      expect(await repository.labelsForProject(admin(), otherProjectId)).toEqual([]);
+    });
+  });
+
   describe('роадмап и стадия', () => {
     it('метаданные содержат прогресс без формулировок', async () => {
       const versionId = await createVersion();
