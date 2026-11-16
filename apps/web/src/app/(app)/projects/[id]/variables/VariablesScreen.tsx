@@ -52,7 +52,7 @@ export function VariablesScreen({ projectId, environmentId }: IProps) {
   const [isCreating, setIsCreating] = useState(false);
 
   if (variables.isPending || sections.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (variables.isError || sections.isError) {

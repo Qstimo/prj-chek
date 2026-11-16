@@ -102,10 +102,8 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   /**
    * Идущий прогон, если он есть.
    *
-   * Признак в памяти рядом с замком в базе, а не вместо него: замок
-   * узнаётся только запросом, а ручке «Проверить сейчас» ответ нужен
-   * сразу и без похода в базу. Поле же даёт ответ «занято» в том
-   * процессе, где прогон и идёт, — а это обычный случай.
+   * Память не заменяет замок базы: она сразу отсеивает повторный запрос
+   * в том же процессе, пока первый ещё получает соединение и замок.
    */
   private current: Promise<StatusRunOutcome> | null = null;
 
@@ -129,9 +127,13 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
 
     // Прогон при старте не держит подъём приложения: оно обязано начать
     // отвечать на запросы, не дожидаясь обхода сети.
-    this.start();
+    const start = () => {
+      // start уже пишет отказ в лог; фон не оставляет rejected Promise.
+      void this.start().catch(() => undefined);
+    };
+    start();
 
-    this.timer = setInterval(() => this.start(), minutes * 60 * 1000);
+    this.timer = setInterval(start, minutes * 60 * 1000);
     // Процесс не должен жить ради таймера.
     this.timer.unref();
   }
@@ -147,23 +149,24 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Запускает прогон в фоне и сразу отвечает, принят ли он.
+   * Ждёт только ответа о замке базы; сам обход продолжает в фоне.
    *
-   * Для ручки «Проверить сейчас»: она объявлена `202`, а прогон идёт
-   * минуты — запрос браузера рвался по таймауту при живом прогоне.
-   * Признак занятости проверяется и выставляется синхронно, поэтому два
-   * одновременных запроса не могут оба получить «принято».
+   * pg_try_advisory_xact_lock не ждёт чужого прогона: занятый замок
+   * сразу даёт Busy, в том числе между разными экземплярами API.
    */
-  start(options: RunOptions = {}): StatusRunOutcome {
+  start(options: RunOptions = {}): Promise<StatusRunOutcome> {
     if (this.current) {
-      return StatusRunOutcome.Busy;
+      return Promise.resolve(StatusRunOutcome.Busy);
     }
 
-    void this.claim(options).catch((cause) =>
-      this.logger.error(`Прогон проверок упал: ${cause}`),
-    );
-
-    return StatusRunOutcome.Accepted;
+    return new Promise((resolve, reject) => {
+      void this.claim(options, resolve).catch((cause) => {
+        // До ответа о замке отклоняем запрос; после Accepted только
+        // сообщаем об отказе фонового обхода, как и прежде.
+        reject(cause);
+        this.logger.error(`Прогон проверок упал: ${cause}`);
+      });
+    });
   }
 
   /**
@@ -191,8 +194,11 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    * Синхронно — обязательное условие: признак, выставленный после первого
    * `await`, два одновременных запроса обошли бы оба.
    */
-  private claim(options: RunOptions): Promise<StatusRunOutcome> {
-    const running = this.locked(options).finally(() => {
+  private claim(
+    options: RunOptions,
+    onClaimed?: (outcome: StatusRunOutcome) => void,
+  ): Promise<StatusRunOutcome> {
+    const running = this.locked(options, onClaimed).finally(() => {
       this.current = null;
     });
 
@@ -211,7 +217,10 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    * исключением, падением процесса, обрывом связи. Записи прогона идут
    * своими соединениями и этой транзакции не касаются.
    */
-  private async locked(options: RunOptions): Promise<StatusRunOutcome> {
+  private async locked(
+    options: RunOptions,
+    onClaimed?: (outcome: StatusRunOutcome) => void,
+  ): Promise<StatusRunOutcome> {
     return this.lockDb.transaction(async (tx) => {
       const rows = (await tx.execute(
         sql`select pg_try_advisory_xact_lock(${LOCK_CLASS}, ${LOCK_OBJECT}) as locked`,
@@ -219,10 +228,12 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
 
       if (rows[0]?.locked !== true) {
         this.logger.log('Прогон проверок уже идёт: этот пропущен.');
+        onClaimed?.(StatusRunOutcome.Busy);
 
         return StatusRunOutcome.Busy;
       }
 
+      onClaimed?.(StatusRunOutcome.Accepted);
       await this.sweep(options);
 
       return StatusRunOutcome.Done;

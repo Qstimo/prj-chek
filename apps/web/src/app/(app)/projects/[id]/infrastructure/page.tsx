@@ -5,7 +5,7 @@ import { ApiError } from '@/api';
 import { apiServer } from '@/api/server';
 
 import { InfrastructureScreen } from './InfrastructureScreen';
-import { InfrastructureStatusPanel } from './InfrastructureStatusPanel';
+import { InfrastructureStatusEntry } from './InfrastructureStatusEntry';
 
 /** Страница секции «Инфраструктура». */
 export default async function InfrastructurePage({
@@ -30,7 +30,7 @@ export default async function InfrastructurePage({
   return (
     <main className="space-y-6 pb-6">
       <h1 className="text-2xl font-semibold">Инфраструктура</h1>
-      <InfrastructureStatusPanel projectId={id} isSuperadmin={subject.isSuperadmin} />
+      <InfrastructureStatusEntry projectId={id} />
       <InfrastructureScreen projectId={id} isSuperadmin={subject.isSuperadmin} />
     </main>
   );

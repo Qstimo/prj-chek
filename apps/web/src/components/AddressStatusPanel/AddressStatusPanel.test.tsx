@@ -158,7 +158,9 @@ describe('панель разбора адреса', () => {
       <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
     );
 
-    expect(screen.getByText(/не падал ни разу за 30 дней/)).toBeInTheDocument();
+    expect(screen.getByText(/нет зарегистрированных падений за 30 дней/)).toBeInTheDocument();
+    expect(screen.getByText(/аптайм не измерен/)).toBeInTheDocument();
+    expect(screen.queryByText(/100%/)).not.toBeInTheDocument();
   });
 
   it('отказ истории объясняется, а не гасится', () => {

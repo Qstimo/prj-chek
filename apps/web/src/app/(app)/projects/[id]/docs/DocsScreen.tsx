@@ -38,7 +38,7 @@ export function DocsScreen({ projectId }: IProps) {
   const page = useQueryDocPage(projectId, selectedId);
 
   if (docs.isPending || sections.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (docs.isError || sections.isError) {

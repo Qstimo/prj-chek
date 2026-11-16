@@ -23,7 +23,7 @@ export function Loader({ label = 'Загрузка…', size = 'compact' }: IPro
           className="cairn-loader__face cairn-loader__face--fill"
         />
       </span>
-      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="sr-only">{label}</span>
     </div>
   );
 }

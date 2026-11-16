@@ -2,7 +2,8 @@
 
 import type { Platform, RoadmapCheckpoint } from '@cairn/shared';
 
-import { PlatformChips } from '../PlatformChips';
+import { useUnfinishedNotice } from '../RoadmapTimeline/useUnfinishedNotice';
+
 import { UNFINISHED_MARK } from './constants';
 import { carryOverActionOf } from './utils';
 
@@ -51,6 +52,11 @@ export function CheckpointItem({
   carryOverTargetLabel,
   isCarryingOver = false,
 }: IProps) {
+  const { noticeId, isVisible, triggerProps, tooltipProps } = useUnfinishedNotice(
+    markUnfinished && !checkpoint.isDone,
+  );
+  const explanation =
+    'Версия выпущена, но чекпоинт не закрыт. Незавершённые задачи можно перенести в следующую версию.';
   const doneClassName = checkpoint.isDone ? 'text-muted-foreground line-through' : '';
   // Неизвестный идентификатор пропускается молча: платформу могли
   // удалить, а закэшированный ответ ещё помнит тег.
@@ -59,8 +65,9 @@ export function CheckpointItem({
     .filter((platform): platform is Platform => platform !== undefined);
 
   return (
-    <li className="flex items-center gap-2">
+    <li className="flex min-w-0 flex-wrap items-start gap-2 py-2">
       <input
+        className="mt-1 shrink-0"
         type="checkbox"
         id={`checkpoint-${checkpoint.id}`}
         checked={checkpoint.isDone}
@@ -74,21 +81,53 @@ export function CheckpointItem({
           href={checkpoint.url}
           target="_blank"
           rel="noopener noreferrer"
-          className={`hover:underline ${doneClassName}`}
+          className={`min-w-0 flex-1 basis-40 break-words [overflow-wrap:anywhere] hover:underline ${doneClassName}`}
         >
           {checkpoint.title}
         </a>
       ) : (
-        <label htmlFor={`checkpoint-${checkpoint.id}`} className={doneClassName}>
+        <label
+          htmlFor={`checkpoint-${checkpoint.id}`}
+          className={`min-w-0 flex-1 basis-40 break-words [overflow-wrap:anywhere] ${doneClassName}`}
+        >
           {checkpoint.title}
         </label>
       )}
 
-      <PlatformChips platforms={tags} />
+      {tags.length > 0 && (
+        <ul className="flex max-w-full min-w-0 flex-wrap gap-1 sm:max-w-36">
+          {tags.map((tag) => (
+            <li
+              key={tag.id}
+              tabIndex={0}
+              title={tag.name}
+              className="w-32 max-w-full shrink-0 truncate rounded bg-muted px-2 py-1 text-xs focus:whitespace-normal focus:break-words focus:[overflow-wrap:anywhere]"
+            >
+              {tag.name}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {markUnfinished && !checkpoint.isDone && (
-        <span className="rounded bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600 dark:text-amber-500">
+        <span
+          {...triggerProps}
+          tabIndex={0}
+          aria-label="Не закрыт после выпуска"
+          aria-describedby={noticeId}
+          className="group shrink-0 rounded bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600 outline-offset-2 dark:text-amber-500"
+        >
+          <span aria-hidden="true" className="font-bold">! </span>
           {UNFINISHED_MARK}
+          <span
+            id={noticeId}
+            role="tooltip"
+            hidden={!isVisible}
+            {...tooltipProps}
+            className="fixed bottom-4 left-4 right-4 z-[60] mx-auto w-fit max-w-[calc(100vw-2rem)] whitespace-normal break-words rounded-md border bg-background p-3 text-left text-sm font-normal text-foreground shadow-lg"
+          >
+            {explanation}
+          </span>
         </span>
       )}
 
@@ -98,9 +137,10 @@ export function CheckpointItem({
         <button
           type="button"
           aria-label={carryOverActionOf(checkpoint.title, carryOverTargetLabel)}
+          title={carryOverActionOf(checkpoint.title, carryOverTargetLabel)}
           disabled={isCarryingOver}
           onClick={() => onCarryOver(checkpoint.id)}
-          className="text-sm text-muted-foreground hover:underline disabled:opacity-50"
+          className="h-9 w-36 max-w-full shrink-0 truncate rounded-md border px-2 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
         >
           {carryOverTargetLabel ? `→ ${carryOverTargetLabel}` : '→ следующая версия'}
         </button>
@@ -111,7 +151,7 @@ export function CheckpointItem({
           type="button"
           aria-label={`Править ${checkpoint.title}`}
           onClick={() => onEdit(checkpoint.id)}
-          className="text-sm text-muted-foreground"
+          className="h-9 w-9 shrink-0 rounded-md border text-sm text-muted-foreground"
         >
           ✎
         </button>
@@ -122,7 +162,7 @@ export function CheckpointItem({
           type="button"
           aria-label={`Убрать ${checkpoint.title}`}
           onClick={() => onDelete(checkpoint.id)}
-          className="text-sm text-muted-foreground"
+          className="h-9 w-9 shrink-0 rounded-md border text-sm text-muted-foreground"
         >
           ×
         </button>

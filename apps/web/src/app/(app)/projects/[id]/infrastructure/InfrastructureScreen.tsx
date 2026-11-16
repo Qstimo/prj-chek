@@ -41,7 +41,7 @@ export function InfrastructureScreen({ projectId, isSuperadmin }: IProps) {
   const [isCreating, setIsCreating] = useState(false);
 
   if (environments.isPending || sections.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (environments.isError || sections.isError) {

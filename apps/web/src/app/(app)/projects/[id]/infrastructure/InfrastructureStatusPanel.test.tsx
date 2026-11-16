@@ -98,6 +98,43 @@ beforeEach(() => {
 });
 
 describe('панель статуса инфраструктуры', () => {
+  it.each([StatusIndicator.Warning, StatusIndicator.Unknown, StatusIndicator.Paused])('сохраняет доступный запуск рядом с индикатором %s', async (indicator) => {
+    const mutate = vi.fn();
+    vi.mocked(hooks.useMutationRunChecks).mockReturnValue({ mutate, isPending: false, isSuccess: false, error: null } as never);
+    vi.mocked(hooks.useQueryProjectStatus).mockReturnValue(query({ ...STATUS, indicator }));
+    render(<InfrastructureStatusPanel projectId="p1" isSuperadmin />);
+    await userEvent.click(screen.getByRole('button', { name: 'Проверить сейчас' }));
+    expect(mutate).toHaveBeenCalledOnce();
+  });
+  it.each([true, false])('адрес без первой проверки не обещает отсутствие падений (running=%s)', (checkRunning) => {
+    vi.mocked(hooks.useQueryProjectStatus).mockReturnValue(query({ ...STATUS, checkRunning, warnings: [], registryWarnings: [], domains: [{ ...ADDRESS, checkedAt: null, health: null, healthError: null, latencyMs: null, tlsTrusted: null, tlsValidTo: null, registryExpiresAt: null }] }));
+    render(<InfrastructureStatusPanel projectId="p1" isSuperadmin />);
+    expect(screen.getByText(/Наблюдение ещё не началось/)).toBeInTheDocument();
+    expect(screen.getByText(/данных для графика нет/)).toBeInTheDocument();
+    expect(screen.queryByText(/Зарегистрированных падений за/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/никогда|не проверяли/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Проверки выполняются…') !== null).toBe(checkRunning);
+    if (checkRunning) expect(screen.getByRole('button', { name: 'Проверяю…' })).toBeDisabled();
+    else expect(screen.getByRole('button', { name: 'Проверить сейчас' })).toBeEnabled();
+  });
+  it('после reload показывает непрерывный Loader до подтверждённого сервером завершения', () => {
+    vi.mocked(hooks.useQueryProjectStatus).mockReturnValue(query({ ...STATUS, checkRunning: true }));
+    const { rerender } = render(<InfrastructureStatusPanel projectId="p1" isSuperadmin />);
+    expect(screen.getByText('Проверки выполняются…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Проверяю…' })).toBeDisabled();
+    vi.mocked(hooks.useQueryProjectStatus).mockReturnValue(query({ ...STATUS, checkRunning: false }));
+    rerender(<InfrastructureStatusPanel projectId="p1" isSuperadmin />);
+    expect(screen.queryByText('Проверки выполняются…')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Проверить сейчас' })).toBeEnabled();
+  });
+
+  it('потеря сети во время прогона не прячет Loader и не разрешает повторный запуск', () => {
+    vi.mocked(hooks.useQueryProjectStatus).mockReturnValue({ data: { ...STATUS, checkRunning: true }, isPending: false, isError: true } as never);
+    render(<InfrastructureStatusPanel projectId="p1" isSuperadmin />);
+    expect(screen.getByText('Проверки выполняются…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Проверяю…' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/завершение проверок пока не подтверждено/);
+  });
   it.each(['pending', 'error'])('не выдаёт %s истории за отсутствие падений', (state) => {
     vi.mocked(hooks.useQueryIncidents).mockReturnValue({ data: undefined,
       isPending: state === 'pending', isError: state === 'error',
@@ -105,7 +142,7 @@ describe('панель статуса инфраструктуры', () => {
     render(<InfrastructureStatusPanel projectId="p1" isSuperadmin={false} />);
     expect(screen.queryByText(/Падений за .* не было/)).not.toBeInTheDocument();
     expect(screen.getByText(state === 'pending' ? 'Загрузка истории падений…' : 'Не удалось загрузить историю падений.')).toBeInTheDocument();
-    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: ADDRESS.name })).toBeInTheDocument();
   });
 
   it('при отказе обновления сохраняет известное падение и предупреждает об устаревшей истории', () => {
@@ -224,7 +261,8 @@ describe('панель статуса инфраструктуры', () => {
 
     render(<InfrastructureStatusPanel projectId="p1" isSuperadmin />);
 
-    expect(screen.getByRole('status')).toHaveTextContent(/проверки запущены/i);
+    expect(screen.queryByText(/в течение/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Проверить сейчас' })).toBeEnabled();
   });
 
   it('до запуска ничего про проверки не обещает', () => {

@@ -83,6 +83,10 @@ describe('карта размещения', () => {
     expect(panel).toHaveTextContent('Оплачен до 12.01.2027');
     expect(panel).toHaveTextContent('Витрина');
     expect(panel).toHaveTextContent('Прод');
+    expect(screen.getByRole('link', { name: 'Витрина · Прод' })).toHaveAttribute(
+      'href', `/projects/${PROJECT_ID}/infrastructure`,
+    );
+    expect(screen.queryByRole('link', { name: 'Витрина' })).not.toBeInTheDocument();
   });
 
   it('Esc снимает выделение', async () => {

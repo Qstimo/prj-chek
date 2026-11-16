@@ -16,23 +16,19 @@ interface IProps {
 /**
  * Строка поддомена под его корнем.
  *
- * Проект и окружение — ссылки: реестр отвечает на вопрос «чей это адрес»,
- * и путь от адреса к проекту должен быть в один переход.
+ * Проект и окружение — одна связь с переходом в инфраструктуру.
  */
 export function SubdomainListItem({ subdomain, root, onRequestDelete }: IProps) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 py-1 text-sm">
       <SubdomainName name={subdomain.name} root={root} />
 
-      <div className="flex items-center gap-3 text-muted-foreground">
-        <Link href={`/projects/${subdomain.projectId}`} className="hover:underline">
-          {subdomain.projectName}
-        </Link>
+      <div className="flex min-w-0 flex-wrap items-center gap-3 text-muted-foreground">
         <Link
           href={`/projects/${subdomain.projectId}/infrastructure`}
-          className="hover:underline"
+          className="min-w-0 break-words hover:underline"
         >
-          {subdomain.environmentName}
+          {subdomain.projectName} · {subdomain.environmentName}
         </Link>
         <button
           type="button"

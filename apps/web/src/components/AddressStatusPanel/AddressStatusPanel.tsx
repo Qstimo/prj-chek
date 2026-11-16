@@ -23,6 +23,7 @@ import { WarningsPanel } from '@/components/WarningsPanel';
 
 import type { IProps } from './types';
 import { fallsTextOf, uptimeSummaryTextOf } from './utils';
+import { registryExplanationOf } from '@/components/StatusByEnvironment/utils';
 
 /**
  * Разбор одного адреса: три проверки по отдельности, разрешение имени,
@@ -38,7 +39,7 @@ import { fallsTextOf, uptimeSummaryTextOf } from './utils';
 export function AddressStatusPanel({ projectId, address, warnings, onClose }: IProps) {
   // Хук зовётся всегда — `null` вместо адреса означает «панель закрыта»,
   // и запрос не уходит.
-  const history = useQueryAddressIncidents(projectId, address?.domainId ?? null);
+  const history = useQueryAddressIncidents(projectId, address?.checkedAt ? address.domainId : null);
 
   if (!address) {
     return null;
@@ -55,7 +56,7 @@ export function AddressStatusPanel({ projectId, address, warnings, onClose }: IP
       <dl className="grid gap-3 sm:grid-cols-2">
         <Check label="Доступность" value={healthTextOf(address)} note={note} />
         <Check label="Сертификат" value={tlsTextOf(address)} />
-        <Check label="Домен" value={registryTextOf(address)} />
+        <div><Check label="Домен" value={registryTextOf(address)} note={address.registryError ? registryExplanationOf(address.registryError) : null} />{address.registryError && <details className="mt-2 text-xs text-muted-foreground"><summary className="cursor-pointer">Ответ поставщика данных</summary><p className="mt-1 break-words">{address.registryError}</p></details>}</div>
         <Check label="Проверено" value={checkedAtTextOf(address.checkedAt)} />
         <Check label="Разрешение имени" value={placement ?? 'имя никуда не смотрит'} />
       </dl>
@@ -64,14 +65,14 @@ export function AddressStatusPanel({ projectId, address, warnings, onClose }: IP
 
       <section className="space-y-2">
         <h4 className="text-sm font-medium">История падений</h4>
-        <History
+        {!address.checkedAt ? <p className="text-sm text-muted-foreground">Ожидает первой проверки. Наблюдение за адресом ещё не началось.</p> : <History
           history={history.data}
           isPending={history.isPending}
           isError={history.isError}
           isFetching={history.isFetching}
           onLoadMore={() => void history.fetchNextPage({ cancelRefetch: false })}
           onRetry={() => void history.refetch()}
-        />
+        />}
       </section>
     </Drawer>
   );
@@ -146,7 +147,7 @@ function History({
       )}
 
       <dl className="grid gap-2 sm:grid-cols-3">
-        <Check label="Отвечал" value={uptimeSummaryTextOf(summary.uptime, window.days)} />
+        <Check label="По журналу инцидентов" value={summary.falls === 0 ? 'Инцидентов нет; аптайм не измерен' : uptimeSummaryTextOf(summary.uptime, window.days)} />
         {summary.downSeconds > 0 && (
           <Check label="Не отвечал" value={downtimeTextOf(summary.downSeconds)} />
         )}

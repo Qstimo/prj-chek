@@ -1,7 +1,7 @@
 import { StatusCheckCode } from '@cairn/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { RDAP_CACHE_ENV, checkDomainExpiry, clearDomainExpiryCache } from './domain.checker';
+import { RDAP_BOOTSTRAP_URL, RDAP_CACHE_ENV, checkDomainExpiry, clearDomainExpiryCache } from './domain.checker';
 
 /** Ответ реестра со сроком регистрации. */
 function registry(expiration: string) {
@@ -16,6 +16,12 @@ function registry(expiration: string) {
   };
 }
 
+function registryFetch() {
+  return vi.fn().mockResolvedValueOnce({ status: 200, json: async () => ({
+    services: [[['com', 'org', 'zone'], ['https://registry.example/rdap/']]],
+  }) });
+}
+
 describe('checkDomainExpiry', () => {
   beforeEach(() => {
     clearDomainExpiryCache();
@@ -28,21 +34,22 @@ describe('checkDomainExpiry', () => {
   });
 
   it('берёт срок регистрации из события expiration', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(registry('2026-09-20T00:00:00Z'));
+    const fetchFn = registryFetch().mockResolvedValue(registry('2026-09-20T00:00:00Z'));
 
     const result = await checkDomainExpiry('example.com', { fetchFn });
 
     expect(result.expiresAt?.toISOString()).toBe('2026-09-20T00:00:00.000Z');
     expect(result.error).toBeNull();
     expect(result.code).toBeNull();
-    expect(fetchFn.mock.calls[0]?.[0]).toBe('https://rdap.org/domain/example.com');
+    expect(fetchFn.mock.calls[0]?.[0]).toBe(RDAP_BOOTSTRAP_URL);
+    expect(fetchFn.mock.calls[1]?.[0]).toBe('https://registry.example/rdap/domain/example.com');
   });
 
   it('спрашивает реестр о том имени, которое дали — о корне', async () => {
     // Реестры знают только корни: пока спрашивали по имени адреса, то
     // есть по поддомену, у каждого адреса висело вечное «реестр ответил
     // HTTP 404». Корень выбирает вызывающий — у него он есть в базе.
-    const fetchFn = vi.fn().mockResolvedValue(registry('2027-01-01T00:00:00Z'));
+    const fetchFn = registryFetch().mockResolvedValue(registry('2027-01-01T00:00:00Z'));
 
     await checkDomainExpiry('example.com', { fetchFn });
 
@@ -50,7 +57,7 @@ describe('checkDomainExpiry', () => {
   });
 
   it('незнакомый реестру домен — свой код', async () => {
-    const fetchFn = vi.fn().mockResolvedValue({ status: 404, json: async () => ({}) });
+    const fetchFn = registryFetch().mockResolvedValue({ status: 404, json: async () => ({}) });
 
     const result = await checkDomainExpiry('example.zone', { fetchFn });
 
@@ -60,7 +67,7 @@ describe('checkDomainExpiry', () => {
   });
 
   it('отказ реестра отличается от незнакомого домена', async () => {
-    const fetchFn = vi.fn().mockResolvedValue({ status: 503, json: async () => ({}) });
+    const fetchFn = registryFetch().mockResolvedValue({ status: 503, json: async () => ({}) });
 
     expect((await checkDomainExpiry('example.com', { fetchFn })).code).toBe(
       StatusCheckCode.RegistryUnavailable,
@@ -68,7 +75,7 @@ describe('checkDomainExpiry', () => {
   });
 
   it('ответ без события expiration — свой код', async () => {
-    const fetchFn = vi.fn().mockResolvedValue({
+    const fetchFn = registryFetch().mockResolvedValue({
       status: 200,
       json: async () => ({ events: [{ eventAction: 'registration', eventDate: '2020-01-01' }] }),
     });
@@ -79,8 +86,7 @@ describe('checkDomainExpiry', () => {
   });
 
   it('сетевая ошибка разбирается до кода', async () => {
-    const fetchFn = vi
-      .fn()
+    const fetchFn = registryFetch()
       .mockRejectedValue(
         new TypeError('fetch failed', {
           cause: Object.assign(new Error('getaddrinfo ENOTFOUND rdap.org'), {
@@ -91,12 +97,12 @@ describe('checkDomainExpiry', () => {
 
     const result = await checkDomainExpiry('example.com', { fetchFn });
 
-    expect(result.code).toBe(StatusCheckCode.DnsNotFound);
+    expect(result.code).toBe(StatusCheckCode.RegistryUnavailable);
     expect(result.error).toContain('ENOTFOUND');
   });
 
   it('негодная дата в ответе не выдаёт себя за срок', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(registry('когда-нибудь'));
+    const fetchFn = registryFetch().mockResolvedValue(registry('когда-нибудь'));
 
     const result = await checkDomainExpiry('example.com', { fetchFn });
 
@@ -115,37 +121,38 @@ describe('кэш ответов реестра', () => {
     // Срок меняется раз в год, а прогон идёт каждые четверть часа и по
     // каждому адресу: без кэша реестр получал бы сотни одинаковых
     // вопросов в сутки.
-    const fetchFn = vi.fn().mockResolvedValue(registry('2027-01-01T00:00:00Z'));
+    const fetchFn = registryFetch().mockResolvedValue(registry('2027-01-01T00:00:00Z'));
 
     const first = await checkDomainExpiry('example.com', { fetchFn });
     const second = await checkDomainExpiry('example.com', { fetchFn });
 
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
     expect(second.expiresAt?.toISOString()).toBe(first.expiresAt?.toISOString());
   });
 
   it('разные корни кэшируются по отдельности', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(registry('2027-01-01T00:00:00Z'));
+    const fetchFn = registryFetch().mockResolvedValue(registry('2027-01-01T00:00:00Z'));
 
     await checkDomainExpiry('example.com', { fetchFn });
     await checkDomainExpiry('example.org', { fetchFn });
 
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
   });
 
   it('отказ тоже кэшируется: зона без RDAP отказывает устойчиво', async () => {
     // Иначе закрытая дверь получала бы 96 стуков в сутки — ровно то, от
     // чего кэш и заводился.
-    const fetchFn = vi.fn().mockResolvedValue({ status: 404, json: async () => ({}) });
+    const fetchFn = registryFetch().mockResolvedValue({ status: 404, json: async () => ({}) });
 
     await checkDomainExpiry('example.zone', { fetchFn });
     await checkDomainExpiry('example.zone', { fetchFn });
 
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
   it('по истечении срока кэша вопрос задаётся снова', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(registry('2027-01-01T00:00:00Z'));
+    const fetchFn = registryFetch().mockResolvedValue(registry('2027-01-01T00:00:00Z'));
+    fetchFn.mockResolvedValueOnce(registry('2027-01-01T00:00:00Z')).mockResolvedValueOnce({ status: 200, json: async () => ({ services: [[['com'], ['https://registry.example/rdap/']]] }) });
     let now = 1_000_000;
 
     process.env[RDAP_CACHE_ENV] = '24';
@@ -153,10 +160,47 @@ describe('кэш ответов реестра', () => {
 
     now += 23 * 60 * 60 * 1000;
     await checkDomainExpiry('example.com', { fetchFn, now: () => now });
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
 
     now += 2 * 60 * 60 * 1000;
     await checkDomainExpiry('example.com', { fetchFn, now: () => now });
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+  });
+});
+
+
+describe('IANA discovery failures', () => {
+  beforeEach(() => clearDomainExpiryCache());
+  it.each(['ru', 'im'])('reports unsupported .%s without querying an arbitrary service', async zone => {
+    const fetchFn = registryFetch();
+    const result = await checkDomainExpiry(`example.${zone}`, { fetchFn });
+    expect(result.code).toBe(StatusCheckCode.RegistryUnavailable);
+    expect(result.error).toContain('не поддерживается');
+    expect(result.expiresAt).toBeNull();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+  it('preserves bootstrap HTTP failure as unavailable data', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({ status: 503 });
+    const result = await checkDomainExpiry('example.com', { fetchFn });
+    expect(result.code).toBe(StatusCheckCode.RegistryUnavailable);
+    expect(result.error).toContain('503');
+  });
+  it('retries negative results after five minutes while retaining bootstrap', async () => {
+    let now = 0;
+    const fetchFn = registryFetch().mockResolvedValue({ status: 503, json: async () => ({}) });
+    await checkDomainExpiry('example.com', { fetchFn, now: () => now });
+    now = 60_000;
+    await checkDomainExpiry('example.com', { fetchFn, now: () => now });
     expect(fetchFn).toHaveBeenCalledTimes(2);
+    now = 301_000;
+    await checkDomainExpiry('example.com', { fetchFn, now: () => now });
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+  it('rejects insecure registry endpoints', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({ status: 200, json: async () => ({
+      services: [[['com'], ['http://unsafe.example/']]],
+    }) });
+    expect((await checkDomainExpiry('example.com', { fetchFn })).code).toBe(StatusCheckCode.RegistryUnavailable);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });

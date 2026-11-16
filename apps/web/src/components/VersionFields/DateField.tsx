@@ -20,7 +20,7 @@ export function DateField({ id, label, value, onChange }: IProps) {
         type="date"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-md border border-border px-3 py-2"
+        className="w-40 max-w-full min-w-0 shrink-0 rounded-md border border-border px-3 py-2 tabular-nums"
       />
     </div>
   );

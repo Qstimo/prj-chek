@@ -20,6 +20,7 @@ import {
   CARRY_OVER_FIELD_LABEL,
   CARRY_OVER_NEEDS_LABEL_QUESTION,
   CELL_INPUT_CLASSES,
+  CHECKPOINT_FORM_LAYOUT_CLASSES,
   CHECKPOINTS_HINT,
   CHECKPOINTS_TITLE,
   CLOSE_CONFIRM_ACTION,
@@ -137,7 +138,7 @@ export function VersionDrawer({
       isOpen={isOpen}
       onClose={requestClose}
       title={version.label}
-      width={DrawerWidth.Wide}
+      width={DrawerWidth.Release}
       actions={
         actions && (
           <SaveButton
@@ -266,7 +267,7 @@ export function VersionDrawer({
       )}
 
       {detail && (
-        <section className="space-y-2">
+        <section className={`space-y-2 ${CHECKPOINT_FORM_LAYOUT_CLASSES}`}>
           <h3 className="text-sm font-medium">
             {CHECKPOINTS_TITLE}
             {/* Напоминание — только тем, кто правит: на публичной странице
@@ -295,12 +296,14 @@ export function VersionDrawer({
       )}
 
       {actions && (
-        <CheckpointForm
-          platforms={platforms.length > 0 ? platforms : undefined}
-          isSubmitting={actions.isSubmittingCheckpoint}
-          onSubmit={actions.onAddCheckpoint}
-          onReadTitle={actions.onReadCheckpointTitle}
-        />
+        <div className={CHECKPOINT_FORM_LAYOUT_CLASSES}>
+          <CheckpointForm
+            platforms={platforms.length > 0 ? platforms : undefined}
+            isSubmitting={actions.isSubmittingCheckpoint}
+            onSubmit={actions.onAddCheckpoint}
+            onReadTitle={actions.onReadCheckpointTitle}
+          />
+        </div>
       )}
 
       {actions && <VersionActions onDelete={actions.onDeleteVersion} />}

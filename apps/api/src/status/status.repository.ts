@@ -12,7 +12,7 @@ import {
   type StatusWarning,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { asc, eq, inArray, ne } from 'drizzle-orm';
+import { asc, eq, inArray, ne, sql } from 'drizzle-orm';
 
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
@@ -123,6 +123,17 @@ export class StatusRepository {
     @Inject(DATABASE) private readonly db: Database,
     private readonly access: AccessService,
   ) {}
+
+  /** Замок с парой целых ключей хранится в pg_locks с objsubid = 2. */
+  async isCheckRunning(): Promise<boolean> {
+    const rows = (await this.db.execute(sql`select exists (
+      select 1 from pg_locks
+      where locktype = 'advisory' and granted
+        and database = (select oid from pg_database where datname = current_database())
+        and classid = ${0x43414952}::oid and objid = 1::oid and objsubid = 2
+    ) as running`)) as unknown as { running: boolean }[];
+    return rows[0]?.running === true;
+  }
 
   /**
    * Пишет результат проверок адреса: одна строка на адрес.
@@ -273,7 +284,12 @@ export class StatusRepository {
       AccessLevel.Metadata,
     );
 
-    return this.buildStatus(projectId, { withRegistry: subject.isSuperadmin });
+    // Замок читается после проверки прав, но до снимка: если прогон
+    // завершится во время чтения, ещё один быстрый опрос получит итог.
+    const runningBefore = await this.isCheckRunning();
+    const status = await this.buildStatus(projectId, { withRegistry: subject.isSuperadmin });
+
+    return { ...status, checkRunning: runningBefore || await this.isCheckRunning() };
   }
 
   /**

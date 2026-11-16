@@ -35,7 +35,7 @@ export function PlacementList({ map, selectedId, isDomain }: IProps) {
         return (
           <li key={`${edge.domainId}-${edge.projectId}`} className="text-sm">
             <Link
-              href={isDomain ? `/projects/${edge.projectId}` : `/domains/${edge.domainId}/edit`}
+              href={isDomain ? `/projects/${edge.projectId}/infrastructure` : `/domains/${edge.domainId}/edit`}
               className="hover:underline"
             >
               {counterpart?.name}

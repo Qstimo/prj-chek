@@ -2,9 +2,9 @@
 
 import { releaseStatesFor, PlatformReleaseState, type Platform } from '@cairn/shared';
 
-import { today } from '@/utils';
+import { formatDate, today } from '@/utils';
 
-import { Select, SelectWidth } from '../Select';
+import { Select } from '../Select';
 import { RELEASE_STATE_LABELS } from '../ReleaseSummary';
 import { CELL_INPUT_CLASSES, NO_RELEASE_LABEL } from './constants';
 import type { IReleaseCell } from './types';
@@ -58,32 +58,49 @@ export function ReleaseRow({ platform, cell, versionLabel, onChange }: IProps) {
   if (!onChange) {
     return (
       <li className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="min-w-32">{platform.name}</span>
-        <span className="text-muted-foreground">
+        <span className="w-40 max-w-full shrink-0 break-words [overflow-wrap:anywhere]">
+          {platform.name}
+        </span>
+        <span className="inline-flex min-h-9 w-36 max-w-full shrink-0 items-center rounded bg-muted px-2 text-muted-foreground">
           {cell ? RELEASE_STATE_LABELS[cell.state] : NO_RELEASE_LABEL}
         </span>
-        {cell?.buildLabel && <span className="text-muted-foreground">{cell.buildLabel}</span>}
+        {cell?.releasedDate && (
+          <time
+            dateTime={cell.releasedDate}
+            className="w-36 max-w-full shrink-0 whitespace-nowrap tabular-nums text-muted-foreground"
+          >
+            {formatDate(cell.releasedDate)}
+          </time>
+        )}
+        {cell?.buildLabel && (
+          <span className="w-40 max-w-full shrink-0 break-words [overflow-wrap:anywhere] text-muted-foreground">
+            {cell.buildLabel}
+          </span>
+        )}
       </li>
     );
   }
 
   return (
     <li className="flex flex-wrap items-center gap-2">
-      <span className="min-w-32 text-sm">{platform.name}</span>
+      <span className="w-40 max-w-full shrink-0 break-words [overflow-wrap:anywhere] text-sm">
+        {platform.name}
+      </span>
 
-      <Select
-        label={`Состояние ${platform.name}`}
-        value={cell?.state ?? ''}
-        onChange={changeState}
-        width={SelectWidth.Auto}
-      >
-        <option value="">{NO_RELEASE_LABEL}</option>
-        {releaseStatesFor(platform.kind).map((state) => (
-          <option key={state} value={state}>
-            {RELEASE_STATE_LABELS[state]}
-          </option>
-        ))}
-      </Select>
+      <div className="w-36 max-w-full shrink-0">
+        <Select
+          label={`Состояние ${platform.name}`}
+          value={cell?.state ?? ''}
+          onChange={changeState}
+        >
+          <option value="">{NO_RELEASE_LABEL}</option>
+          {releaseStatesFor(platform.kind).map((state) => (
+            <option key={state} value={state}>
+              {RELEASE_STATE_LABELS[state]}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       {cell && isReleased && (
         <input
@@ -93,7 +110,7 @@ export function ReleaseRow({ platform, cell, versionLabel, onChange }: IProps) {
           onChange={(event) =>
             onChange(platform.id, { ...cell, releasedDate: event.target.value })
           }
-          className={CELL_INPUT_CLASSES}
+          className={`${CELL_INPUT_CLASSES} w-36 max-w-full min-w-0 shrink-0 tabular-nums`}
         />
       )}
 
@@ -104,7 +121,8 @@ export function ReleaseRow({ platform, cell, versionLabel, onChange }: IProps) {
           value={cell.buildLabel}
           placeholder={versionLabel}
           onChange={(event) => onChange(platform.id, { ...cell, buildLabel: event.target.value })}
-          className={`${CELL_INPUT_CLASSES} w-28`}
+          title={cell.buildLabel || versionLabel}
+          className={`${CELL_INPUT_CLASSES} w-40 max-w-full min-w-0 shrink-0`}
         />
       )}
     </li>

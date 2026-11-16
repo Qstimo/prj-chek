@@ -16,7 +16,7 @@ export function DomainsScreen() {
   const removeSubdomain = useMutationRemoveEnvironmentDomain();
 
   if (domains.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (domains.isError) {

@@ -9,7 +9,7 @@ export function DomainMapScreen() {
   const map = useQueryDomainMap();
 
   if (map.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (map.isError) {

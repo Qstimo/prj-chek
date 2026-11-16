@@ -302,3 +302,11 @@ describe('схема статуса окружения', () => {
     expect('latencyMs' in parsed).toBe(false);
   });
 });
+
+
+it('accepts optional checkRunning for old fixtures and preserves API progress', () => {
+  const status = { indicator: StatusIndicator.Unknown, environments: [], domains: [], warnings: [], registryWarnings: [] };
+  expect(projectStatusSchema.parse(status).checkRunning).toBeUndefined();
+  expect(projectStatusSchema.parse({ ...status, checkRunning: true }).checkRunning).toBe(true);
+  expect(projectStatusSchema.parse({ ...status, checkRunning: false }).checkRunning).toBe(false);
+});

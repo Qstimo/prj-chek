@@ -45,27 +45,37 @@ function address(overrides: Partial<DomainStatus> = {}): DomainStatus {
 
 /** Строка таблицы по имени адреса. */
 function row(name = 'stage.example.com') {
-  return screen.getByRole('row', { name: new RegExp(name.replace(/\./g, '\\.')) });
+  return screen.getByRole('article', { name });
 }
 
 describe('StatusByEnvironment', () => {
+  it('сохраняет полный длинный redirect и название окружения при выборе адреса', async () => {
+    const redirectTo = `https://example.com/${'AuthenticationRedirectTarget'.repeat(30)}`;
+    const name = 'LongEnvironmentName'.repeat(20);
+    const onSelect = vi.fn();
+    render(<StatusByEnvironment environments={[{ ...prod, name }]} addresses={[address({ healthCode: StatusCheckCode.Redirect, redirectTo })]} onSelect={onSelect} />);
+    expect(screen.getByRole('heading', { name })).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes(redirectTo))).toHaveTextContent(redirectTo);
+    await userEvent.click(screen.getByRole('button', { name: 'stage.example.com' }));
+    expect(onSelect).toHaveBeenCalledWith('22222222-2222-2222-2222-222222222222');
+  });
   it('показывает адреса под их окружением', () => {
     render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
 
-    const group = screen.getByRole('rowgroup', { name: 'Прод' });
+    const group = screen.getByRole('region', { name: 'Прод' });
 
     expect(within(group).getByText('stage.example.com')).toBeInTheDocument();
   });
 
-  it('называет три проверки заголовками столбцов', () => {
+  it('называет независимые проверки в карточке без тесной таблицы', () => {
     // Таблица отвечает на вопрос «что проверяли»: три проверки разнесены
     // по столбцам, а не слиты в одну фразу.
     render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
 
-    expect(screen.getByRole('columnheader', { name: 'Доступность' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Сертификат' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Домен' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Проверено' })).toBeInTheDocument();
+    expect(screen.getByText('Доступность')).toBeInTheDocument();
+    expect(screen.getByText('Сертификат TLS')).toBeInTheDocument();
+    expect(screen.getByText('Регистрация домена')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
   it('у мёртвого адреса показывает причину', () => {
@@ -102,8 +112,8 @@ describe('StatusByEnvironment', () => {
 
     render(<StatusByEnvironment environments={[prod]} addresses={[fresh]} />);
 
-    expect(within(row()).getAllByText('не проверяли')).toHaveLength(3);
-    expect(within(row()).getByText('никогда')).toBeInTheDocument();
+    expect(within(row()).getAllByText('Результата ещё нет')).toHaveLength(3);
+    expect(within(row()).getByText(/Ожидает первой проверки/)).toBeInTheDocument();
   });
 
   it('ошибку проверки сертификата показывает вместо срока', () => {
@@ -151,17 +161,31 @@ describe('StatusByEnvironment', () => {
     expect(screen.getByText(/https:\/\/example\.com\/health/)).toBeInTheDocument();
   });
 
-  it('показывает время последней проверки у адреса и у окружения', () => {
+  it('показывает время проверки один раз у адреса без повторов в заголовке', () => {
     // `checkedAt` считался на сервере и до экрана не доезжал: человек не
     // знал, насколько свежее то, на что он смотрит.
     render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
 
-    expect(within(row()).getByText('17.09.2026, 13:00')).toBeInTheDocument();
-    expect(
-      within(screen.getByRole('rowgroup', { name: 'Прод' })).getByText(
-        /проверено 17\.09\.2026, 13:00/,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getAllByText(/17\.09\.2026, 13:00/)).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Прод' })).not.toHaveTextContent(/2026/);
+  });
+
+  it.each(['реестр ответил HTTP 403', 'RDAP: зона .ru не поддерживается в IANA; срок регистрации недоступен'])('ошибка реестра нейтральна, диагностика только в деталях: %s', async (registryError) => {
+    render(<StatusByEnvironment environments={[prod]} addresses={[address({ registryError, registryExpiresAt: null })]} />);
+    const card = row();
+    expect(within(card).getByText('Сведения реестра недоступны')).toHaveClass('text-muted-foreground', { exact: false });
+    expect(within(card).getByText(/В сети/)).toBeInTheDocument();
+    const diagnostic = within(card).getByText(`Ответ поставщика: ${registryError}`);
+    expect(diagnostic.closest('details')).not.toHaveAttribute('open');
+    await userEvent.click(within(card).getByText('Почему нет данных'));
+    expect(diagnostic.closest('details')).toHaveAttribute('open');
+    expect(within(card).getByText(/Это не означает, что сайт недоступен/)).toBeInTheDocument();
+  });
+
+  it('выделяет близкий срок TLS', () => {
+    const soon = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    render(<StatusByEnvironment environments={[prod]} addresses={[address({ tlsValidTo: soon })]} />);
+    expect(screen.getByText(/До истечения: 3 дн/).closest('div')).toHaveClass('bg-amber-500/10');
   });
 
   it('не называет машину: её имя принадлежит уровню чтения', () => {

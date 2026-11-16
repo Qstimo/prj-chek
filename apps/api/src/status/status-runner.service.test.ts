@@ -452,9 +452,15 @@ describe('runner статусов', () => {
     await vi.waitFor(() => expect(busy).toHaveBeenCalled());
 
     expect(await second.runAll()).toBe(StatusRunOutcome.Busy);
-
-    release();
-    await running;
+    const service = new StatusService(testDb.db, repository, second, new AuditService());
+    try {
+      await expect(service.runNow(admin())).rejects.toBeInstanceOf(ConflictException);
+      expect(await testDb.db.select().from(auditLog)
+        .where(eq(auditLog.action, AuditAction.StatusCheckRun))).toHaveLength(0);
+    } finally {
+      release();
+      await running;
+    }
   });
 
   it('прогон при старте идёт сразу, не ожидая интервала', async () => {

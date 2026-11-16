@@ -11,7 +11,7 @@ export function ServersScreen() {
   const remove = useMutationDeleteServer();
 
   if (servers.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (servers.isError) {

@@ -4,7 +4,7 @@ import { CODE_LABELS } from '@/components/WarningsPanel';
 import { formatDate } from '@/utils';
 
 /** Проверки не было: один текст на все три столбца. */
-export const NOT_CHECKED = 'не проверяли';
+export const NOT_CHECKED = 'Результата ещё нет';
 
 /**
  * Коды, при которых адрес жив, но проверка увидела не то, чего ждала.
@@ -73,10 +73,17 @@ export function tlsTextOf({ tlsTrusted, tlsCode, tlsError, tlsValidTo }: DomainS
 /** Срок регистрации по данным реестра зоны. */
 export function registryTextOf({ registryError, registryExpiresAt }: DomainStatus): string {
   if (registryError) {
-    return registryError;
+    return 'Сведения реестра недоступны';
   }
 
   return registryExpiresAt ? `до ${dayOf(registryExpiresAt)}` : NOT_CHECKED;
+}
+
+/** Registry diagnostics describe an external data source, never site availability. */
+export function registryExplanationOf(error: string): string {
+  return /не поддерживается|unsupported/i.test(error)
+    ? 'Для этой доменной зоны в публичном реестре RDAP нет источника срока регистрации. Это не означает, что сайт недоступен.'
+    : 'Внешний поставщик данных реестра не предоставил сведения. Это не означает, что сайт недоступен.';
 }
 
 /**
@@ -105,7 +112,7 @@ export function placementTextOf({ resolvedIps, resolveError }: DomainStatus): st
  */
 export function checkedAtTextOf(checkedAt: string | null): string {
   if (!checkedAt) {
-    return 'никогда';
+    return 'Ожидает первой проверки';
   }
 
   const at = new Date(checkedAt);

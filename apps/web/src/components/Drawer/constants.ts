@@ -8,6 +8,7 @@ import { DrawerWidth } from './types';
 export const WIDTH_CLASSES: Record<DrawerWidth, string> = {
   [DrawerWidth.Default]: 'max-w-[480px]',
   [DrawerWidth.Wide]: 'max-w-[640px]',
+  [DrawerWidth.Release]: 'max-w-[1024px]',
   // Ограничение только с `md`, и не меньше узкой панели: на телефоне
   // половина экрана — это половина телефона, а на планшете 50vw меньше
   // нынешних 480px.

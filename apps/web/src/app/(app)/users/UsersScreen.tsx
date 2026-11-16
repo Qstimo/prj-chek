@@ -18,7 +18,7 @@ export function UsersScreen() {
   const users = useQueryUsers();
 
   if (users.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (users.isError) {

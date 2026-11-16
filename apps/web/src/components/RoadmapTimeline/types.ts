@@ -8,6 +8,8 @@ export interface TimelineVersion {
   plannedDate: string | null;
   releasedDate: string | null;
   progress: RoadmapProgress;
+  unfinished?: number;
+  hasUnfinishedOnRelease?: boolean;
 }
 
 /**

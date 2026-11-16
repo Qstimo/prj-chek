@@ -42,7 +42,7 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
   const [isCreating, setIsCreating] = useState(false);
 
   if (roadmap.isPending || sections.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (roadmap.isError || sections.isError) {

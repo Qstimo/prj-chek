@@ -122,6 +122,8 @@ export const statusWarningSchema = z.object({
 
 /** Агрегированный статус проекта (спека 5). */
 export const projectStatusSchema = z.object({
+  /** Always supplied by the API; optional for existing fixtures. */
+  checkRunning: z.boolean().optional(),
   indicator: z.nativeEnum(StatusIndicator),
   environments: z.array(environmentStatusSchema),
   domains: z.array(domainStatusSchema),

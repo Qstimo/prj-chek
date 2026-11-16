@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StatusOverview } from './StatusOverview';
+vi.mock('./IncidentCharts', () => ({ IncidentCharts: ({ domainId, windowDays }: { domainId: string; windowDays: number }) => <div data-testid="chart-selection">{domainId}:{windowDays}</div> }));
 
 const ENVIRONMENT_ID = '11111111-1111-1111-1111-111111111111';
 const DOMAIN_ID = '22222222-2222-2222-2222-222222222222';
@@ -69,6 +70,25 @@ const FALL: AddressIncidents = {
 };
 
 describe('сводка проверок', () => {
+  it('переключает адрес и окно графиков и сбрасывает адрес при фильтрации', async () => {
+    render(<StatusOverview projectId="p" status={{ ...STATUS, domains: [address(), address({ domainId: 'second', name: 'second.example.com', health: HealthState.Down })] }} />);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Адрес для графиков' }), 'second');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Период графиков' }), '7');
+    expect(screen.getByTestId('chart-selection')).toHaveTextContent('second:7');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Фильтр доступности' }), HealthState.Up);
+    expect(screen.getByTestId('chart-selection')).toHaveTextContent(`${DOMAIN_ID}:7`);
+    expect(screen.queryByRole('option', { name: 'second.example.com' })).not.toBeInTheDocument();
+  });
+  it('фильтрует карточки по окружению и доступности', async () => {
+    const secondEnvironment = { ...STATUS.environments[0]!, environmentId: 'second', name: 'Тест' };
+    render(<StatusOverview status={{ ...STATUS, environments: [...STATUS.environments, secondEnvironment], domains: [address(), address({ domainId: 'other', environmentId: 'second', name: 'test.example.com', health: HealthState.Down })] }} />);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Окружение' }), 'second');
+    expect(screen.queryByRole('article', { name: 'stage.example.com' })).not.toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'test.example.com' })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Фильтр доступности' }), HealthState.Up);
+    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+    expect(screen.getByText(/Нет адресов для выбранных фильтров/)).toBeInTheDocument();
+  });
   it('показывает время последней проверки по проекту', () => {
     render(<StatusOverview status={STATUS} />);
 
@@ -78,13 +98,13 @@ describe('сводка проверок', () => {
   it('у непроверенного проекта говорит об этом прямо', () => {
     render(<StatusOverview status={{ ...STATUS, domains: [address({ checkedAt: null })] }} />);
 
-    expect(screen.getByText(/проверок ещё не было/i)).toBeInTheDocument();
+    expect(screen.getByText('Ожидает первой проверки. Результата ещё нет.')).toBeInTheDocument();
   });
 
   it('ставит таблицу проверок', () => {
     render(<StatusOverview status={STATUS} />);
 
-    expect(screen.getByRole('table', { name: 'Проверки адресов' })).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'stage.example.com' })).toBeInTheDocument();
   });
 
   it('ведёт лентой падений под таблицей', () => {
@@ -104,7 +124,7 @@ describe('сводка проверок', () => {
     );
 
     expect(screen.queryByRole('list', { name: 'Падения адресов' })).not.toBeInTheDocument();
-    expect(screen.getByText(/падений за 30 дней не было/i)).toBeInTheDocument();
+    expect(screen.getByText(/Зарегистрированных падений за 30 дней/i)).toBeInTheDocument();
   });
 
   it('по клику на адрес в ленте открывает его разбор', async () => {

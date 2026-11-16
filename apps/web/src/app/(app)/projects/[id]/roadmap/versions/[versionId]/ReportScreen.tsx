@@ -32,7 +32,7 @@ export function ReportScreen({ projectId, versionId, isSuperadmin }: IProps) {
   const report = useQueryReport(projectId, versionId);
 
   if (report.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (report.isError) {

@@ -85,3 +85,7 @@ export const STATE_LABELS: Record<RoadmapVersionState, string> = {
   [RoadmapVersionState.InProgress]: 'В работе',
   [RoadmapVersionState.Released]: 'Выпущена',
 };
+
+/** Длинные имена платформ не должны задавать минимальную ширину формы релиза. */
+export const CHECKPOINT_FORM_LAYOUT_CLASSES =
+  '[&_fieldset]:min-w-0 [&_fieldset>div>div]:min-w-0 [&_fieldset>div>div]:max-w-full [&_fieldset_label]:min-w-0 [&_fieldset_label]:break-words [&_fieldset_label]:[overflow-wrap:anywhere] [&_fieldset_input]:shrink-0';

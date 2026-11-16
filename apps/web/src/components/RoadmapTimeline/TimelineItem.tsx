@@ -10,6 +10,7 @@ import {
   STEP,
 } from './constants';
 import { useTimelineHref } from './href';
+import { useUnfinishedNotice } from './useUnfinishedNotice';
 import { sectorPath } from './sector';
 import type { TimelineCell, TimelineForm, TimelineVersion } from './types';
 import { dateLabelOf, datePartsOf, fillOf, noteOf, percentOf } from './utils';
@@ -56,6 +57,12 @@ export function TimelineItem({
   total,
   onSelect,
 }: IProps) {
+  const { noticeId, isVisible, triggerProps, tooltipProps } = useUnfinishedNotice(
+    Boolean(version.hasUnfinishedOnRelease),
+  );
+  const notice = version.hasUnfinishedOnRelease
+    ? `Версия выпущена. Незакрытых чекпоинтов: ${version.unfinished ?? version.progress.total - version.progress.done}. Незавершённые задачи можно перенести в следующую версию.`
+    : undefined;
   const hrefOf = useTimelineHref();
   const href = hrefOf?.(version.id);
   const note = noteOf(version);
@@ -94,13 +101,15 @@ export function TimelineItem({
       // Счёт идёт от начала окна, которое умеет съезжать к текущей версии.
       aria-posinset={position}
       aria-setsize={total}
-      className={SLOT_CLASSES[form]}
+      className={`group ${SLOT_CLASSES[form]}`}
       style={slotStyleOf(form, cell)}
     >
       {href ? (
         <Link
+          {...triggerProps}
           href={href}
           aria-label={`Версия ${version.label}`}
+          aria-describedby={notice ? noticeId : undefined}
           aria-current={isCurrent ? 'step' : undefined}
           // Щелчок с клавишей-ускорителем и щелчок не основной кнопкой
           // оставлены браузеру: это «открой в новой вкладке», и перехватить
@@ -112,8 +121,10 @@ export function TimelineItem({
         </Link>
       ) : onSelect ? (
         <button
+          {...triggerProps}
           type="button"
           aria-label={`Версия ${version.label}`}
+          aria-describedby={notice ? noticeId : undefined}
           aria-current={isCurrent ? 'step' : undefined}
           onClick={() => onSelect(version.id)}
           className={`${bodyClassName} hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`}
@@ -121,7 +132,27 @@ export function TimelineItem({
           {content}
         </button>
       ) : (
-        <div className={bodyClassName}>{content}</div>
+        <div
+          {...triggerProps}
+          tabIndex={notice ? 0 : undefined}
+          aria-label={`Версия ${version.label}`}
+          aria-describedby={notice ? noticeId : undefined}
+          className={bodyClassName}
+        >
+          {content}
+        </div>
+      )}
+      {/* Фиксированная подсказка не обрезается ячейкой серпантина и не меняет геометрию оси. */}
+      {notice && (
+        <span
+          id={noticeId}
+          role="tooltip"
+          hidden={!isVisible}
+          {...tooltipProps}
+          className="fixed bottom-4 left-4 right-4 z-[60] mx-auto w-fit max-w-[calc(100vw-2rem)] whitespace-normal break-words rounded-md border bg-background p-3 text-left text-sm text-foreground shadow-lg"
+        >
+          {version.label}: {notice}
+        </span>
       )}
     </li>
   );
@@ -232,8 +263,11 @@ function StripBody({
         <Mark version={version} isCurrent={isCurrent} />
       </svg>
 
-      <span className="block truncate px-1 text-center text-xs" title={version.label}>
-        {version.label}
+      <span className="flex min-w-0 items-center justify-center gap-1 px-1 text-xs" title={version.label}>
+        <span className="min-w-0 truncate" title={version.label}>
+          {version.label}
+        </span>
+        {version.hasUnfinishedOnRelease && <UnfinishedMark />}
       </span>
       {/*
         Пояснение и число — двумя строками: вместе они шире шага, и в одну
@@ -282,6 +316,7 @@ function ListBody({
         {version.label}
       </span>
 
+      {version.hasUnfinishedOnRelease && <UnfinishedMark />}
       <span
         aria-hidden="true"
         className="hidden h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border sm:block"
@@ -329,5 +364,17 @@ function Mark({ version, isCurrent }: { version: TimelineVersion; isCurrent: boo
         />
       )}
     </g>
+  );
+}
+
+/** Пометка без вложенных кнопок и без изменения шага оси. */
+function UnfinishedMark() {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-xs font-bold text-amber-600 dark:text-amber-400"
+    >
+      !
+    </span>
   );
 }

@@ -60,6 +60,9 @@ describe('карта доменов', () => {
 
     expect(panel).toHaveTextContent('ООО Ромашка');
     expect(panel).toHaveTextContent('stage.example.com');
+    expect(screen.getByRole('link', { name: 'Витрина' })).toHaveAttribute(
+      'href', `/projects/${PROJECT_ID}/infrastructure`,
+    );
     expect(panel).toHaveTextContent('оплачен до 2026-09-20');
   });
 

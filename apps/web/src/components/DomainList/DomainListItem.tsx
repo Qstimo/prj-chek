@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { pluralProjects, pluralSubdomains } from '@/utils';
 
 import { PaidUntilBadge } from '../PaidUntilBadge';
-import { StatusIndicator } from '../StatusIndicator';
+import { DomainRenewalIndicator } from '../StatusIndicator/DomainRenewalIndicator';
 import { SubdomainListItem } from './SubdomainListItem';
 
 /** Пропсы строки реестра доменов. */
@@ -39,7 +39,7 @@ export function DomainListItem({ domain, onRequestDelete, onRequestDeleteSubdoma
         </div>
 
         <div className="flex items-center gap-4">
-          <StatusIndicator indicator={domain.indicator} />
+          <DomainRenewalIndicator indicator={domain.indicator} />
           <span className="text-sm text-muted-foreground">
             {pluralSubdomains(domain.subdomainCount)} · {pluralProjects(domain.projectCount)}
           </span>

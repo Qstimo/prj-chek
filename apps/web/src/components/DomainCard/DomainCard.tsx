@@ -5,6 +5,7 @@ import Link from 'next/link';
 
 import { PaidUntilBadge } from '../PaidUntilBadge';
 import { StatusIndicator } from '../StatusIndicator';
+import { DomainRenewalIndicator } from '../StatusIndicator/DomainRenewalIndicator';
 import { PlacementList } from './PlacementList';
 import type { IProps } from './types';
 
@@ -28,7 +29,7 @@ export function DomainCard({ map, selectedId, onClose }: IProps) {
         <div className="space-y-1">
           <h2 className="font-medium">{domain?.name ?? project?.name}</h2>
           {domain?.owner && <p className="text-sm text-muted-foreground">{domain.owner}</p>}
-          <StatusIndicator indicator={domain?.indicator ?? project!.indicator} />
+          {domain ? <DomainRenewalIndicator indicator={domain.indicator} /> : <StatusIndicator indicator={project!.indicator} />}
         </div>
         <button type="button" onClick={onClose} className="text-sm hover:underline">
           Закрыть

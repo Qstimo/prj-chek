@@ -33,7 +33,7 @@ export function UserScreen({ userId, currentSubjectId }: IProps) {
   const [issued, setIssued] = useState<IssuedLinkResponse | null>(null);
 
   if (user.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (user.isError) {

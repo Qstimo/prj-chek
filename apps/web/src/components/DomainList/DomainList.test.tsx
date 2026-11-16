@@ -70,6 +70,13 @@ describe('реестр доменов', () => {
     expect(screen.getByTestId('paid-until')).toHaveAttribute('data-state', 'soon');
   });
 
+  it('не называет неизвестный срок отсутствием проверки сайта', () => {
+    render(<DomainList domains={[{ ...bare, paidUntil: null, indicator: StatusIndicator.Unknown }]} onDelete={onDelete} onDeleteSubdomain={onDeleteSubdomain} />);
+    expect(screen.getByText('Срок продления неизвестен')).toBeInTheDocument();
+    expect(screen.queryByText('Не проверялось')).not.toBeInTheDocument();
+    expect(screen.getByTitle(/Доступность сайта проверяется отдельно/)).toBeInTheDocument();
+  });
+
   it('ведёт на правку корня', () => {
     render(<DomainList domains={[domain]} onDelete={onDelete} onDeleteSubdomain={onDeleteSubdomain} />);
 
@@ -106,26 +113,24 @@ describe('реестр доменов', () => {
     expect(screen.getByText('api.')).toBeInTheDocument();
   });
 
-  it('ведёт с поддомена в его проект', () => {
+  it('показывает проект и окружение одной ссылкой в инфраструктуру', () => {
     render(
       <DomainList domains={[domain]} onDelete={onDelete} onDeleteSubdomain={onDeleteSubdomain} />,
     );
 
-    expect(screen.getByRole('link', { name: 'Лавка' })).toHaveAttribute(
-      'href',
-      `/projects/${PROJECT_ID}`,
-    );
-  });
-
-  it('ведёт с окружения в инфраструктуру проекта', () => {
-    render(
-      <DomainList domains={[domain]} onDelete={onDelete} onDeleteSubdomain={onDeleteSubdomain} />,
-    );
-
-    expect(screen.getByRole('link', { name: 'Прод' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Лавка · Прод' })).toHaveAttribute(
       'href',
       `/projects/${PROJECT_ID}/infrastructure`,
     );
+  });
+
+  it('не дублирует связь отдельной ссылкой на паспорт проекта', () => {
+    render(
+      <DomainList domains={[domain]} onDelete={onDelete} onDeleteSubdomain={onDeleteSubdomain} />,
+    );
+
+    expect(screen.queryByRole('link', { name: 'Лавка' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Прод' })).not.toBeInTheDocument();
   });
 
   it('корень без поддоменов остаётся одной строкой', () => {

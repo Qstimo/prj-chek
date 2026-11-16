@@ -32,7 +32,7 @@ export function VersionFields({ draft, onChange, hasPlatforms = false }: IProps)
   }
 
   return (
-    <div className="space-y-4">
+    <div className="grid min-w-0 gap-4 sm:grid-cols-2">
       <TextField
         id="label"
         label="Обозначение"

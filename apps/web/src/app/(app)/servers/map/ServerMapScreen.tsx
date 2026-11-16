@@ -9,7 +9,7 @@ export function ServerMapScreen() {
   const map = useQueryServerMap();
 
   if (map.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (map.isError) {

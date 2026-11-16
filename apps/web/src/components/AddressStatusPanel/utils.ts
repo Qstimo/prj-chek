@@ -10,7 +10,7 @@ import { pluralize } from '@/utils';
  */
 export function fallsTextOf(falls: number, windowDays: number): string {
   if (falls === 0) {
-    return `не падал ни разу за ${pluralize(windowDays, 'день', 'дня', 'дней')}`;
+    return `нет зарегистрированных падений за ${pluralize(windowDays, 'день', 'дня', 'дней')}`;
   }
 
   return fallCountTextOf(falls, windowDays);

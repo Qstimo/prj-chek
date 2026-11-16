@@ -35,17 +35,17 @@ export function PlacementList({ map, selectedId, isServer }: IProps) {
         return (
           <li key={`${edge.serverId}-${edge.projectId}`} className="text-sm">
             {isServer ? (
-              <Link href={`/projects/${edge.projectId}`} className="hover:underline">
-                {counterpart?.name}
+              <Link href={`/projects/${edge.projectId}/infrastructure`} className="break-words hover:underline">
+                {counterpart?.name} · {edge.environments.map((environment) => environment.name).join(', ')}
               </Link>
             ) : (
               <Link href={`/servers/${edge.serverId}/edit`} className="hover:underline">
                 {counterpart?.name}
               </Link>
             )}
-            <span className="block text-muted-foreground">
+            {!isServer && <span className="block text-muted-foreground">
               {edge.environments.map((environment) => environment.name).join(', ')}
-            </span>
+            </span>}
           </li>
         );
       })}

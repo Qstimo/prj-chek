@@ -41,7 +41,7 @@ export function AccessScreen({ projectId }: IProps) {
   const revokeToken = useMutationRevokeAgentToken(projectId);
 
   if (grants.isPending || users.isPending || tokens.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (grants.isError || users.isError || tokens.isError) {

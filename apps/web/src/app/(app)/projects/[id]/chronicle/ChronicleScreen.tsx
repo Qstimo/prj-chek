@@ -57,7 +57,7 @@ export function ChronicleScreen({ projectId, isSuperadmin }: IProps) {
   );
 
   if (chronicle.isPending || sections.isPending) {
-    return <Loader />;
+    return <Loader size="page" />;
   }
 
   if (chronicle.isError || sections.isError) {

@@ -6,7 +6,9 @@
   .cairn-loader {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    justify-content: center;
+    width: 100%;
+    min-height: 6rem;
     padding-block: 0.75rem;
   }
 
@@ -38,8 +40,7 @@
   .cairn-loader--page {
     flex-direction: column;
     justify-content: center;
-    min-height: 16rem;
-    gap: 1rem;
+    min-height: max(16rem, calc(100svh - 16rem));
     padding: 2rem;
   }
 

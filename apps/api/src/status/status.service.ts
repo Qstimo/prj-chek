@@ -47,7 +47,8 @@ export class StatusService {
    * отдельно, иначе человек ждал бы обновления, которого не будет.
    */
   async runNow(subject: RequestSubject): Promise<void> {
-    if (this.runner.start({ isManual: true }) === StatusRunOutcome.Busy) {
+    // Ждём лишь захвата замка, чтобы чужой экземпляр тоже получил 409.
+    if (await this.runner.start({ isManual: true }) === StatusRunOutcome.Busy) {
       throw new ConflictException('Проверки уже идут. Подождите, пока прогон закончится.');
     }
 

@@ -37,8 +37,13 @@ export function Drawer({
             панели, а верхний отступ она держит сама (см. выше).
           */}
           <header className="sticky top-0 z-10 -mx-6 flex items-start justify-between gap-4 bg-background px-6 pb-4 pt-6">
-            <Dialog.Title className="text-lg font-medium">{title}</Dialog.Title>
-            <div className="flex items-center gap-2">
+            <Dialog.Title
+              tabIndex={width === DrawerWidth.Release ? 0 : undefined}
+              className={`min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-lg font-medium ${width === DrawerWidth.Release ? 'max-h-24 overflow-y-auto' : ''}`}
+            >
+              {title}
+            </Dialog.Title>
+            <div className="flex shrink-0 items-center gap-2">
               {actions}
               <Dialog.Close
                 aria-label="Закрыть"
