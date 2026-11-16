@@ -27,6 +27,20 @@ export function isCalendarDay(day: string): boolean {
 }
 
 /**
+ * День без времени, обязательный: дата события хроники и саммари.
+ *
+ * Отдельно от `dayDateSchema`, а не `.nullable()` поверх неё, ровно
+ * наоборот: обязательный вариант — основной, а допускающий пустоту
+ * получается из него. У хроники была своя копия этой проверки, потому
+ * что общая схема допускает `null`; третья копия для саммари развела бы
+ * формат по трём файлам.
+ */
+export const requiredDaySchema = z
+  .string()
+  .regex(DAY_PATTERN, 'Ожидается дата ГГГГ-ММ-ДД')
+  .refine(isCalendarDay, NO_SUCH_DAY);
+
+/**
  * Дата-день без времени: план, факт релиза, выход на платформе.
  *
  * Общая схема, а не копия в каждом файле: иначе формат неизбежно
@@ -38,8 +52,4 @@ export function isCalendarDay(day: string): boolean {
  * за её объём. Долг осознанный, а не незамеченный; проверку календаря обе
  * схемы берут отсюда, поэтому в этой части разойтись уже не могут.
  */
-export const dayDateSchema = z
-  .string()
-  .regex(DAY_PATTERN, 'Ожидается дата ГГГГ-ММ-ДД')
-  .refine(isCalendarDay, NO_SUCH_DAY)
-  .nullable();
+export const dayDateSchema = requiredDaySchema.nullable();

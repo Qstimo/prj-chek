@@ -1,18 +1,12 @@
 import { z } from 'zod';
 
 import { ChronicleSource } from '../enums';
-import { DAY_PATTERN, NO_SUCH_DAY, isCalendarDay } from './day-date';
-
-/** Дата события: день без времени. Точное время хранит `createdAt`. */
-const occurredOnSchema = z
-  .string()
-  .regex(DAY_PATTERN, 'Ожидается дата ГГГГ-ММ-ДД')
-  .refine(isCalendarDay, NO_SUCH_DAY);
+import { requiredDaySchema } from './day-date';
 
 /** Запись хроники на уровне метаданных: дата, заголовок, источник (ТЗ 4.3). */
 export const chronicleMetadataSchema = z.object({
   id: z.string().uuid(),
-  occurredOn: occurredOnSchema,
+  occurredOn: requiredDaySchema,
   title: z.string(),
   source: z.nativeEnum(ChronicleSource),
 });
@@ -26,7 +20,7 @@ export const chronicleDetailSchema = chronicleMetadataSchema.extend({
 
 /** Поля для создания записи вручную. */
 export const chronicleEntryCreateSchema = z.object({
-  occurredOn: occurredOnSchema,
+  occurredOn: requiredDaySchema,
   title: z.string().trim().min(1).max(300),
   content: z.string().trim().min(1).max(65_536),
 });
