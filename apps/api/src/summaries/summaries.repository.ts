@@ -4,6 +4,7 @@ import {
   Section,
   SUMMARY_ALREADY_RELEASED,
   SummaryTaskOrigin,
+  type ProjectMetadata,
   type SummaryCreate,
   type SummaryDetail,
   type SummaryListItem,
@@ -53,6 +54,21 @@ export class SummariesRepository {
     private readonly chronicle: ChronicleRepository,
     private readonly roadmap: RoadmapRepository,
   ) {}
+
+  /** Цели выбора фильтруются по хронике, а не по видимости паспорта. */
+  async writableProjects(subject: RequestSubject): Promise<ProjectMetadata[]> {
+    const ids = await this.access.projectIdsWithLevel(subject, Section.Chronicle, AccessLevel.Write);
+    if (ids.length === 0) return [];
+    return this.db.select({ id: projects.id, slug: projects.slug, name: projects.name, lifecycle: projects.lifecycle })
+      .from(projects).where(inArray(projects.id, ids)).orderBy(asc(projects.name));
+  }
+
+  /** Общая история использует ту же выборку целей и те же проекции саммари. */
+  async findOverview(subject: RequestSubject): Promise<SummaryListItem[]> {
+    const targets = await this.writableProjects(subject);
+    const lists = await Promise.all(targets.map(project => this.findForProject(subject, project.id)));
+    return lists.flat().sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
 
   /** История саммари проекта: свежие сверху. */
   async findForProject(

@@ -6,6 +6,8 @@ import {
   SUMMARY_TEXT_TOO_LONG,
   SUMMARY_TASKS_EMPTY,
   SummaryTaskOrigin,
+  type ProjectMetadata,
+  type TaskSuggesterInfo,
   type RoadmapVersionCreate,
   type SummaryReleaseResult,
   type SummaryCreate,
@@ -64,6 +66,25 @@ export class SummariesService implements OnModuleDestroy {
     @Inject(TASK_SUGGESTER) private readonly suggester: TaskSuggester,
     private readonly roadmap: RoadmapRepository,
   ) {}
+
+  /** История по всем проектам, куда можно писать хронику. */
+  async overview(subject: RequestSubject): Promise<SummaryListItem[]> {
+    return this.repository.findOverview(subject);
+  }
+
+  /** Допустимые цели первого шага. */
+  async writableProjects(subject: RequestSubject): Promise<ProjectMetadata[]> {
+    return this.repository.writableProjects(subject);
+  }
+
+  /** Явная проекция не позволяет свойствам адаптера утечь в ответ. */
+  suggesterInfo(): TaskSuggesterInfo {
+    return {
+      isEnabled: this.suggester.isEnabled, kind: this.suggester.kind,
+      host: this.suggester.host, model: this.suggester.model || null,
+      maxChars: this.suggester.maxChars,
+    };
+  }
 
   /** История саммари проекта. Чтение в журнал не пишется. */
   async list(subject: RequestSubject, projectId: string): Promise<SummaryListItem[]> {

@@ -10,6 +10,8 @@ import { DisabledSuggester } from './suggester/disabled.suggester';
 import { OpenAiCompatibleSuggester } from './suggester/openai-compatible.suggester';
 import { suggesterSettings } from './suggester/settings';
 import { TASK_SUGGESTER, type TaskSuggester } from './suggester/task-suggester';
+import { SummariesController } from './summaries.controller';
+import { SummariesOverviewController } from './summaries-overview.controller';
 import { SummariesRepository } from './summaries.repository';
 import { SummariesService } from './summaries.service';
 
@@ -21,6 +23,7 @@ import { SummariesService } from './summaries.service';
  */
 @Module({
   imports: [DbModule, AccessModule, AuditModule, AuthModule, ChronicleModule, RoadmapModule],
+  controllers: [SummariesController, SummariesOverviewController],
   providers: [
     SummariesRepository,
     SummariesService,

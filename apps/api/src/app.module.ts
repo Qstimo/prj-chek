@@ -18,6 +18,7 @@ import { PlatformsModule } from './platforms/platforms.module';
 import { ProjectsModule } from './projects/projects.module';
 import { PushModule } from './push/push.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
+import { SummariesModule } from './summaries/summaries.module';
 import { StatusModule } from './status/status.module';
 import { DomainsModule } from './domains/domains.module';
 import { ServersModule } from './servers/servers.module';
@@ -37,6 +38,7 @@ import { VariablesModule } from './variables/variables.module';
     PlatformsModule,
     EnvironmentsModule,
     ChronicleModule,
+    SummariesModule,
     VariablesModule,
     RoadmapModule,
     DocsModule,
