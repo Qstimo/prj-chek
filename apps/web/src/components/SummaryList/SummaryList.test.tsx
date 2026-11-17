@@ -26,6 +26,8 @@ const WITH_TASKS: SummaryListItem = {
   taskCount: 12,
 };
 
+const VERSION_ID = '55555555-5555-5555-5555-555555555555';
+
 const RELEASED: SummaryListItem = {
   ...TEXT_ONLY,
   id: '44444444-4444-4444-4444-444444444444',
@@ -33,6 +35,7 @@ const RELEASED: SummaryListItem = {
   taskCount: 4,
   isReleased: true,
   releasedVersionLabel: 'v1.4',
+  releasedVersionId: VERSION_ID,
 };
 
 describe('история саммари', () => {
@@ -47,19 +50,24 @@ describe('история саммари', () => {
 
   it('скрытое обозначение версии не читается как «не сформирован»', () => {
     // isReleased — состояние потока, обозначение — данные роадмапа.
-    render(<SummaryList items={[{ ...RELEASED, releasedVersionLabel: null }]} />);
+    render(
+      <SummaryList
+        items={[{ ...RELEASED, releasedVersionLabel: null, releasedVersionId: null }]}
+      />,
+    );
 
     expect(screen.getByText('Ушло в роадмап')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Ушло/ })).not.toBeInTheDocument();
   });
 
-  it('«Ушло в v1.4» ведёт в роадмап проекта', () => {
-    // Без `?version`: идентификатора версии в строке истории нет —
-    // `summaryListItemSchema` его не несёт.
+  it('«Ушло в v1.4» ведёт на саму версию, а не на полосу целиком', () => {
+    // Роадмап держит открытую версию в адресе: без `?version` ссылка
+    // привела бы к полосе, где версию ещё надо найти.
     render(<SummaryList items={[RELEASED]} />);
 
     expect(screen.getByRole('link', { name: 'Ушло в v1.4' })).toHaveAttribute(
       'href',
-      `/projects/${PROJECT_ID}/roadmap`,
+      `/projects/${PROJECT_ID}/roadmap?version=${VERSION_ID}`,
     );
   });
 

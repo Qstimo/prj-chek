@@ -45,12 +45,19 @@ export function SummaryList({ items }: IProps) {
               <td className="px-3 py-2 text-muted-foreground">{item.projectName}</td>
               <td className="px-3 py-2 tabular-nums">{item.taskCount}</td>
               <td className="px-3 py-2">
+                {/* Обозначение и идентификатор версии выходят по одному
+                    правилу видимости, поэтому проверяются вместе: ссылка
+                    без идентификатора вела бы на полосу целиком, а
+                    обозначение без него не бывает. */}
                 {!item.isReleased ? (
                   stateOf(item.taskCount)
-                ) : item.releasedVersionLabel === null ? (
+                ) : item.releasedVersionLabel === null || item.releasedVersionId === null ? (
                   LIST_TEXTS.releasedHidden
                 ) : (
-                  <Link href={`/projects/${item.projectId}/roadmap`} className="hover:underline">
+                  <Link
+                    href={`/projects/${item.projectId}/roadmap?version=${item.releasedVersionId}`}
+                    className="hover:underline"
+                  >
                     {`Ушло в ${item.releasedVersionLabel}`}
                   </Link>
                 )}
