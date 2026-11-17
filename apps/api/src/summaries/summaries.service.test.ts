@@ -54,6 +54,11 @@ function unavailable(message = 'узел не ответил'): SuggesterFailure
   return new SuggesterFailure(SUGGESTER_UNAVAILABLE, message);
 }
 
+/** Пауза, по которой видно, что вторая транзакция правда стоит на замке. */
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Обещание, которое разрешает тест: так ловится «вызов ещё в сети». */
 function deferred(): { promise: Promise<never>; release: () => void } {
   let release = (): void => {};
@@ -148,6 +153,23 @@ describe('служба саммари', () => {
     isRevoked: false,
   });
 
+  /**
+   * Служба со своим репозиторием на заданном соединении.
+   *
+   * Нужна проверке одновременных нажатий: у клиентов фикстуры `max: 1`,
+   * и две транзакции на одном соединении не живут одновременно.
+   */
+  function serviceOn(db: typeof testDb.db): {
+    service: SummariesService;
+    repository: SummariesRepository;
+  } {
+    const access = new AccessService(db);
+    const roadmap = new RoadmapRepository(db, access);
+    const own = new SummariesRepository(db, access, new ChronicleRepository(db, access), roadmap);
+
+    return { repository: own, service: new SummariesService(db, own, audit, suggesterStub, roadmap) };
+  }
+
   /** Записи журнала по действию, старые сверху. */
   async function auditRecords(action: AuditAction) {
     return testDb.db
@@ -239,10 +261,53 @@ describe('служба саммари', () => {
     });
 
     it('одновременные нажатия дают одну версию и один конфликт', async () => {
-      const results = await Promise.allSettled(['v1.3', 'v1.4'].map(label => service.release(writer(), projectId, summaryId, { label })));
+      // Два **соединения** и ручная координация, как у соседней проверки
+      // замены: у клиента фикстуры `max: 1`, и на одном соединении
+      // вторая транзакция не начинается до коммита первой — PostgreSQL
+      // двух открытых не видит, и замок строки в проверке не участвовал
+      // бы вовсе. Убери `.for('no key update')` — тест обязан покраснеть.
+      const second = serviceOn(testDb.appDb);
+      let locked = (): void => {};
+      let resumeFirst = (): void => {};
+      let reachedLock = (): void => {};
+      let passedLock = (): void => {};
+      const held = new Promise<void>((resolve) => { locked = resolve; });
+      const resume = new Promise<void>((resolve) => { resumeFirst = resolve; });
+      const reached = new Promise<void>((resolve) => { reachedLock = resolve; });
+      const passed = new Promise<void>((resolve) => { passedLock = resolve; });
+
+      // Первое нажатие замирает, уже взяв замок строки саммари: замок
+      // берётся в `lockForRelease`, то есть до создания версии.
+      const createVersion = RoadmapRepository.prototype.createVersion;
+      vi.spyOn(RoadmapRepository.prototype, 'createVersion').mockImplementationOnce(
+        async function (this: RoadmapRepository, ...args) {
+          locked();
+          await resume;
+          return createVersion.apply(this, args);
+        },
+      );
+      const lockForRelease = second.repository.lockForRelease.bind(second.repository);
+      vi.spyOn(second.repository, 'lockForRelease').mockImplementation(async (...args) => {
+        reachedLock();
+        const row = await lockForRelease(...args);
+        passedLock();
+        return row;
+      });
+
+      const first = service.release(writer(), projectId, summaryId, { label: 'v1.3' });
+      await held;
+      const concurrent = second.service.release(writer(), projectId, summaryId, { label: 'v1.4' });
+      await reached;
+      // Замок держит — второе нажатие стоит, и первое отпускается по
+      // паузе; замка нет — второе уже прочитало незанятую строку, и
+      // ждать нечего.
+      await Promise.race([passed, pause(250)]);
+      resumeFirst();
+
+      const results = await Promise.allSettled([first, concurrent]);
       expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
       expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { status: 409, response: expect.objectContaining({ code: SUMMARY_ALREADY_RELEASED }) } });
-      expect(await testDb.db.select().from(roadmapVersions)).toHaveLength(1);
+      expect(await testDb.rowsOf(roadmapVersions)).toHaveLength(1);
     });
 
     it.each(['ручная', 'предложенная'])('замена %s после чтения до релиза получает конфликт и не меняет выпущенный черновик', async (kind) => {
