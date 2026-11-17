@@ -1,6 +1,10 @@
+import { randomBytes } from 'node:crypto';
+
 import {
   AccessLevel,
   Section,
+  ModelAuthScheme,
+  ModelServiceKind,
   PlatformKind,
   SUMMARY_TASKS_EMPTY,
   SUGGESTER_DISABLED,
@@ -11,17 +15,21 @@ import {
   SubjectKind,
   SummaryTaskOrigin,
   ModelServicePlacement,
+  type ModelServiceUpdate,
   type SummaryCreate,
 } from '@cairn/shared';
 import { BadGatewayException, BadRequestException, ConflictException } from '@nestjs/common';
 import { asc, eq, like } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
 import { ChronicleRepository } from '../chronicle/chronicle.repository';
+import { CryptoService } from '../crypto/crypto.service';
+import { ModelServiceSettingsService } from '../model-services/model-service-settings.service';
+import { ModelServicesRepository } from '../model-services/model-services.repository';
 import {
   auditLog,
   chronicleEntries,
@@ -37,7 +45,13 @@ import {
 } from '../db/schema';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
 import { DisabledSuggester } from './suggester/disabled.suggester';
-import { SuggesterFailure, type TaskSuggester } from './suggester/task-suggester';
+import { SUGGESTER_NODE_ENV_NAMES } from './suggester/settings';
+import { ModelServiceTaskSuggesterSource } from './suggester/task-suggester.source';
+import {
+  SuggesterFailure,
+  type TaskSuggester,
+  type TaskSuggesterSource,
+} from './suggester/task-suggester';
 import { SummariesRepository } from './summaries.repository';
 import { SummariesService } from './summaries.service';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
@@ -92,6 +106,12 @@ describe('служба саммари', () => {
     probe: vi.fn(),
   };
 
+  /** Источник заглушки: адаптер берётся на вызов, как в боевом коде. */
+  const stubSource: TaskSuggesterSource = { current: async () => suggesterStub };
+
+  /** Источник выключенного порта: ненастроенный узел. */
+  const disabledSource: TaskSuggesterSource = { current: async () => new DisabledSuggester() };
+
   beforeAll(async () => {
     testDb = await startTestDatabase();
     const access = new AccessService(testDb.db);
@@ -102,14 +122,14 @@ describe('служба саммари', () => {
       new RoadmapRepository(testDb.db, access),
     );
     audit = new AuditService();
-    service = new SummariesService(testDb.db, repository, audit, suggesterStub, new RoadmapRepository(testDb.db, access));
-    // Вторая служба на выключенном порте: адаптер выбирается при старте,
-    // и подменять его на ходу нельзя — так же, как в боевом коде.
+    service = new SummariesService(testDb.db, repository, audit, stubSource, new RoadmapRepository(testDb.db, access));
+    // Вторая служба на выключенном порте: источник отдаёт выключенный
+    // адаптер на каждом вызове — так же, как в боевом коде.
     disabledService = new SummariesService(
       testDb.db,
       repository,
       audit,
-      new DisabledSuggester(),
+      disabledSource,
       new RoadmapRepository(testDb.db, access),
     );
   });
@@ -170,7 +190,7 @@ describe('служба саммари', () => {
     const roadmap = new RoadmapRepository(db, access);
     const own = new SummariesRepository(db, access, new ChronicleRepository(db, access), roadmap);
 
-    return { repository: own, service: new SummariesService(db, own, audit, suggesterStub, roadmap) };
+    return { repository: own, service: new SummariesService(db, own, audit, stubSource, roadmap) };
   }
 
   /** Записи журнала по действию, старые сверху. */
@@ -207,6 +227,165 @@ describe('служба саммари', () => {
       (cause: unknown) => cause,
     );
   }
+
+  describe('смена настройки без перезапуска', () => {
+    let liveService: SummariesService;
+    let settingsRepository: ModelServicesRepository;
+    let savedEnv: Record<string, string | undefined>;
+
+    /** Настройка узла в базе: тест меняет в ней одно поле. */
+    const nodeInput: ModelServiceUpdate = {
+      baseUrl: 'https://pervyj.example/v1',
+      authScheme: ModelAuthScheme.Bearer,
+      model: 'первая',
+      folder: null,
+      placement: ModelServicePlacement.External,
+      timeoutSeconds: 60,
+      isEnabled: true,
+    };
+
+    /** Ответ OpenAI-совместимого узла: в сеть не ходит ни один тест. */
+    function completion(): Response {
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"tasks":["раз"]}' } }] }),
+        { status: 200 },
+      );
+    }
+
+    /** Сохраняет настройку узла так, как это сделал бы администратор. */
+    async function save(overrides: Partial<ModelServiceUpdate> = {}): Promise<void> {
+      await settingsRepository.save(
+        testDb.db,
+        ModelServiceKind.TaskSuggester,
+        adminSubjectId,
+        { ...nodeInput, secret: 'ключ', ...overrides },
+      );
+    }
+
+    /** Имена моделей из записей журнала о передаче, старые сверху. */
+    async function suggestedModels(): Promise<unknown[]> {
+      const rows = await auditRecords(AuditAction.SummaryTasksSuggested);
+
+      return rows.map((row) => (row.metadata as { model?: unknown } | null)?.model);
+    }
+
+    beforeEach(() => {
+      const access = new AccessService(testDb.db);
+      settingsRepository = new ModelServicesRepository(
+        testDb.db,
+        new CryptoService(randomBytes(32).toString('base64')),
+      );
+      liveService = new SummariesService(
+        testDb.db,
+        repository,
+        audit,
+        new ModelServiceTaskSuggesterSource(
+          new ModelServiceSettingsService(testDb.db, settingsRepository),
+        ),
+        new RoadmapRepository(testDb.db, access),
+      );
+
+      // Окружение чистое: иначе ключ из оболочки разработчика включал бы
+      // узел там, где проверяется ненастроенный.
+      savedEnv = Object.fromEntries(
+        SUGGESTER_NODE_ENV_NAMES.map((name) => [name, process.env[name]]),
+      );
+      for (const name of SUGGESTER_NODE_ENV_NAMES) {
+        delete process.env[name];
+      }
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      for (const name of SUGGESTER_NODE_ENV_NAMES) {
+        if (savedEnv[name] === undefined) {
+          delete process.env[name];
+        } else {
+          process.env[name] = savedEnv[name];
+        }
+      }
+    });
+
+    it('смена настройки действует на следующем вызове, без перезапуска', async () => {
+      // Отмена запрета «порт выбирается один раз при старте»: отмена
+      // названа, и взамен каждая смена попадает в журнал (дизайн, 9.1).
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(completion())));
+
+      await save({ model: 'первая' });
+      await liveService.suggest(writer(), projectId, summaryId);
+
+      await save({ model: 'вторая' });
+      await liveService.suggest(writer(), projectId, summaryId);
+
+      expect(await suggestedModels()).toEqual(['первая', 'вторая']);
+    });
+
+    it('подпись над кнопкой читает действующую настройку, а не снимок старта', async () => {
+      // Отстать негде: `suggesterInfo` строится из той же разрешённой
+      // настройки, из которой строится адаптер (дизайн, 9.1 пункт 2).
+      await save({ model: 'первая' });
+      expect(await liveService.suggesterInfo()).toMatchObject({ model: 'первая' });
+
+      await save({ model: 'вторая' });
+      expect(await liveService.suggesterInfo()).toMatchObject({
+        model: 'вторая',
+        host: 'pervyj.example',
+        isEnabled: true,
+      });
+    });
+
+    it('вызов, ушедший в сеть, доходит на прежней настройке', async () => {
+      // Иначе журнал называл бы один узел, а текст уехал бы на другой —
+      // то есть журнал начал бы врать о передаче, о которой он
+      // единственный след (дизайн, 9.3).
+      await save({ baseUrl: 'https://pervyj.example/v1' });
+      let release = (): void => {};
+      const fetchMock = vi.fn(
+        (_url: string, _init: RequestInit) =>
+          new Promise<Response>((resolve) => {
+            release = () => resolve(completion());
+          }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const inFlight = liveService.suggest(writer(), projectId, summaryId);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      await save({ baseUrl: 'https://vtoroj.example/v1' });
+      release();
+      await inFlight;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(new URL(String(fetchMock.mock.calls[0]?.[0])).hostname).toBe('pervyj.example');
+    });
+
+    it('ненастроенный узел даёт выключенный порт, а не падение', async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const error = await failureOf(liveService.suggest(writer(), projectId, summaryId));
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: SUGGESTER_DISABLED,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('снятый ключ выключает порт на следующем вызове', async () => {
+      // Та же отмена с другой стороны: администратор очистил поле, и
+      // передача наружу прекращается без перезапуска API.
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(completion())));
+      await save();
+      await liveService.suggest(writer(), projectId, summaryId);
+
+      await save({ secret: null });
+
+      const error = await failureOf(liveService.suggest(writer(), projectId, summaryId));
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: SUGGESTER_DISABLED,
+      });
+    });
+  });
 
   describe('формирование релиза', () => {
     beforeEach(async () => {

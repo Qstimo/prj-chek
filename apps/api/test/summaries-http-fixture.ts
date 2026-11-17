@@ -9,7 +9,11 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
 import { DATABASE } from '../src/db/db.module';
 import { grants, projects, subjects, users } from '../src/db/schema';
-import { TASK_SUGGESTER, type TaskSuggester } from '../src/summaries/suggester/task-suggester';
+import {
+  TASK_SUGGESTER_SOURCE,
+  type TaskSuggester,
+  type TaskSuggesterSource,
+} from '../src/summaries/suggester/task-suggester';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
 
 /** Настоящие сессии и база: проверяем маршруты вместе с регистрацией в корне. */
@@ -24,12 +28,14 @@ export function summariesHttpFixture() {
     // этих маршрутов не касается — она живёт в администрировании.
     isEnabled: true, suggest: vi.fn(), probe: vi.fn(),
   };
+  /** Источник заглушки: подменяется токен источника, а не адаптера. */
+  const suggesterSource: TaskSuggesterSource = { current: async () => suggester };
   beforeAll(async () => {
     db = await startTestDatabase();
     passwordHash = await new PasswordService().hash('очень длинный пароль');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE).useValue(db.db)
-      .overrideProvider(TASK_SUGGESTER).useValue(suggester).compile();
+      .overrideProvider(TASK_SUGGESTER_SOURCE).useValue(suggesterSource).compile();
     app = module.createNestApplication();
     app.use(cookieParser());
     await app.init();

@@ -33,9 +33,10 @@ import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import {
   SuggesterFailure,
-  TASK_SUGGESTER,
+  TASK_SUGGESTER_SOURCE,
   type SuggestResult,
   type TaskSuggester,
+  type TaskSuggesterSource,
 } from './suggester/task-suggester';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
 import { SummariesRepository } from './summaries.repository';
@@ -66,7 +67,7 @@ export class SummariesService implements OnModuleDestroy {
     @Inject(DATABASE) private readonly db: Database,
     private readonly repository: SummariesRepository,
     private readonly audit: AuditService,
-    @Inject(TASK_SUGGESTER) private readonly suggester: TaskSuggester,
+    @Inject(TASK_SUGGESTER_SOURCE) private readonly suggesters: TaskSuggesterSource,
     private readonly roadmap: RoadmapRepository,
   ) {}
 
@@ -80,12 +81,20 @@ export class SummariesService implements OnModuleDestroy {
     return this.repository.writableProjects(subject);
   }
 
-  /** Явная проекция не позволяет свойствам адаптера утечь в ответ. */
-  suggesterInfo(): TaskSuggesterInfo {
+  /**
+   * Явная проекция не позволяет свойствам адаптера утечь в ответ.
+   *
+   * Асинхронна, потому что читает действующую настройку, а не снимок
+   * старта: подпись над кнопкой отстать от настройки не может
+   * (дизайн, 9.1 пункт 2).
+   */
+  async suggesterInfo(): Promise<TaskSuggesterInfo> {
+    const suggester = await this.suggesters.current();
+
     return {
-      isEnabled: this.suggester.isEnabled, placement: this.suggester.placement,
-      host: this.suggester.host, model: this.suggester.model || null,
-      maxChars: this.suggester.maxChars,
+      isEnabled: suggester.isEnabled, placement: suggester.placement,
+      host: suggester.host, model: suggester.model || null,
+      maxChars: suggester.maxChars,
     };
   }
 
@@ -249,12 +258,18 @@ export class SummariesService implements OnModuleDestroy {
    * 7. успех — транзакция замены черновика. Отдельной записи журнала об
    *    успехе нет: запись о передаче уже закрыта, дописать в неё число
    *    предложенных нечем.
+   *
+   * Адаптер берётся **один раз** в начале вызова и дальше не
+   * перечитывается: смена настройки посреди вызова оставила бы в журнале
+   * один узел, а текст уехал бы на другой — то есть журнал начал бы
+   * врать о передаче, о которой он единственный след (дизайн, 9.3).
    */
   async suggest(
     subject: RequestSubject,
     projectId: string,
     summaryId: string,
   ): Promise<SummaryDetail> {
+    const suggester = await this.suggesters.current();
     const source = await this.db.transaction((tx) =>
       this.repository.sourceTextOf(subject, tx, projectId, summaryId),
     );
@@ -271,19 +286,19 @@ export class SummariesService implements OnModuleDestroy {
     // «Не настроено» прежде «длинно» — порядок таблицы дизайна 5.4:
     // предел у выключенного порта свой, и отказ по длине послал бы
     // человека сокращать текст для разбивки, которой нет вовсе.
-    if (!this.suggester.isEnabled) {
+    if (!suggester.isEnabled) {
       throw new ConflictException({
         code: SUGGESTER_DISABLED,
         message: 'Разбивка не настроена: обратитесь к администратору.',
       });
     }
 
-    if (source.text.length > this.suggester.maxChars) {
+    if (source.text.length > suggester.maxChars) {
       throw new ConflictException({
         code: SUMMARY_TEXT_TOO_LONG,
-        maxChars: this.suggester.maxChars,
+        maxChars: suggester.maxChars,
         chars: source.text.length,
-        message: `Текст длиннее ${this.suggester.maxChars} знаков. Сократите или разделите на два саммари.`,
+        message: `Текст длиннее ${suggester.maxChars} знаков. Сократите или разделите на два саммари.`,
       });
     }
 
@@ -309,9 +324,9 @@ export class SummariesService implements OnModuleDestroy {
           entityId: summaryId,
           projectId,
           metadata: {
-            suggester: this.suggester.placement,
-            model: this.suggester.model,
-            host: this.suggester.host,
+            suggester: suggester.placement,
+            model: suggester.model,
+            host: suggester.host,
             chars: source.text.length,
           },
         }),
@@ -320,9 +335,12 @@ export class SummariesService implements OnModuleDestroy {
       let result: SuggestResult;
 
       try {
-        result = await this.suggester.suggest(source.text, controller.signal);
+        result = await suggester.suggest(source.text, controller.signal);
       } catch (cause) {
-        await this.recordFailure(subject, projectId, summaryId, cause, Date.now() - startedAt);
+        await this.recordFailure(subject, projectId, summaryId, suggester, {
+          cause,
+          durationMs: Date.now() - startedAt,
+        });
 
         throw outwardOf(cause);
       }
@@ -335,8 +353,8 @@ export class SummariesService implements OnModuleDestroy {
           summaryId,
           result.tasks.map((task) => task.title),
           {
-            name: this.suggester.placement,
-            model: this.suggester.model,
+            name: suggester.placement,
+            model: suggester.model,
             textUpdatedAt: source.textUpdatedAt,
             dropped: result.dropped,
           },
@@ -358,13 +376,17 @@ export class SummariesService implements OnModuleDestroy {
    *
    * В теле бывает и присланный нами текст созвона, и подробности о
    * ключе, поэтому наружу идёт только код отказа.
+   *
+   * Адаптер приходит параметром, а не берётся у источника заново: запись
+   * обязана назвать тот узел, на который вызов и ушёл, иначе смена
+   * настройки посреди вызова переписала бы историю передачи.
    */
   private async recordFailure(
     subject: RequestSubject,
     projectId: string,
     summaryId: string,
-    cause: unknown,
-    durationMs: number,
+    suggester: TaskSuggester,
+    failure: { cause: unknown; durationMs: number },
   ): Promise<void> {
     await this.db.transaction((tx) =>
       this.audit.record(tx, actorOf(subject), {
@@ -373,10 +395,10 @@ export class SummariesService implements OnModuleDestroy {
         entityId: summaryId,
         projectId,
         metadata: {
-          suggester: this.suggester.placement,
-          host: this.suggester.host,
-          code: codeOf(cause),
-          durationMs,
+          suggester: suggester.placement,
+          host: suggester.host,
+          code: codeOf(failure.cause),
+          durationMs: failure.durationMs,
         },
       }),
     );
