@@ -1,4 +1,8 @@
-import { SUGGESTER_UNAVAILABLE, type ModelServicePlacement } from '@cairn/shared';
+import {
+  SUGGESTER_UNAVAILABLE,
+  ModelAuthScheme,
+  type ModelServicePlacement,
+} from '@cairn/shared';
 
 import type { SuggesterSettings } from './settings';
 import { SuggesterFailure, type SuggestResult, type TaskSuggester } from './task-suggester';
@@ -119,12 +123,16 @@ export class OpenAiCompatibleSuggester implements TaskSuggester {
   /** Тело ответа чужого узла. Любая неудача — один и тот же отказ. */
   private async ask(text: string, signal: AbortSignal): Promise<string> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const authorization = this.authorizationOf();
 
-    // Локальный endpoint ключа не требует, и пустой `Bearer` он имеет
-    // право отвергнуть.
-    if (this.#settings.apiKey !== '') {
-      headers.Authorization = `Bearer ${this.#settings.apiKey}`;
+    if (authorization !== null) {
+      headers.Authorization = authorization;
     }
+
+    // Каталог (`folder`) здесь не отправляется: у Yandex он стоит внутри
+    // имени модели, которое человек вписал целиком, и второе место для
+    // того же значения разошлось бы с первым при первой правке
+    // (дизайн, 6.3). Поле читает тот адаптер, которому оно нужно.
 
     let response: Response;
 
@@ -167,6 +175,28 @@ export class OpenAiCompatibleSuggester implements TaskSuggester {
     }
 
     return payload;
+  }
+
+  /**
+   * Значение заголовка `Authorization` либо `null`, когда его не ставят.
+   *
+   * Схема, а не класс адаптера: Yandex отличается от OpenAI **одним
+   * словом в одном заголовке**, и класс, отличающийся словом, — это
+   * настройка, оформленная кодом (дизайн, 6.1).
+   *
+   * Пустой ключ при `bearer`/`api_key` оставляет заголовок ненаписанным:
+   * порт в этом состоянии и так выключен, но адаптер не вправе слать
+   * `Bearer ` с пустым значением — узел имеет право отвергнуть его, и
+   * отказ назвал бы не ту причину.
+   */
+  private authorizationOf(): string | null {
+    if (this.#settings.authScheme === ModelAuthScheme.None || this.#settings.apiKey === '') {
+      return null;
+    }
+
+    const prefix = this.#settings.authScheme === ModelAuthScheme.ApiKey ? 'Api-Key' : 'Bearer';
+
+    return `${prefix} ${this.#settings.apiKey}`;
   }
 
   /** Предел ожидания в миллисекундах. */
