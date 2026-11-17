@@ -164,13 +164,31 @@ describe('экран саммари', () => {
   });
 
   it('повторная разбивка непустого черновика спрашивает подтверждение', async () => {
-    // Заменять правленный список молча нельзя.
+    // Заменять правленный список молча нельзя. Сторож стоит у дорогой
+    // стороны: платный вызов не должен уйти, пока диалог открыт, — само
+    // наличие диалога этого не доказывает.
+    const suggest = mutation();
+    vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(suggest);
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
     await userEvent.click(screen.getByRole('button', { name: /Создать задачи/ }));
 
+    expect(
+      (suggest as unknown as { mutate: ReturnType<typeof vi.fn> }).mutate,
+    ).not.toHaveBeenCalled();
     expect(screen.getByText(/будет заменён/)).toBeInTheDocument();
-    expect(vi.mocked(hooks.useMutationSuggestSummaryTasks).mock.results[0]).toBeDefined();
+  });
+
+  it('подтверждение отпускает разбивку', async () => {
+    // Обратная сторона: диалог не должен стать тупиком.
+    const suggest = mutation();
+    vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(suggest);
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: /Создать задачи/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Заменить' }));
+
+    expect((suggest as unknown as { mutate: ReturnType<typeof vi.fn> }).mutate).toHaveBeenCalled();
   });
 
   it('первая разбивка пустого черновика подтверждения не спрашивает', async () => {
