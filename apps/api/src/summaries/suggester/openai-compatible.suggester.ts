@@ -137,6 +137,14 @@ export class OpenAiCompatibleSuggester implements TaskSuggester {
             { role: 'user', content: `${TEXT_START}\n${text}\n${TEXT_END}` },
           ],
         }),
+        // Адрес узла задаёт только настройка, и переадресация его меняет.
+        // Умолчание `fetch` — `follow`, а 307 и 308 сохраняют метод и
+        // тело: настроенный узел одним ответом переслал бы текст саммари
+        // на любой чужой адрес, и при `local` текст ушёл бы за контур,
+        // пока и подпись на экране, и `host` в журнале показывают
+        // прежний узел. Переадресация — настройка, а не маршрут, поэтому
+        // она отказ.
+        redirect: 'error',
         signal: AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs())]),
       });
     } catch {
