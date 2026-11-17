@@ -40,6 +40,22 @@ describe('AppNav', () => {
     expect(screen.queryByRole('link', { name: 'Журнал' })).not.toBeInTheDocument();
   });
 
+  it('суперадмин видит пункт «Модели»', () => {
+    render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
+
+    expect(screen.getByRole('link', { name: 'Модели' })).toHaveAttribute(
+      'href',
+      '/model-services',
+    );
+  });
+
+  it('обычный пользователь пункта «Модели» не видит', () => {
+    // Это настройка установки, и не-суперадмину экран отвечает 403.
+    render(<AppNav subject={subject} onLogout={vi.fn()} />);
+
+    expect(screen.queryByRole('link', { name: 'Модели' })).not.toBeInTheDocument();
+  });
+
   it('показывает разделы администрирования суперадмину', () => {
     render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
 
