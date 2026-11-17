@@ -1,5 +1,5 @@
 {
-  "id": "8c7ee217-aa32-4fb6-b9d2-6857ed986a91",
+  "id": "51e19687-571d-4052-8829-042b44e2185b",
   "prevId": "c1002dba-6e2d-457c-86f7-40fbcd02f7c1",
   "version": "7",
   "dialect": "postgresql",
@@ -2470,94 +2470,31 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.summaries": {
-      "name": "summaries",
+    "public.project_tags": {
+      "name": "project_tags",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
         "project_id": {
           "name": "project_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "chronicle_entry_id": {
-          "name": "chronicle_entry_id",
+        "tag_id": {
+          "name": "tag_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
-        },
-        "created_by_subject_id": {
-          "name": "created_by_subject_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "released_version_id": {
-          "name": "released_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suggester_name": {
-          "name": "suggester_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suggester_model": {
-          "name": "suggester_model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suggested_at": {
-          "name": "suggested_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suggested_text_at": {
-          "name": "suggested_text_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         }
       },
       "indexes": {
-        "summaries_project_created_idx": {
-          "name": "summaries_project_created_idx",
+        "project_tags_tag_idx": {
+          "name": "project_tags_tag_idx",
           "columns": [
             {
-              "expression": "project_id",
+              "expression": "tag_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
               "nulls": "last"
             }
           ],
@@ -2568,9 +2505,9 @@
         }
       },
       "foreignKeys": {
-        "summaries_project_id_projects_id_fk": {
-          "name": "summaries_project_id_projects_id_fk",
-          "tableFrom": "summaries",
+        "project_tags_project_id_projects_id_fk": {
+          "name": "project_tags_project_id_projects_id_fk",
+          "tableFrom": "project_tags",
           "tableTo": "projects",
           "columnsFrom": [
             "project_id"
@@ -2581,62 +2518,36 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "summaries_chronicle_entry_id_chronicle_entries_id_fk": {
-          "name": "summaries_chronicle_entry_id_chronicle_entries_id_fk",
-          "tableFrom": "summaries",
-          "tableTo": "chronicle_entries",
+        "project_tags_tag_id_tags_id_fk": {
+          "name": "project_tags_tag_id_tags_id_fk",
+          "tableFrom": "project_tags",
+          "tableTo": "tags",
           "columnsFrom": [
-            "chronicle_entry_id"
+            "tag_id"
           ],
           "columnsTo": [
             "id"
           ],
           "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "summaries_created_by_subject_id_subjects_id_fk": {
-          "name": "summaries_created_by_subject_id_subjects_id_fk",
-          "tableFrom": "summaries",
-          "tableTo": "subjects",
-          "columnsFrom": [
-            "created_by_subject_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "summaries_released_version_id_roadmap_versions_id_fk": {
-          "name": "summaries_released_version_id_roadmap_versions_id_fk",
-          "tableFrom": "summaries",
-          "tableTo": "roadmap_versions",
-          "columnsFrom": [
-            "released_version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "summaries_chronicle_entry": {
-          "name": "summaries_chronicle_entry",
-          "nullsNotDistinct": false,
+      "compositePrimaryKeys": {
+        "project_tags_project_id_tag_id_pk": {
+          "name": "project_tags_project_id_tag_id_pk",
           "columns": [
-            "chronicle_entry_id"
+            "project_id",
+            "tag_id"
           ]
         }
       },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.summary_task_drafts": {
-      "name": "summary_task_drafts",
+    "public.tags": {
+      "name": "tags",
       "schema": "",
       "columns": {
         "id": {
@@ -2646,28 +2557,15 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "summary_id": {
-          "name": "summary_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
+        "slug": {
+          "name": "slug",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "origin": {
-          "name": "origin",
-          "type": "summary_task_origin",
-          "typeSchema": "public",
+        "label": {
+          "name": "label",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2679,46 +2577,18 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "summary_task_drafts_summary_idx": {
-          "name": "summary_task_drafts_summary_idx",
-          "columns": [
-            {
-              "expression": "summary_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "position",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "summary_task_drafts_summary_id_summaries_id_fk": {
-          "name": "summary_task_drafts_summary_id_summaries_id_fk",
-          "tableFrom": "summary_task_drafts",
-          "tableTo": "summaries",
-          "columnsFrom": [
-            "summary_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "tags_slug_unique": {
+          "name": "tags_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "slug"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -3115,8 +2985,7 @@
       "schema": "public",
       "values": [
         "manual",
-        "webhook",
-        "summary"
+        "webhook"
       ]
     },
     "public.environment_kind": {
@@ -3211,14 +3080,6 @@
         "user",
         "agent_token",
         "intake_address"
-      ]
-    },
-    "public.summary_task_origin": {
-      "name": "summary_task_origin",
-      "schema": "public",
-      "values": [
-        "model",
-        "human"
       ]
     }
   },

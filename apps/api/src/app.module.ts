@@ -20,6 +20,7 @@ import { PushModule } from './push/push.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
 import { SummariesModule } from './summaries/summaries.module';
 import { StatusModule } from './status/status.module';
+import { TagsModule } from './tags/tags.module';
 import { DomainsModule } from './domains/domains.module';
 import { ServersModule } from './servers/servers.module';
 import { UsersModule } from './users/users.module';
@@ -36,6 +37,7 @@ import { VariablesModule } from './variables/variables.module';
     AuthModule,
     ProjectsModule,
     PlatformsModule,
+    TagsModule,
     EnvironmentsModule,
     ChronicleModule,
     SummariesModule,

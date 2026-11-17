@@ -236,22 +236,36 @@
     {
       "idx": 33,
       "version": "7",
-      "when": 1794845774219,
-      "tag": "0033_normal_turbo",
+      "when": 1794843151096,
+      "tag": "0033_project_tags",
       "breakpoints": true
     },
     {
       "idx": 34,
       "version": "7",
-      "when": 1794845775219,
-      "tag": "0034_summary_privileges",
+      "when": 1794843151097,
+      "tag": "0034_project_tag_privileges",
       "breakpoints": true
     },
     {
       "idx": 35,
       "version": "7",
-      "when": 1794852283797,
-      "tag": "0035_summary_suggester_dropped",
+      "when": 1794912029745,
+      "tag": "0035_normal_turbo",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794912060269,
+      "tag": "0036_summary_privileges",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794912078016,
+      "tag": "0037_summary_suggester_dropped",
       "breakpoints": true
     }
   ]

@@ -1,14 +1,19 @@
-import { ProjectLifecycle, StatusIndicator } from '@cairn/shared';
+import { ProjectLifecycle, StatusIndicator, type ProjectListItem } from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { ProjectCard } from './ProjectCard';
 
-const project = {
+const project: ProjectListItem = {
   id: '11111111-1111-1111-1111-111111111111',
   slug: 'proekt',
   name: 'Проект',
   lifecycle: ProjectLifecycle.Active,
+  updatedAt: null,
+  platforms: [],
+  tags: [],
+  productionDomain: null,
+  productionServerName: null,
 };
 
 describe('ProjectCard', () => {
@@ -53,5 +58,15 @@ describe('ProjectCard', () => {
     render(<ProjectCard project={project} />);
 
     expect(screen.queryByText('Авария')).not.toBeInTheDocument();
+  });
+
+  it('показывает теги проекта', () => {
+    render(
+      <ProjectCard
+        project={{ ...project, tags: [{ id: 't1', slug: 'web', label: 'Web' }] }}
+      />,
+    );
+
+    expect(screen.getByText('Web')).toBeInTheDocument();
   });
 });

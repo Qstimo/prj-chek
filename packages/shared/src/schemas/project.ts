@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { ProjectLifecycle } from '../enums';
 import { platformCreateSchema, platformRefSchema } from './platform';
+import { tagSchema, tagSetSchema } from './tag';
 
 /**
  * Проект на уровне метаданных: видно, что он есть, и его состояние (ТЗ 4.3).
@@ -30,6 +31,13 @@ export const projectListItemSchema = projectMetadataSchema.extend({
   updatedAt: z.string().nullable(),
   /** Платформы паспорта; пустой массив без Info ≥ Metadata. */
   platforms: z.array(platformRefSchema),
+  /**
+   * Теги паспорта; пустой массив без Info ≥ Metadata.
+   *
+   * В строке сводки, а не только в карточке: по ним фильтруется сам
+   * список, и второй запрос за ними превратил бы фильтр в мигающий.
+   */
+  tags: z.array(tagSchema),
   /** Первый домен прод-окружения (name ASC); без Infra ≥ Metadata — null. */
   productionDomain: z.string().nullable(),
   /** Имя машины прода; без Infra ≥ Read — null. */
@@ -38,6 +46,14 @@ export const projectListItemSchema = projectMetadataSchema.extend({
 
 /** Проект на уровне чтения: все поля паспорта. */
 export const projectDetailSchema = projectMetadataSchema.extend({
+  /**
+   * Теги паспорта.
+   *
+   * В самой проекции, а не отдельной ручкой, в отличие от платформ:
+   * набор правится целиком, и его нынешнее состояние нужно той же
+   * форме, которая его отправляет.
+   */
+  tags: z.array(tagSchema),
   purpose: z.string().nullable(),
   stack: z.string().nullable(),
   repoUrl: z.string().nullable(),
@@ -81,6 +97,15 @@ export const projectUpdateSchema = z
 export const projectCreateSchema = projectUpdateSchema.extend({
   name: z.string().min(1).max(200),
   platforms: z.array(platformCreateSchema).max(20).optional(),
+  /**
+   * Теги — тем же порядком, что и платформы: при создании принимаются,
+   * в правке живут своей ручкой `PUT /projects/:id/tags`.
+   *
+   * Определение берётся из `tagSetSchema`, а не повторяется здесь:
+   * второй список ограничений разошёлся бы с первым, и правка начала
+   * бы принимать то, что создание отвергает.
+   */
+  tags: tagSetSchema.shape.labels.optional(),
 });
 
 /** Проект на уровне метаданных. */

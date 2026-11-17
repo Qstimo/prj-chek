@@ -37,18 +37,20 @@ function query<T>(data: T) {
 
 /** Бездействующая мутация для мока. */
 function mutation() {
-  return { mutate: vi.fn(), isPending: false, error: null } as never;
+  return { mutate: vi.fn(), isPending: false, error: null, data: undefined, variables: undefined } as never;
 }
 
 beforeEach(() => {
   push.mockClear();
   refresh.mockClear();
-  // Все четыре хука компонента: автомок вернул бы undefined, а хуки
-  // вызываются до раннего возврата по правам.
+  // Все хуки компонента: автомок вернул бы undefined, а вызываются они
+  // до раннего возврата по правам.
   vi.mocked(hooks.useMutationUpdateProject).mockReturnValue(mutation());
   vi.mocked(hooks.useQueryPlatforms).mockReturnValue(query([]));
   vi.mocked(hooks.useMutationCreatePlatform).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationDeletePlatform).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationSetProjectTags).mockReturnValue(mutation());
+  vi.mocked(hooks.useQueryTagVocabulary).mockReturnValue(query([]));
 });
 
 describe('EditProjectPanel', () => {
@@ -60,7 +62,7 @@ describe('EditProjectPanel', () => {
       error: null,
     } as never);
 
-    render(<EditProjectPanel projectId="p1" initial={INITIAL} canWrite />);
+    render(<EditProjectPanel projectId="p1" initial={INITIAL} initialTags={[]} canWrite />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Править' }));
     await userEvent.clear(screen.getByLabelText('Название'));
@@ -82,7 +84,7 @@ describe('EditProjectPanel', () => {
       error: null,
     } as never);
 
-    render(<EditProjectPanel projectId="p1" initial={INITIAL} canWrite />);
+    render(<EditProjectPanel projectId="p1" initial={INITIAL} initialTags={[]} canWrite />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Править' }));
     await userEvent.click(screen.getByRole('button', { name: '+ Веб' }));
@@ -101,7 +103,7 @@ describe('EditProjectPanel', () => {
       error: null,
     } as never);
 
-    render(<EditProjectPanel projectId="p1" initial={INITIAL} canWrite />);
+    render(<EditProjectPanel projectId="p1" initial={INITIAL} initialTags={[]} canWrite />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Править' }));
     await userEvent.click(screen.getByRole('button', { name: 'Убрать RuStore' }));
@@ -115,8 +117,36 @@ describe('EditProjectPanel', () => {
     expect(remove).toHaveBeenCalledWith('p9');
   });
 
+  it('правит теги сразу и отдаёт набор целиком', async () => {
+    // Набор уходит одной ручкой: отдельных «добавить» и «убрать» у него
+    // нет, и отправлять паспорт целиком ради тега незачем.
+    const setTags = vi.fn();
+    vi.mocked(hooks.useMutationSetProjectTags).mockReturnValue({
+      mutate: setTags,
+      isPending: false,
+      error: null,
+      data: undefined,
+      variables: undefined,
+    } as never);
+
+    render(
+      <EditProjectPanel
+        projectId="p1"
+        initial={INITIAL}
+        initialTags={[{ id: 't1', slug: 'web', label: 'Web' }]}
+        canWrite
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Править' }));
+    await userEvent.type(screen.getByLabelText('Свой тег'), 'Product');
+    await userEvent.click(screen.getByRole('button', { name: 'Добавить тег' }));
+
+    expect(setTags.mock.calls[0]?.[0]).toEqual(['Web', 'Product']);
+  });
+
   it('не показывает кнопку правки без уровня записи', () => {
-    render(<EditProjectPanel projectId="p1" initial={INITIAL} canWrite={false} />);
+    render(<EditProjectPanel projectId="p1" initial={INITIAL} initialTags={[]} canWrite={false} />);
 
     expect(screen.queryByRole('button', { name: 'Править' })).not.toBeInTheDocument();
   });

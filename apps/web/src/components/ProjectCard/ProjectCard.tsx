@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { StatusIndicator } from '../StatusIndicator';
+import { TagChips } from '../TagChips';
 import { LIFECYCLE_LABELS, LIFECYCLE_STYLES } from './constants';
 import type { IProps } from './types';
 
@@ -23,6 +24,12 @@ export function ProjectCard({ project, indicator }: IProps) {
           {LIFECYCLE_LABELS[project.lifecycle]}
         </span>
       </div>
+
+      {project.tags.length > 0 && (
+        <div className="mt-2">
+          <TagChips tags={project.tags} />
+        </div>
+      )}
 
       {indicator && (
         <div className="mt-2">

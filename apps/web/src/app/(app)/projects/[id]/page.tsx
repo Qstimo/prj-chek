@@ -86,6 +86,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           projectId={id}
           canWrite={sections[Section.Info] === AccessLevel.Write}
           initialPlatforms={platforms}
+          initialTags={project.tags}
           initial={{
             name: project.name,
             purpose: project.purpose,

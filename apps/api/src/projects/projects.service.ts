@@ -18,6 +18,7 @@ import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import type { Project } from '../db/schema';
 import { PlatformsRepository } from '../platforms/platforms.repository';
+import { TagsRepository } from '../tags/tags.repository';
 import { ProjectsRepository } from './projects.repository';
 
 /**
@@ -34,6 +35,7 @@ export class ProjectsService {
     private readonly audit: AuditService,
     private readonly access: AccessService,
     private readonly platforms: PlatformsRepository,
+    private readonly tags: TagsRepository,
   ) {}
 
   /**
@@ -103,6 +105,23 @@ export class ProjectsService {
             metadata: { name: platform.name, kind: platform.kind },
           });
         }
+      }
+
+      // Теги — тем же порядком: репозиторием тегов, а не их службой,
+      // чтобы не открывать вложенную транзакцию. Право он проверит сам,
+      // и у суперадмина — единственного, кто создаёт проекты, — уровень
+      // разрешается без обращения к выдачам, которых у новорождённого
+      // проекта ещё нет.
+      if (input.tags?.length) {
+        const tags = await this.tags.set(subject, tx, created.id, input.tags);
+
+        await this.audit.record(tx, actorOf(subject), {
+          action: AuditAction.ProjectTagsSet,
+          entityType: 'project',
+          entityId: created.id,
+          projectId: created.id,
+          metadata: { tags: tags.map((tag) => tag.label) },
+        });
       }
 
       return created;

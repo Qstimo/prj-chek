@@ -4,6 +4,7 @@ import {
   type PlatformRef,
   type ProjectListItem,
   type SectionLevels,
+  type Tag,
 } from '@cairn/shared';
 
 import { meets } from '../access/access.service';
@@ -19,6 +20,7 @@ export function projectListItemProjection(
   project: Project,
   levels: SectionLevels,
   platforms: PlatformRef[],
+  tags: Tag[],
   productionDomain: string | null,
   productionServerName: string | null,
 ): ProjectListItem {
@@ -32,6 +34,9 @@ export function projectListItemProjection(
     lifecycle: project.lifecycle,
     updatedAt: meets(info, AccessLevel.Read) ? project.updatedAt.toISOString() : null,
     platforms: meets(info, AccessLevel.Metadata) ? platforms : [],
+    // Тем же гейтом, что платформы: тег — поле паспорта, и проект,
+    // видимый только через роадмап, своих меток не раскрывает.
+    tags: meets(info, AccessLevel.Metadata) ? tags : [],
     productionDomain: meets(infra, AccessLevel.Metadata) ? productionDomain : null,
     productionServerName: meets(infra, AccessLevel.Read) ? productionServerName : null,
   };

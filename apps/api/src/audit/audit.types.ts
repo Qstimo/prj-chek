@@ -13,6 +13,12 @@ export enum AuditAction {
   PushUnsubscribed = 'push.unsubscribed',
   ProjectCreated = 'project.created',
   ProjectUpdated = 'project.updated',
+  /**
+   * Своё действие, а не `project.updated`: набор тегов правится своей
+   * ручкой и целиком, и запись «изменены поля паспорта» не сказала бы,
+   * что проект перестал быть «Web».
+   */
+  ProjectTagsSet = 'project_tags.set',
   PlatformCreated = 'platform.created',
   PlatformUpdated = 'platform.updated',
   PlatformDeleted = 'platform.deleted',

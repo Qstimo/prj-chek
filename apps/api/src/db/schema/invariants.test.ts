@@ -29,6 +29,7 @@ import { sessions } from './sessions';
 import { domainStatuses } from './status';
 import { subjects } from './subjects';
 import { summaries, summaryTaskDrafts } from './summaries';
+import { projectTags, tags } from './tags';
 import { totpChallenges } from './totp-challenges';
 import { users } from './users';
 import { variableVersions, variables } from './variables';
@@ -45,6 +46,8 @@ const ALL_TABLES = [
   { name: 'environments', table: environments },
   { name: 'domains', table: domains },
   { name: 'environment_domains', table: environmentDomains },
+  { name: 'tags', table: tags },
+  { name: 'project_tags', table: projectTags },
   { name: 'project_platforms', table: projectPlatforms },
   { name: 'environment_platforms', table: environmentPlatforms },
   { name: 'version_platform_releases', table: versionPlatformReleases },

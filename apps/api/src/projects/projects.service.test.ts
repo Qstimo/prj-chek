@@ -8,6 +8,7 @@ import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
 import { PlatformsRepository } from '../platforms/platforms.repository';
+import { TagsRepository } from '../tags/tags.repository';
 import { ProjectsRepository } from './projects.repository';
 import { ProjectsService } from './projects.service';
 import { auditLog, grants, projectPlatforms, projects, subjects, users } from '../db/schema';
@@ -26,10 +27,11 @@ describe('ProjectsService', () => {
     const access = new AccessService(testDb.db);
     service = new ProjectsService(
       testDb.db,
-      new ProjectsRepository(testDb.db, access),
+      new ProjectsRepository(testDb.db, access, new TagsRepository(testDb.db, access)),
       new AuditService(),
       access,
       new PlatformsRepository(testDb.db, access),
+      new TagsRepository(testDb.db, access),
     );
   });
 
