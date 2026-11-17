@@ -10,6 +10,7 @@ export * from './schemas/environment';
 export * from './schemas/grant';
 export * from './schemas/incident';
 export * from './schemas/intake';
+export * from './schemas/model-service';
 export * from './schemas/platform';
 export * from './schemas/project';
 export * from './schemas/push';
