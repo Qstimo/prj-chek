@@ -1,4 +1,4 @@
-import { AccessLevel, Section, SubjectKind, TaskSuggesterKind } from '@cairn/shared';
+import { AccessLevel, Section, SubjectKind, ModelServicePlacement } from '@cairn/shared';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -9,7 +9,11 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
 import { DATABASE } from '../src/db/db.module';
 import { grants, projects, subjects, users } from '../src/db/schema';
-import { TASK_SUGGESTER, type TaskSuggester } from '../src/summaries/suggester/task-suggester';
+import {
+  TASK_SUGGESTER_SOURCE,
+  type TaskSuggester,
+  type TaskSuggesterSource,
+} from '../src/summaries/suggester/task-suggester';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
 
 /** Настоящие сессии и база: проверяем маршруты вместе с регистрацией в корне. */
@@ -19,15 +23,19 @@ export function summariesHttpFixture() {
   let passwordHash: string;
   const state = { projectId: '', otherProjectId: '', memberId: '', adminUserId: '' };
   const suggester: TaskSuggester & { suggest: ReturnType<typeof vi.fn> } = {
-    kind: TaskSuggesterKind.Local, model: 'тест', host: 'llm.internal', maxChars: 40_000,
-    isEnabled: true, suggest: vi.fn(),
+    placement: ModelServicePlacement.Local, model: 'тест', host: 'llm.internal', maxChars: 40_000,
+    // `probe` заглушкой: ни один тест не ходит в сеть, и проверка связи
+    // этих маршрутов не касается — она живёт в администрировании.
+    isEnabled: true, suggest: vi.fn(), probe: vi.fn(),
   };
+  /** Источник заглушки: подменяется токен источника, а не адаптера. */
+  const suggesterSource: TaskSuggesterSource = { current: async () => suggester };
   beforeAll(async () => {
     db = await startTestDatabase();
     passwordHash = await new PasswordService().hash('очень длинный пароль');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE).useValue(db.db)
-      .overrideProvider(TASK_SUGGESTER).useValue(suggester).compile();
+      .overrideProvider(TASK_SUGGESTER_SOURCE).useValue(suggesterSource).compile();
     app = module.createNestApplication();
     app.use(cookieParser());
     await app.init();

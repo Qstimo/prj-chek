@@ -15,6 +15,7 @@ export const COMMON_LINKS = [
 export const ADMIN_LINKS = [
   { href: '/servers', label: 'Серверы' },
   { href: '/domains', label: 'Домены' },
+  { href: '/model-services', label: 'Модели' },
   { href: '/users', label: 'Пользователи' },
   { href: '/audit', label: 'Журнал' },
 ] as const;

@@ -267,6 +267,27 @@
       "when": 1794912078016,
       "tag": "0037_summary_suggester_dropped",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794925349267,
+      "tag": "0038_late_marauders",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794925349268,
+      "tag": "0039_model_service_privileges",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794929706911,
+      "tag": "0040_nebulous_pete_wisdom",
+      "breakpoints": true
     }
   ]
 }

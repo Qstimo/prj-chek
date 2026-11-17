@@ -5,11 +5,8 @@ import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { ChronicleModule } from '../chronicle/chronicle.module';
 import { DbModule } from '../db/db.module';
+import { ModelServicesModule } from '../model-services/model-services.module';
 import { RoadmapModule } from '../roadmap/roadmap.module';
-import { DisabledSuggester } from './suggester/disabled.suggester';
-import { OpenAiCompatibleSuggester } from './suggester/openai-compatible.suggester';
-import { suggesterSettings } from './suggester/settings';
-import { TASK_SUGGESTER, type TaskSuggester } from './suggester/task-suggester';
 import { SummariesController } from './summaries.controller';
 import { SummariesOverviewController } from './summaries-overview.controller';
 import { SummariesRepository } from './summaries.repository';
@@ -22,26 +19,21 @@ import { SummariesService } from './summaries.service';
  * живёт записью хроники, а результат уезжает в роадмап штатным путём.
  */
 @Module({
-  imports: [DbModule, AccessModule, AuditModule, AuthModule, ChronicleModule, RoadmapModule],
-  controllers: [SummariesController, SummariesOverviewController],
-  providers: [
-    SummariesRepository,
-    SummariesService,
-    {
-      provide: TASK_SUGGESTER,
-      useFactory: (): TaskSuggester => {
-        const settings = suggesterSettings();
-
-        // Порт выбирается один раз при старте: подмена адаптера на ходу
-        // сменила бы границу передачи данных молча. Автоматического
-        // перехода на внешний адаптер при отказе локального нет и не
-        // будет — это запрет, а не недоработка (дизайн, раздел 5.2).
-        return settings.isEnabled
-          ? new OpenAiCompatibleSuggester(settings)
-          : new DisabledSuggester();
-      },
-    },
+  imports: [
+    DbModule,
+    AccessModule,
+    AuditModule,
+    AuthModule,
+    ChronicleModule,
+    RoadmapModule,
+    ModelServicesModule,
   ],
-  exports: [SummariesRepository, SummariesService, TASK_SUGGESTER],
+  controllers: [SummariesController, SummariesOverviewController],
+  providers: [SummariesRepository, SummariesService],
+  // Источник адаптера приходит из `ModelServicesModule`: он строится из
+  // одной только службы разрешения настройки, и проверка связи на экране
+  // администрирования нуждается в том же источнике. Две регистрации одного
+  // токена разошлись бы при первой правке фабрики.
+  exports: [SummariesRepository, SummariesService],
 })
 export class SummariesModule {}

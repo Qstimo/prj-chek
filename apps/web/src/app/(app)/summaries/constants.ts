@@ -6,7 +6,7 @@ import {
   SUMMARY_TASKS_EMPTY,
   SUMMARY_TEXT_NOT_PLAIN,
   SUMMARY_TEXT_TOO_LONG,
-  TaskSuggesterKind,
+  ModelServicePlacement,
   type TaskSuggesterInfo,
 } from '@cairn/shared';
 
@@ -131,7 +131,7 @@ export function suggesterNoticeOf(suggester: TaskSuggesterInfo): string {
   const host = suggester.host ?? 'настроенный узел';
   const model = suggester.model === null ? '' : `, модель ${suggester.model}`;
 
-  if (suggester.kind === TaskSuggesterKind.Local) {
+  if (suggester.placement === ModelServicePlacement.Local) {
     return `Разбивку делает ${host} в вашем контуре${model}. Текст саммари уходит на этот адрес; за пределы контура он не передаётся.`;
   }
 

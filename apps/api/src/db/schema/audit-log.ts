@@ -37,7 +37,17 @@ export const auditLog = pgTable(
     subjectLabel: text('subject_label').notNull(),
     action: text('action').notNull(),
     entityType: text('entity_type'),
-    entityId: uuid('entity_id'),
+    /**
+     * Идентификатор объекта действия — **текст**, а не `uuid`.
+     *
+     * У почти всех объектов это идентификатор строки, и он `uuid`. У
+     * настройки службы модели идентификатором строки **является значение
+     * перечня** (`task_suggester`): у таблицы `model_services` первичный
+     * ключ — перечень, а не суррогат (дизайн настройки служб, 3.2). Писать
+     * сюда что-то другое было бы неправдой, а колонка `uuid` не приняла бы
+     * правду, — поэтому расширен тип колонки, а не подменено значение.
+     */
+    entityId: text('entity_id'),
     projectId: uuid('project_id').references(() => projects.id, { onDelete: 'restrict' }),
     metadata: jsonb('metadata'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

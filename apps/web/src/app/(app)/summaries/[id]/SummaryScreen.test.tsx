@@ -4,7 +4,7 @@ import {
   SUGGESTER_UNAVAILABLE,
   Section,
   SummaryTaskOrigin,
-  TaskSuggesterKind,
+  ModelServicePlacement,
   type SummaryDetail,
   type TaskSuggesterInfo,
 } from '@cairn/shared';
@@ -65,7 +65,7 @@ const RELEASED_DETAIL: SummaryDetail = {
 
 const EXTERNAL_SUGGESTER: TaskSuggesterInfo = {
   isEnabled: true,
-  kind: TaskSuggesterKind.External,
+  placement: ModelServicePlacement.External,
   host: 'api.openai.com',
   model: 'gpt-4o-mini',
   maxChars: 40_000,
@@ -73,7 +73,7 @@ const EXTERNAL_SUGGESTER: TaskSuggesterInfo = {
 
 const LOCAL_SUGGESTER: TaskSuggesterInfo = {
   isEnabled: true,
-  kind: TaskSuggesterKind.Local,
+  placement: ModelServicePlacement.Local,
   host: 'llm.internal',
   model: 'qwen2.5',
   maxChars: 40_000,
@@ -81,7 +81,7 @@ const LOCAL_SUGGESTER: TaskSuggesterInfo = {
 
 const DISABLED_SUGGESTER: TaskSuggesterInfo = {
   isEnabled: false,
-  kind: TaskSuggesterKind.External,
+  placement: ModelServicePlacement.External,
   host: null,
   model: null,
   maxChars: 40_000,

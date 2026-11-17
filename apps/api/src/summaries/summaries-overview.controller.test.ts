@@ -34,7 +34,7 @@ describe('HTTP: обзор саммари', () => {
   it('настройки доступны вошедшему и содержат только публичный контракт', async () => {
     const member = await fixture.signIn('user@cairn.local');
     const response = await member.get('/summaries/suggester').expect(200);
-    expect(response.body).toEqual({ isEnabled: true, kind: 'local', host: 'llm.internal', model: 'тест', maxChars: 40_000 });
+    expect(response.body).toEqual({ isEnabled: true, placement: 'local', host: 'llm.internal', model: 'тест', maxChars: 40_000 });
     expect(taskSuggesterInfoSchema.parse(response.body)).toEqual(response.body);
   });
 

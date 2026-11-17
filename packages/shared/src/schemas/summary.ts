@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { SummaryTaskOrigin, TaskSuggesterKind } from '../enums';
+import { ModelServicePlacement, SummaryTaskOrigin } from '../enums';
 import { requiredDaySchema } from './day-date';
 import { HAS_NUL, isNulFree } from './plain-text';
 
@@ -177,7 +177,7 @@ export const summaryReleaseResultSchema = z.object({
 export const taskSuggesterInfoSchema = z.object({
   isEnabled: z.boolean(),
   /** `external` или `local`: куда уходит текст. */
-  kind: z.nativeEnum(TaskSuggesterKind),
+  placement: z.nativeEnum(ModelServicePlacement),
   /** Имя узла из настроенного адреса, без пути и без ключа. */
   host: z.string().nullable(),
   model: z.string().nullable(),

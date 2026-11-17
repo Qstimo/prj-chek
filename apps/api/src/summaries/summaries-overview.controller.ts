@@ -24,9 +24,14 @@ export class SummariesOverviewController {
     return this.summaries.writableProjects(subject);
   }
 
-  /** Только публичные настройки, доступные любому вошедшему. */
+  /**
+   * Только публичные настройки, доступные любому вошедшему.
+   *
+   * Асинхронна вместе со службой: читается действующая настройка, а не
+   * снимок старта процесса.
+   */
   @Get('suggester')
-  suggester(): TaskSuggesterInfo {
+  suggester(): Promise<TaskSuggesterInfo> {
     return this.summaries.suggesterInfo();
   }
 }

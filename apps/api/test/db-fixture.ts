@@ -83,6 +83,7 @@ export async function startTestDatabase(): Promise<TestDatabase> {
                        summary_task_drafts, summaries,
                        doc_pages, chronicle_entries, environment_domains, domains, environments,
                        project_tags, tags,
+                       model_services,
                        servers, projects, users, subjects
         RESTART IDENTITY CASCADE
       `);
