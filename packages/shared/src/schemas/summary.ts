@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { SummaryTaskOrigin, TaskSuggesterKind } from '../enums';
 import { requiredDaySchema } from './day-date';
+import { HAS_NUL, isNulFree } from './plain-text';
 
 /** Разбивка не настроена: ни адреса, ни ключа. */
 export const SUGGESTER_DISABLED = 'suggester_disabled';
@@ -109,11 +110,18 @@ export const summaryDetailSchema = summaryListItemSchema.extend({
   suggestedVersionLabel: z.string().nullable(),
 });
 
-/** Создание саммари: дата, заголовок, текст. */
+/**
+ * Создание саммари: дата, заголовок, текст.
+ *
+ * Текст приводит к пригодному виду {@link normalizeSummaryText} — и в
+ * браузере, и на сервере. Заголовку хватает запрета нулевого байта: он
+ * уезжает в ту же колонку, что у рукописной записи хроники, и наружу к
+ * модели не уходит вовсе.
+ */
 export const summaryCreateSchema = z
   .object({
     occurredOn: requiredDaySchema,
-    title: z.string().trim().min(1).max(300),
+    title: z.string().trim().min(1).max(300).refine(isNulFree, HAS_NUL),
     text: summaryTextSchema,
   })
   .strict();

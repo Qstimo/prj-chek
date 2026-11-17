@@ -6,13 +6,14 @@ import {
   SUGGESTER_DISABLED,
   SUMMARY_ALREADY_RELEASED,
   SUGGESTER_UNAVAILABLE,
+  SUMMARY_TEXT_NOT_PLAIN,
   SUMMARY_TEXT_TOO_LONG,
   SubjectKind,
   SummaryTaskOrigin,
   TaskSuggesterKind,
   type SummaryCreate,
 } from '@cairn/shared';
-import { BadGatewayException, ConflictException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, ConflictException } from '@nestjs/common';
 import { asc, eq, like } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -311,6 +312,47 @@ describe('служба саммари', () => {
   });
 
   describe('создание', () => {
+    it('приводит переводы строк к LF и считает длину по приведённому', async () => {
+      // Нормализация идёт и на сервере (дизайн, 3.1): иначе один и тот
+      // же текст менял бы длину от платформы автора, и предел порта с
+      // числом `chars` в журнале считали бы разное.
+      const created = await service.create(writer(), projectId, {
+        ...CREATE_INPUT,
+        text: 'раз\r\nдва',
+      });
+
+      expect(created.text).toBe('раз\nдва');
+      expect((await auditRecords(AuditAction.SummaryCreated))[1]?.metadata).toMatchObject({
+        chars: 7,
+      });
+    });
+
+    it('снимает один ведущий BOM', async () => {
+      const created = await service.create(writer(), projectId, {
+        ...CREATE_INPUT,
+        text: '﻿обсудили сроки',
+      });
+
+      expect(created.text).toBe('обсудили сроки');
+    });
+
+    it.each([
+      ['NUL', '\u0000'],
+      ['прочий управляющий символ', '\u0007'],
+    ])('%s отвергает названным отказом, а не падением драйвера', async (_name, char) => {
+      // `NUL` до колонки `text` в PostgreSQL не доходит вовсе и давал
+      // `22021` драйвера, то есть `500` вместо отказа с кодом.
+      const error = await failureOf(
+        service.create(writer(), projectId, { ...CREATE_INPUT, text: `раз${char}два` }),
+      );
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        code: SUMMARY_TEXT_NOT_PLAIN,
+      });
+      expect(await testDb.rowsOf(summaries)).toHaveLength(1);
+    });
+
     it('пишет в журнал заголовок, дату и длину текста, но не текст', async () => {
       const [record] = await auditRecords(AuditAction.SummaryCreated);
 

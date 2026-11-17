@@ -1,4 +1,4 @@
-import { AccessLevel, Section, SUMMARY_ALREADY_RELEASED, SUMMARY_TASKS_EMPTY, SUGGESTER_DISABLED, SUGGESTER_UNAVAILABLE, SUMMARY_TEXT_TOO_LONG } from '@cairn/shared';
+import { AccessLevel, Section, SUMMARY_ALREADY_RELEASED, SUMMARY_TASKS_EMPTY, SUGGESTER_DISABLED, SUGGESTER_UNAVAILABLE, SUMMARY_TEXT_NOT_PLAIN, SUMMARY_TEXT_TOO_LONG } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 import { SuggesterFailure } from './suggester/task-suggester';
 import { summariesHttpFixture, SUMMARY_BODY } from '../../test/summaries-http-fixture';
@@ -55,6 +55,18 @@ describe('HTTP: саммари проекта', () => {
     const created = await agent.post(base()).send(SUMMARY_BODY).expect(201);
     await agent.put(`${base()}/${created.body.id}/tasks`).send({ tasks: [{ title: 'Задача', position: 1 }] }).expect(400);
     await agent.post(`${base()}/${created.body.id}/release`).send({ label: '' }).expect(400);
+  });
+
+  it('управляющие символы в тексте — 400 с кодом, а не 500 от драйвера', async () => {
+    // Нормализация идёт на сервере тоже (дизайн, 3.1): `NUL` до колонки
+    // `text` в PostgreSQL не доходит вовсе, и без проверки запрос падал
+    // ошибкой драйвера мимо всякого кода отказа.
+    const agent = await fixture.signIn();
+    const response = await agent
+      .post(base())
+      .send({ ...SUMMARY_BODY, text: `раз\u0000два` })
+      .expect(400);
+    expect(response.body.code).toBe(SUMMARY_TEXT_NOT_PLAIN);
   });
 
   it('без сессии — 401, без выдачи — 404, с чтением хроники — 403', async () => {

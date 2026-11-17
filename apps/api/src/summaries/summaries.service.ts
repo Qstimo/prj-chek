@@ -3,9 +3,11 @@ import {
   ChronicleSource,
   SUGGESTER_DISABLED,
   SUMMARY_ALREADY_RELEASED,
+  SUMMARY_TEXT_NOT_PLAIN,
   SUMMARY_TEXT_TOO_LONG,
   SUMMARY_TASKS_EMPTY,
   SummaryTaskOrigin,
+  normalizeSummaryText,
   type ProjectMetadata,
   type TaskSuggesterInfo,
   type RoadmapVersionCreate,
@@ -17,6 +19,7 @@ import {
 } from '@cairn/shared';
 import {
   BadGatewayException,
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -103,6 +106,13 @@ export class SummariesService implements OnModuleDestroy {
   /**
    * Создаёт саммари вместе с записью хроники.
    *
+   * Текст приводится к пригодному виду **здесь**, а не только в браузере:
+   * нормализация одна и та же функция контракта на обеих сторонах (дизайн,
+   * 3.1), и проверка живёт в одном месте. Иначе обращение мимо веба
+   * сохраняло бы `CRLF` — то есть другую длину у того же текста — а
+   * нулевой байт валил бы запрос ошибкой драйвера вместо названного
+   * отказа.
+   *
    * Две записи журнала в одной транзакции, а не одна: текст ложится в
    * хронику, и запись, появившаяся в ленте без следа в журнале, была бы
    * дыркой — создание идёт репозиторием хроники, а не её службой, и
@@ -114,8 +124,10 @@ export class SummariesService implements OnModuleDestroy {
     projectId: string,
     input: SummaryCreate,
   ): Promise<SummaryDetail> {
+    const text = plainTextOf(input.text);
+
     return this.db.transaction(async (tx) => {
-      const created = await this.repository.create(subject, tx, projectId, input);
+      const created = await this.repository.create(subject, tx, projectId, { ...input, text });
 
       await this.audit.record(tx, actorOf(subject), {
         action: AuditAction.ChronicleEntryCreated,
@@ -396,6 +408,25 @@ function outwardOf(cause: unknown): Error {
         ? cause.message
         : 'Разбивка не ответила. Попробуйте ещё раз.',
   });
+}
+
+/**
+ * Текст в пригодном виде либо названный отказ.
+ *
+ * Функция контракта бросает обычную ошибку с кодом в сообщении — она
+ * общая с браузером и о HTTP не знает. Здесь код переезжает в тело
+ * ответа: интерфейс разбирает его, а не фразу (`FAILURE_MESSAGES`), и
+ * `400` говорит правду — негодно прислано, повторять бессмысленно.
+ */
+function plainTextOf(raw: string): string {
+  try {
+    return normalizeSummaryText(raw);
+  } catch {
+    throw new BadRequestException({
+      code: SUMMARY_TEXT_NOT_PLAIN,
+      message: 'В тексте управляющие символы: его прислали в непригодном виде.',
+    });
+  }
 }
 
 /** Строит действующее лицо журнала из субъекта запроса. */
