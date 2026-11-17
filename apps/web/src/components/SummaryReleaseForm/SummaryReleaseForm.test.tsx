@@ -39,13 +39,19 @@ describe('форма релиза из саммари', () => {
     expect(screen.getByLabelText(/Плановая дата/)).toBeInTheDocument();
   });
 
-  it('поля «Дата релиза» нет и при выпущенном состоянии', () => {
+  it('поля «Дата релиза» нет и при выпущенном состоянии', async () => {
     // «Ни при каких условиях» значит и это: `VersionFields` на `released`
     // показывает дату, а здесь её не бывает (дизайн, раздел 7.5).
     render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={vi.fn()} />);
 
-    userEvent.selectOptions(screen.getByLabelText(/Состояние/), RoadmapVersionState.Released);
+    await userEvent.selectOptions(
+      screen.getByLabelText(/Состояние/),
+      RoadmapVersionState.Released,
+    );
 
+    // Состояние действительно переключилось: без этой проверки
+    // пропущенный `await` оставлял бы `planned` и повторял соседний тест.
+    expect(screen.getByLabelText(/Состояние/)).toHaveValue(RoadmapVersionState.Released);
     expect(screen.queryByLabelText(/Дата релиза/)).not.toBeInTheDocument();
   });
 
