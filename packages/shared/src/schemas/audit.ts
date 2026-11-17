@@ -21,7 +21,15 @@ export const auditEntrySchema = z.object({
   subjectLabel: z.string(),
   action: z.string(),
   entityType: z.string().nullable(),
-  entityId: z.string().uuid().nullable(),
+  /**
+   * Идентификатор объекта действия: у почти всех объектов `uuid`, у
+   * настройки службы модели — значение перечня (`task_suggester`).
+   *
+   * Не `uuid()`, потому что у `model_services` первичный ключ и есть
+   * перечень: сузить схему до `uuid` значило бы объявить неправдой то,
+   * что лежит в журнале.
+   */
+  entityId: z.string().nullable(),
   projectId: z.string().uuid().nullable(),
   metadata: z.unknown().nullable(),
   createdAt: z.string(),
