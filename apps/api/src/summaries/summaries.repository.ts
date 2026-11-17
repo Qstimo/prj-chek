@@ -110,9 +110,7 @@ export class SummariesRepository {
       title: row.title,
       taskCount: counts.get(row.summary.id) ?? 0,
       isReleased: row.summary.releasedVersionId !== null,
-      releasedVersionLabel: row.summary.releasedVersionId
-        ? labels.get(row.summary.releasedVersionId) ?? null
-        : null,
+      ...releasedOf(row.summary.releasedVersionId, labels),
       createdAt: row.summary.createdAt.toISOString(),
     }));
   }
@@ -490,15 +488,12 @@ export class SummariesRepository {
       title: entry.title,
       taskCount: tasks.length,
       isReleased: row.releasedVersionId !== null,
-      releasedVersionLabel: row.releasedVersionId
-        ? labels.get(row.releasedVersionId) ?? null
-        : null,
+      ...releasedOf(row.releasedVersionId, labels),
       createdAt: row.createdAt.toISOString(),
       chronicleEntryId: row.chronicleEntryId,
       text: entry.content,
       tasks,
       suggester: stampOf(row),
-      releasedVersionId: row.releasedVersionId,
       // Грубо намеренно: `updated_at` двигает любая правка записи, включая
       // правку одного заголовка. Точность стоила бы копии текста в базе —
       // ровно той второй правды, от которой избавляет её отсутствие
@@ -585,6 +580,27 @@ export class SummariesRepository {
 
     return meets(level ?? undefined, AccessLevel.Metadata);
   }
+}
+
+/**
+ * Версия-получатель в выдаче: обе её части разом.
+ *
+ * Идентификатор подчиняется тому же правилу, что обозначение, и берётся
+ * из той же карты: без выдачи на «Роадмап» она пуста, и в ответ не уходит
+ * ни то, ни другое — ссылка на версию закрытой секции вела бы в `404`.
+ * «Ушло в роадмап» при этом остаётся видно: это состояние потока, а не
+ * данные роадмапа.
+ */
+function releasedOf(
+  versionId: string | null,
+  labels: Map<string, string>,
+): { releasedVersionId: string | null; releasedVersionLabel: string | null } {
+  const label = versionId === null ? undefined : labels.get(versionId);
+
+  return {
+    releasedVersionId: label === undefined ? null : versionId,
+    releasedVersionLabel: label ?? null,
+  };
 }
 
 /** Отметка «чем и когда построена разбивка»; до разбивки её нет. */

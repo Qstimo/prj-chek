@@ -599,6 +599,20 @@ describe('служба саммари', () => {
       });
     });
 
+    it('выключенный предложитель назван прежде длины текста', async () => {
+      // Таблица дизайна 5.4 перечисляет «не настроен» первым, и это
+      // верный порядок: человеку нечего сокращать, пока разбивки нет
+      // вовсе, а «Сократите или разделите на два саммари» посылало бы
+      // его делать работу, которая ничего не изменит.
+      await seedLongText(50_000);
+
+      const error = await failureOf(disabledService.suggest(writer(), projectId, summaryId));
+
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: SUGGESTER_DISABLED,
+      });
+    });
+
     it('выключенный предложитель в журнал передачи не пишет', async () => {
       // Передачи не было — записи о ней быть не должно.
       await failureOf(disabledService.suggest(writer(), projectId, summaryId));

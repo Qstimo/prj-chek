@@ -15,6 +15,7 @@ const TEXT_ONLY: SummaryListItem = {
   taskCount: 0,
   isReleased: false,
   releasedVersionLabel: null,
+  releasedVersionId: null,
   createdAt: '2026-11-16T10:00:00.000Z',
 };
 

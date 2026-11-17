@@ -255,9 +255,10 @@ describe('репозиторий саммари', () => {
       );
     });
 
-    it('обозначение версии-получателя скрыто без выдачи на роадмап', async () => {
-      // Обозначение версии — данные роадмапа; «ушло в роадмап» —
-      // состояние потока, и оно видно всегда.
+    it('версия-получатель скрыта без выдачи на роадмап целиком', async () => {
+      // И обозначение, и идентификатор — данные роадмапа: ссылка на
+      // версию, которой субъект не видит, вела бы в закрытую секцию.
+      // «Ушло в роадмап» — состояние потока, и оно видно всегда.
       const summaryId = await createSummary();
       const versionId = await createVersion('v1.3');
       await testDb.db.update(summaries).set({ releasedVersionId: versionId }).where(
@@ -266,12 +267,18 @@ describe('репозиторий саммари', () => {
       await grant(Section.Chronicle, AccessLevel.Write);
 
       const [item] = await repository.findForProject(member(), projectId);
+      const detail = await repository.findById(member(), projectId, summaryId);
 
       expect(item?.isReleased).toBe(true);
       expect(item?.releasedVersionLabel).toBeNull();
+      expect(item?.releasedVersionId).toBeNull();
+      expect(detail.isReleased).toBe(true);
+      expect(detail.releasedVersionId).toBeNull();
     });
 
-    it('на уровне метаданных роадмапа обозначение видно', async () => {
+    it('на уровне метаданных роадмапа видны и обозначение, и версия', async () => {
+      // Идентификатор нужен списку: ссылка «Ушло в v1.3» ведёт на
+      // роадмап с открытой версией (`?version=`), а не на полосу целиком.
       const summaryId = await createSummary();
       const versionId = await createVersion('v1.3');
       await testDb.db.update(summaries).set({ releasedVersionId: versionId }).where(
@@ -283,6 +290,7 @@ describe('репозиторий саммари', () => {
       const [item] = await repository.findForProject(member(), projectId);
 
       expect(item?.releasedVersionLabel).toBe('v1.3');
+      expect(item?.releasedVersionId).toBe(versionId);
     });
 
     it('подсказка обозначения пуста без выдачи на роадмап', async () => {

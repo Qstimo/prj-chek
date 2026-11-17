@@ -6,14 +6,15 @@ import {
   normalizeSummaryText,
   summaryCreateSchema,
   summaryDetailSchema,
+  summaryListItemSchema,
   summaryTasksReplaceSchema,
   summarySuggesterStampSchema,
 } from './summary';
 
 const ID = '00000000-0000-0000-0000-000000000001';
 
-/** Минимально полная деталь: от неё отталкиваются точечные проверки. */
-const DETAIL = {
+/** Минимально полная строка истории: от неё отталкивается и деталь. */
+const LIST_ITEM = {
   id: ID,
   projectId: ID,
   projectName: 'CAIRN',
@@ -21,13 +22,18 @@ const DETAIL = {
   title: 'Созвон по релизу',
   taskCount: 0,
   isReleased: false,
+  releasedVersionId: null,
   releasedVersionLabel: null,
   createdAt: '2026-11-16T10:00:00.000Z',
+};
+
+/** Минимально полная деталь: от неё отталкиваются точечные проверки. */
+const DETAIL = {
+  ...LIST_ITEM,
   chronicleEntryId: ID,
   text: 'текст',
   tasks: [],
   suggester: null,
-  releasedVersionId: null,
   isTextStale: false,
   suggestedVersionLabel: null,
 };
@@ -109,6 +115,25 @@ describe('замена черновика', () => {
 
   it('пустой массив законен: черновик очищают перед новой разбивкой', () => {
     expect(summaryTasksReplaceSchema.parse({ tasks: [] }).tasks).toEqual([]);
+  });
+});
+
+describe('строка истории', () => {
+  it('несёт версию-получателя: ссылка ведёт на открытую версию', () => {
+    // Дизайн 7.2 обещает `…/roadmap?version=<id>`, а без поля в строке
+    // ссылка вела бы на полосу целиком.
+    const parsed = summaryListItemSchema.parse({
+      ...LIST_ITEM,
+      isReleased: true,
+      releasedVersionId: ID,
+      releasedVersionLabel: 'v1.4',
+    });
+
+    expect(parsed.releasedVersionId).toBe(ID);
+  });
+
+  it('версия-получатель может быть скрыта: без выдачи на роадмап её нет', () => {
+    expect(summaryListItemSchema.parse(LIST_ITEM).releasedVersionId).toBeNull();
   });
 });
 
