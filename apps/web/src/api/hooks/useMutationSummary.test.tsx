@@ -86,10 +86,12 @@ describe('мутации саммари', () => {
     });
   });
 
-  it('формирование релиза не посылает дату релиза', async () => {
-    // Её нет в форме ни при каких платформах, и `releasedDate` не уходит
-    // даже как null: признак «у проекта есть платформы» производен от
-    // секции «Инфо», которой у субъекта этого потока может не быть.
+  it('формирование релиза уходит по адресу саммари и телом формы', async () => {
+    // Что `releasedDate` в теле не бывает, проверяется там, где тело
+    // собирается, — в форме (`SummaryReleaseForm.test.tsx`) и на экране
+    // (`SummaryScreen.test.tsx`). Здесь входом служила константа этого же
+    // файла, в которой `releasedDate` нет: такой assert верен при любой
+    // реализации хука, который тело только пересылает.
     const fetchMock = okFetch();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -101,10 +103,10 @@ describe('мутации саммари', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(bodyOf(fetchMock)).not.toHaveProperty('releasedDate');
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       `/api/projects/${PROJECT_ID}/summaries/${SUMMARY_ID}/release`,
     );
+    expect(bodyOf(fetchMock)).toEqual(RELEASE_BODY);
   });
 
   it('успешный релиз сбрасывает кэши саммари, хроники и роадмапа', async () => {

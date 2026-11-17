@@ -55,18 +55,12 @@ describe('форма релиза из саммари', () => {
     expect(screen.queryByLabelText(/Дата релиза/)).not.toBeInTheDocument();
   });
 
-  it('платформы проекта форма не запрашивает', () => {
-    // Признак hasPlatforms потоку не нужен, и скрытого третьего
-    // требования `Info ≥ metadata` у двух заявленных прав не появляется.
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={vi.fn()} />);
-
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    vi.unstubAllGlobals();
-  });
+  // Проверка «платформы проекта форма не запрашивает» переехала на экран
+  // (`SummaryScreen.test.tsx`): здесь она смотрела на подменённый `fetch`
+  // у презентационного компонента, который в сеть не ходит ни при каких
+  // условиях — данные в этом проекте идут через `apiClient` и
+  // react-query, то есть assert был верен при любой реализации. А живой
+  // запрос платформ ушёл бы из экрана, и сторожить его надо там.
 
   it('отправляет только обозначение, состояние и плановую дату', async () => {
     const onSubmit = vi.fn();

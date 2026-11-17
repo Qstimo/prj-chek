@@ -202,13 +202,26 @@ describe('экран саммари', () => {
     expect((suggest as unknown as { mutate: ReturnType<typeof vi.fn> }).mutate).toHaveBeenCalled();
   });
 
-  it('отказ разбивки объясняет по коду и не очищает список', () => {
+  it('отказ разбивки объясняет по коду', () => {
+    // «И не очищает список» здесь не проверялось: список рисуется из
+    // замоканного запроса, на который состояние ошибки мутации не
+    // влияет. Настоящая проверка этого свойства стоит на сервере —
+    // `summaries.service.test.ts`, «отказ оставляет прежний черновик».
     vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(failed(SUGGESTER_UNAVAILABLE));
 
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
     expect(screen.getByText(/не ответила/)).toBeInTheDocument();
-    expect(screen.getAllByRole('textbox')).toHaveLength(WITH_TASKS.tasks.length);
+  });
+
+  it('платформы проекта экран не запрашивает', () => {
+    // Чтобы узнать, есть ли у проекта платформы, нужен уровень на
+    // «Инфо», которого у субъекта этого потока может не быть вовсе:
+    // экран, спросивший платформы, завёл бы у двух заявленных прав
+    // скрытое третье требование (дизайн, раздел 7.5).
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    expect(vi.mocked(hooks.useQueryPlatforms)).not.toHaveBeenCalled();
   });
 
   it('предел объёма называет настоящее число', () => {
