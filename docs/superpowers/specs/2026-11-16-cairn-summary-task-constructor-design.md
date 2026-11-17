@@ -450,6 +450,15 @@ export const summaryListItemSchema = z.object({
    * сформирован» было бы неотличимо от «сформирован, обозначение скрыто».
    */
   releasedVersionLabel: z.string().nullable(),
+  /**
+   * Версия-получатель — по тому же правилу, что обозначение.
+   *
+   * Нужна ссылке списка: роадмап держит открытую версию в адресе
+   * (`…/roadmap?version=<id>`, раздел 7.2), и без идентификатора ссылка
+   * вела бы на полосу целиком. Правило видимости одно с обозначением:
+   * ссылка в секцию, которой субъект не видит, вела бы в `404`.
+   */
+  releasedVersionId: z.string().uuid().nullable(),
   createdAt: z.string(),
 });
 
@@ -460,7 +469,6 @@ export const summaryDetailSchema = summaryListItemSchema.extend({
   text: z.string(),
   tasks: z.array(summaryTaskSchema),
   suggester: summarySuggesterStampSchema.nullable(),
-  releasedVersionId: z.string().uuid().nullable(),
   /**
    * Запись правили после того, как построена разбивка.
    *
