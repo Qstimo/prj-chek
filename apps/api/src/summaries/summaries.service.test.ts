@@ -441,6 +441,35 @@ describe('служба саммари', () => {
       expect(JSON.stringify(record)).not.toContain('обсудили сроки');
     });
 
+    it('«задач нет» — успех с нулём задач, а не отказ узла', async () => {
+      // Системная инструкция сама просит вернуть пустой список у
+      // созвона без задач: объявлять это отказом значило бы брать за тот
+      // же текст второй раз и писать в журнал неудачу, которой не было.
+      suggesterStub.suggest.mockResolvedValue({ tasks: [], dropped: 0 });
+
+      const detail = await service.suggest(writer(), projectId, summaryId);
+
+      expect(detail.tasks).toEqual([]);
+      expect(detail.suggester).toMatchObject({ name: 'local', dropped: 0 });
+      expect(await auditRecords(AuditAction.SummaryTasksSuggestionFailed)).toHaveLength(0);
+      expect(await summaryActions()).toEqual([
+        AuditAction.SummaryCreated,
+        AuditAction.SummaryTasksSuggested,
+      ]);
+    });
+
+    it('«задач нет» не затирает правленный руками черновик', async () => {
+      // Применять нечего — и затирать список, который человек правил
+      // двадцать минут, тоже нечем.
+      await service.replaceTasks(writer(), projectId, summaryId, { tasks: [{ title: 'моё' }] });
+      suggesterStub.suggest.mockResolvedValue({ tasks: [], dropped: 0 });
+
+      const detail = await service.suggest(writer(), projectId, summaryId);
+
+      expect(detail.tasks.map((task) => task.title)).toEqual(['моё']);
+      expect(detail.tasks.map((task) => task.origin)).toEqual([SummaryTaskOrigin.Human]);
+    });
+
     it('отказ оставляет прежний черновик', async () => {
       // Иначе неудачная попытка затирала бы список, который человек
       // правил двадцать минут.

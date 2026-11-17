@@ -271,6 +271,12 @@ export class SummariesRepository {
    * Отметка пишется той же транзакцией, что и строки: `suggester_*` без
    * задач читались бы как «разбивка была, задач не предложено», а задачи
    * без отметки — как набранные руками.
+   *
+   * Пустая разбивка — не пустая замена: применять нечего, и прежние
+   * строки остаются на месте. Иначе ответ «задач в тексте нет» — ровно
+   * тот, о котором просит системная инструкция, — стирал бы список,
+   * который человек правил двадцать минут. Отметка при этом обновляется:
+   * разбивка состоялась, и человек обязан это видеть.
    */
   async replaceWithSuggested(
     subject: RequestSubject,
@@ -287,9 +293,8 @@ export class SummariesRepository {
       throw new ConflictException(SUMMARY_ALREADY_RELEASED);
     }
 
-    await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
-
     if (titles.length > 0) {
+      await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
       await tx.insert(summaryTaskDrafts).values(
         titles.map((title, index) => ({
           summaryId,

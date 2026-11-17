@@ -22,6 +22,20 @@ import type { SuggestResult } from './task-suggester';
 /** Предел формулировки: столько принимает чекпоинт роадмапа. */
 export const MAX_TASK_TITLE = 300;
 
+/** Итог разбора вывода: формулировки, отброшенное и судьба самого ответа. */
+export interface ParsedTasks extends SuggestResult {
+  /**
+   * В теле нашёлся объект со списком `tasks`.
+   *
+   * Отдельно от пустого списка намеренно: это разные исходы. Пустой
+   * список — «задач в тексте нет», ровно то, о чём просит системная
+   * инструкция, и отказом он быть не должен. Неразобранный ответ —
+   * отказ узла. Свести их значило бы объявить неудачей то, о чём мы
+   * попросили сами.
+   */
+  isParsed: boolean;
+}
+
 /**
  * Элементы — строки, и только строки.
  *
@@ -40,11 +54,11 @@ const LIST_MARKER = /^(?:[-*•–—]|\d+[.)])\s+/;
  * Пусто — законный итог, а не исключение: решение, что делать с пустым
  * разбором, принимает вызывающий, он же и отвечает отказом.
  */
-export function tasksOf(raw: string, maxTasks: number): SuggestResult {
+export function tasksOf(raw: string, maxTasks: number): ParsedTasks {
   const parsed = outputSchema.safeParse(jsonOf(raw));
 
   if (!parsed.success) {
-    return { tasks: [], dropped: 0 };
+    return { tasks: [], dropped: 0, isParsed: false };
   }
 
   const seen = new Set<string>();
@@ -71,6 +85,7 @@ export function tasksOf(raw: string, maxTasks: number): SuggestResult {
     // Отброшенное называется числом: тихое урезание читалось бы как
     // «столько и предложили».
     dropped: parsed.data.tasks.length - titles.length,
+    isParsed: true,
   };
 }
 

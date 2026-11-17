@@ -98,19 +98,22 @@ export class OpenAiCompatibleSuggester implements TaskSuggester {
    * без собственного предела запрос висел бы столько, сколько молчит
    * чужая сторона.
    *
-   * Пустой разбор — отказ, а не пустой результат: пустой черновик
-   * человеку не нужен, а кнопка, которая «сработала» и ничего не дала,
-   * читается как поломка.
+   * «Задач нет» — успех с нулём задач, а не отказ: системная инструкция
+   * сама просит вернуть `{"tasks":[]}` у текста без задач, и объявлять
+   * этот ответ неудачей узла значило бы брать за тот же текст второй раз
+   * и писать в журнал неудачу, которой не было. Отказом остаются два
+   * других случая: ответ не разобрался вовсе и вывод, из которого после
+   * чистки не выжило ничего, — о них и говорит дизайн 5.4.
    */
   async suggest(text: string, signal: AbortSignal): Promise<SuggestResult> {
     const body = await this.ask(text, signal);
     const result = tasksOf(contentOf(body), this.#settings.maxTasks);
 
-    if (result.tasks.length === 0) {
+    if (!result.isParsed || (result.tasks.length === 0 && result.dropped > 0)) {
       throw this.failure('ответ не разобрался');
     }
 
-    return result;
+    return { tasks: result.tasks, dropped: result.dropped };
   }
 
   /** Тело ответа чужого узла. Любая неудача — один и тот же отказ. */
