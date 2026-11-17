@@ -8,6 +8,7 @@ import { subjects } from './subjects';
 export const chronicleSourceEnum = pgEnum('chronicle_source', [
   ChronicleSource.Manual,
   ChronicleSource.Webhook,
+  ChronicleSource.Summary,
 ]);
 
 /**

@@ -1,0 +1,2 @@
+ALTER TABLE "summaries" ADD COLUMN "suggester_dropped" integer;--> statement-breakpoint
+ALTER TABLE "summaries" ADD CONSTRAINT "summaries_suggester_dropped_nonnegative" CHECK ("summaries"."suggester_dropped" >= 0);

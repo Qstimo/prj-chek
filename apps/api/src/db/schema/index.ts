@@ -15,6 +15,7 @@ export * from './servers';
 export * from './sessions';
 export * from './status';
 export * from './subjects';
+export * from './summaries';
 export * from './tags';
 export * from './totp-challenges';
 export * from './users';

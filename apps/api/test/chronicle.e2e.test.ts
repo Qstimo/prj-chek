@@ -146,6 +146,22 @@ describe('HTTP: хроника', () => {
       .expect(403);
   });
 
+  it('правка с NUL отвечает 400, а не падает ошибкой драйвера', async () => {
+    // Своей ручки текста у саммари нет (дизайн, 4.2): текст правится этой
+    // же `PATCH`, и `NUL` в теле валил `500` у всей секции — PostgreSQL
+    // не принимает нулевой байт в текстовую колонку вовсе.
+    const agent = await signIn('admin@cairn.local');
+    const created = await agent.post(`/projects/${projectId}/chronicle`).send(ENTRY);
+
+    await agent
+      .patch(`/projects/${projectId}/chronicle/${created.body.id}`)
+      .send({ content: 'раз\u0000два' })
+      .expect(400);
+
+    const reloaded = await agent.get(`/projects/${projectId}/chronicle`).expect(200);
+    expect(reloaded.body[0].content).toBe(ENTRY.content);
+  });
+
   it('удаляет запись', async () => {
     const agent = await signIn('admin@cairn.local');
     const created = await agent.post(`/projects/${projectId}/chronicle`).send(ENTRY);

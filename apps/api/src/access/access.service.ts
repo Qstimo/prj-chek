@@ -201,6 +201,53 @@ export class AccessService {
   }
 
   /**
+   * Проекты, где у субъекта уровень на секции не ниже указанного.
+   *
+   * Обратная сторона {@link subjectsWithLevel}: тот отвечает «кто видит
+   * это», этот — «что из этого видит он». Нужен экрану саммари: список
+   * целей — ровно те проекты, куда субъект может писать хронику.
+   *
+   * {@link visibleProjectIds} здесь не годится: она выбирает проекты по
+   * любой секции, а требуется одна конкретная и с уровнем.
+   *
+   * Суперадмины получают все проекты без выдач, отозванные — ни одного:
+   * то же правило, что в {@link resolveLevel}.
+   */
+  async projectIdsWithLevel(
+    subject: RequestSubject,
+    section: Section,
+    minimum: AccessLevel,
+    executor: Executor = this.db,
+  ): Promise<string[]> {
+    if (subject.isRevoked) {
+      return [];
+    }
+
+    if (subject.isSuperadmin) {
+      const all = await executor.select({ id: projects.id }).from(projects);
+
+      return all.map((row) => row.id);
+    }
+
+    const allowed = Object.values(AccessLevel).filter(
+      (level) => LEVEL_ORDER[level] >= LEVEL_ORDER[minimum],
+    );
+
+    const granted = await executor
+      .selectDistinct({ projectId: grants.projectId })
+      .from(grants)
+      .where(
+        and(
+          eq(grants.subjectId, subject.id),
+          eq(grants.section, section),
+          inArray(grants.level, allowed),
+        ),
+      );
+
+    return granted.map((row) => row.projectId);
+  }
+
+  /**
    * Требует уровень не ниже указанного.
    *
    * Бросает {@link SectionNotVisibleError} при отсутствии доступа и

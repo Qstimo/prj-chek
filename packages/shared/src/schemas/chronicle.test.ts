@@ -33,6 +33,22 @@ describe('схема записи хроники', () => {
     ).toThrow();
   });
 
+  it.each(['title', 'content'])('отвергает NUL в поле %s', (field) => {
+    // `NUL` до текстовой колонки PostgreSQL не доходит вовсе: без этой
+    // проверки запрос падал ошибкой драйвера (`22021`), то есть `500`
+    // у всей секции. Общего предела управляющих символов здесь нет —
+    // хроника принимает любой текст, который база способна сохранить.
+    expect(() =>
+      chronicleEntryCreateSchema.parse({
+        occurredOn: '2026-08-27',
+        title: 'Заголовок',
+        content: 'Содержимое',
+        [field]: 'раз\u0000два',
+      }),
+    ).toThrow();
+    expect(() => chronicleEntryUpdateSchema.parse({ [field]: 'раз\u0000два' })).toThrow();
+  });
+
   it('правка допускает частичные данные', () => {
     expect(chronicleEntryUpdateSchema.parse({ title: 'Новый заголовок' }).title).toBe(
       'Новый заголовок',

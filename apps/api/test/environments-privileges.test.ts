@@ -1,6 +1,14 @@
-import { sql } from 'drizzle-orm';
+import { ChronicleSource, SubjectKind, SummaryTaskOrigin } from '@cairn/shared';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import {
+  chronicleEntries,
+  projects,
+  subjects,
+  summaries,
+  summaryTaskDrafts,
+} from '../src/db/schema';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
 
 describe('права роли приложения на окружения', () => {
@@ -87,6 +95,83 @@ describe('права роли приложения на окружения', () 
       testDb.appDb.execute(
         sql`SELECT health_code, redirect_to, resolved_ips, tls_trusted, tls_code FROM domain_statuses`,
       ),
+    ).resolves.toBeDefined();
+  });
+
+  it('роль приложения читает и пишет саммари и черновик задач', async () => {
+    // Парная миграция прав: без неё поток упал бы отказом в правах на
+    // первом же сохранении текста созвона. Проверка именно записью:
+    // урезанный до `GRANT SELECT` грант прошёл бы два `count(*)` и
+    // всплыл бы только в бою — тот самый зазор, ради которого в
+    // `db-fixture` стоит запрет дублировать гранты.
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'права@cairn.local' })
+      .returning();
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'prava-summari', name: 'Права саммари' })
+      .returning();
+    const [entry] = await testDb.db
+      .insert(chronicleEntries)
+      .values({
+        projectId: project!.id,
+        occurredOn: '2026-11-17',
+        title: 'Созвон',
+        content: 'Текст созвона',
+        source: ChronicleSource.Summary,
+        createdBySubjectId: subject!.id,
+      })
+      .returning();
+
+    // Родители заведены владельцем намеренно: проверяются права на
+    // саммари и черновик, а не на хронику с проектами.
+    const [summary] = await testDb.appDb
+      .insert(summaries)
+      .values({
+        projectId: project!.id,
+        chronicleEntryId: entry!.id,
+        createdBySubjectId: subject!.id,
+      })
+      .returning();
+    const [task] = await testDb.appDb
+      .insert(summaryTaskDrafts)
+      .values({
+        summaryId: summary!.id,
+        title: 'Задача',
+        position: 1,
+        origin: SummaryTaskOrigin.Human,
+      })
+      .returning();
+
+    const [renamed] = await testDb.appDb
+      .update(summaryTaskDrafts)
+      .set({ title: 'Правка формулировки' })
+      .where(eq(summaryTaskDrafts.id, task!.id))
+      .returning();
+    expect(renamed?.title).toBe('Правка формулировки');
+
+    const [stamped] = await testDb.appDb
+      .update(summaries)
+      .set({ suggesterName: 'local', suggestedAt: new Date() })
+      .where(eq(summaries.id, summary!.id))
+      .returning();
+    expect(stamped?.suggesterName).toBe('local');
+
+    await testDb.appDb
+      .delete(summaryTaskDrafts)
+      .where(eq(summaryTaskDrafts.summaryId, summary!.id));
+    await testDb.appDb.delete(summaries).where(eq(summaries.id, summary!.id));
+    expect(await testDb.rowsOf(summaries)).toHaveLength(0);
+    expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(0);
+  });
+
+  it('источник записи хроники принимает «саммари»', async () => {
+    // Значение добавлено в существующий перечень: `ALTER TYPE … ADD VALUE`
+    // в репозитории встречается впервые, и проверить его нужно на
+    // применённой миграции, а не на схеме в коде.
+    await expect(
+      testDb.appDb.execute(sql`SELECT 'summary'::chronicle_source`),
     ).resolves.toBeDefined();
   });
 

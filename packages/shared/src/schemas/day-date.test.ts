@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { chronicleEntryCreateSchema } from './chronicle';
-import { dayDateSchema } from './day-date';
+import { dayDateSchema, requiredDaySchema, NO_SUCH_DAY } from './day-date';
 import { intakePayloadSchema } from './intake';
 import { isoDateSchema } from './server';
 
@@ -45,5 +45,31 @@ describe('те же дни в остальных схемах контракта
     const input = { content: 'Сводка со встречи', occurredOn: '2026-04-31' };
 
     expect(intakePayloadSchema.safeParse(input).success).toBe(false);
+  });
+});
+
+describe('requiredDaySchema', () => {
+  it('принимает календарный день', () => {
+    expect(requiredDaySchema.parse('2026-11-16')).toBe('2026-11-16');
+  });
+
+  it('отвергает пустоту: колонка дня события notNull', () => {
+    // `dayDateSchema` допускает null ради плановой и фактической даты
+    // версии; у дня события его быть не может — null дошёл бы до
+    // PostgreSQL падением.
+    expect(() => requiredDaySchema.parse(null)).toThrow();
+  });
+
+  it('отвергает несуществующий день', () => {
+    expect(() => requiredDaySchema.parse('2026-02-30')).toThrow(NO_SUCH_DAY);
+  });
+
+  it('отвергает чужой формат', () => {
+    expect(() => requiredDaySchema.parse('16.11.2026')).toThrow();
+  });
+
+  it('общая схема по-прежнему допускает пустоту', () => {
+    // Сторож прежнего поведения: версия без плановой даты законна.
+    expect(dayDateSchema.parse(null)).toBeNull();
   });
 });

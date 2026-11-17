@@ -1,0 +1,106 @@
+import { RoadmapVersionState } from '@cairn/shared';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { SummaryReleaseForm } from './SummaryReleaseForm';
+
+describe('форма релиза из саммари', () => {
+  it('обозначение предзаполнено подсказкой', () => {
+    render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText(/Обозначение/)).toHaveValue('v1.3');
+  });
+
+  it('без подсказки поле пусто и отправка выключена', () => {
+    // Подсказки нет, когда версий нет, в обозначениях нет цифр или у
+    // субъекта нет выдачи на роадмап.
+    render(<SummaryReleaseForm suggestedLabel={null} taskCount={3} onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText(/Обозначение/)).toHaveValue('');
+    expect(screen.getByRole('button', { name: /Сформировать/ })).toBeDisabled();
+  });
+
+  it('введённое обозначение разблокирует отправку', async () => {
+    render(<SummaryReleaseForm suggestedLabel={null} taskCount={3} onSubmit={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText(/Обозначение/), 'Осень');
+
+    expect(screen.getByRole('button', { name: /Сформировать/ })).toBeEnabled();
+  });
+
+  it('поля «Дата релиза» нет', () => {
+    // Версия из созвона — работа впереди. А главное: чтобы узнать, есть
+    // ли у проекта платформы, нужен уровень на «Инфо», которого у
+    // субъекта этого потока может не быть вовсе.
+    render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={vi.fn()} />);
+
+    expect(screen.queryByLabelText(/Дата релиза/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Плановая дата/)).toBeInTheDocument();
+  });
+
+  it('поля «Дата релиза» нет и при выпущенном состоянии', async () => {
+    // «Ни при каких условиях» значит и это: `VersionFields` на `released`
+    // показывает дату, а здесь её не бывает (дизайн, раздел 7.5).
+    render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={vi.fn()} />);
+
+    await userEvent.selectOptions(
+      screen.getByLabelText(/Состояние/),
+      RoadmapVersionState.Released,
+    );
+
+    // Состояние действительно переключилось: без этой проверки
+    // пропущенный `await` оставлял бы `planned` и повторял соседний тест.
+    expect(screen.getByLabelText(/Состояние/)).toHaveValue(RoadmapVersionState.Released);
+    expect(screen.queryByLabelText(/Дата релиза/)).not.toBeInTheDocument();
+  });
+
+  // Проверка «платформы проекта форма не запрашивает» переехала на экран
+  // (`SummaryScreen.test.tsx`): здесь она смотрела на подменённый `fetch`
+  // у презентационного компонента, который в сеть не ходит ни при каких
+  // условиях — данные в этом проекте идут через `apiClient` и
+  // react-query, то есть assert был верен при любой реализации. А живой
+  // запрос платформ ушёл бы из экрана, и сторожить его надо там.
+
+  it('отправляет только обозначение, состояние и плановую дату', async () => {
+    const onSubmit = vi.fn();
+    render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={onSubmit} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Сформировать/ }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      label: 'v1.3',
+      state: RoadmapVersionState.Planned,
+      plannedDate: expect.any(String),
+    });
+  });
+
+  it('`releasedDate` не уходит даже как null', async () => {
+    const onSubmit = vi.fn();
+    render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={onSubmit} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Сформировать/ }));
+
+    expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty('releasedDate');
+  });
+
+  it('говорит, сколько незакрытых чекпоинтов будет создано', () => {
+    render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={vi.fn()} />);
+
+    expect(screen.getByText(/3 незакрытыми чекпоинтами/)).toBeInTheDocument();
+  });
+
+  it('при опубликованном роадмапе предупреждает о публичной выдаче', () => {
+    render(
+      <SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={vi.fn()} isRoadmapPublic />,
+    );
+
+    expect(screen.getByText(/публичную выдачу/)).toBeInTheDocument();
+  });
+
+  it('без публичной ссылки о публичной выдаче не говорит', () => {
+    render(<SummaryReleaseForm suggestedLabel="v1.3" taskCount={3} onSubmit={vi.fn()} />);
+
+    expect(screen.queryByText(/публичную выдачу/)).not.toBeInTheDocument();
+  });
+});

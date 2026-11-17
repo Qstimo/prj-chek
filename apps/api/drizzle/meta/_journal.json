@@ -246,6 +246,27 @@
       "when": 1794843151097,
       "tag": "0034_project_tag_privileges",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794912029745,
+      "tag": "0035_normal_turbo",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794912060269,
+      "tag": "0036_summary_privileges",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794912078016,
+      "tag": "0037_summary_suggester_dropped",
+      "breakpoints": true
     }
   ]
 }

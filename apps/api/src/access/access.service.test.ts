@@ -183,4 +183,58 @@ describe('AccessService.resolveLevel', () => {
       ).not.toContain(subjectId);
     });
   });
+
+  describe('проекты с уровнем на секции', () => {
+    const chronicleWrite = (overrides: Partial<RequestSubject> = {}) =>
+      service.projectIdsWithLevel(
+        asSubject(overrides),
+        Section.Chronicle,
+        AccessLevel.Write,
+      );
+
+    it('отдаёт только проекты с уровнем не ниже требуемого', async () => {
+      // Выпадающий список саммари — ровно те проекты, куда субъект может
+      // писать хронику.
+      await grant(Section.Chronicle, AccessLevel.Write);
+      await testDb.db.insert(grants).values({
+        subjectId,
+        projectId: otherProjectId,
+        section: Section.Chronicle,
+        level: AccessLevel.Read,
+        grantedBy,
+      });
+
+      expect(await chronicleWrite()).toEqual([projectId]);
+    });
+
+    it('выдача на другую секцию в список не попадает', async () => {
+      await grant(Section.Roadmap, AccessLevel.Write);
+
+      expect(await chronicleWrite()).toEqual([]);
+    });
+
+    it('суперадмин получает все проекты', async () => {
+      expect((await chronicleWrite({ isSuperadmin: true })).sort()).toEqual(
+        [projectId, otherProjectId].sort(),
+      );
+    });
+
+    it('отозванный субъект не получает ничего', async () => {
+      // Отзыв сильнее суперадминства — то же правило, что в resolveLevel.
+      await grant(Section.Chronicle, AccessLevel.Write);
+
+      expect(await chronicleWrite({ isSuperadmin: true, isRevoked: true })).toEqual([]);
+    });
+
+    it('порядок уровней берётся из общего LEVEL_ORDER', async () => {
+      // Уровень `read` ниже `write`: строки перечисления сравнивать нельзя,
+      // и второго экземпляра порядка не заводится.
+      await grant(Section.Chronicle, AccessLevel.Read);
+
+      expect(await chronicleWrite()).toEqual([]);
+      expect(
+        await service.projectIdsWithLevel(asSubject(), Section.Chronicle, AccessLevel.Metadata),
+      ).toEqual([projectId]);
+    });
+  });
 });

@@ -73,6 +73,28 @@ export enum ChronicleSource {
   Manual = 'manual',
   /** Пришла на приёмный адрес по webhook. */
   Webhook = 'webhook',
+  /** Саммари созвона, разобранное конструктором задач. */
+  Summary = 'summary',
+}
+
+/**
+ * Кем предложена задача черновика саммари.
+ *
+ * Нужен инварианту «предложения модели применяются только после
+ * подтверждения человеком» (ТЗ 5.3): без этого признака отличить
+ * предложенное от набранного руками нечем.
+ */
+export enum SummaryTaskOrigin {
+  Model = 'model',
+  Human = 'human',
+}
+
+/** Вид предложителя задач: куда уходит текст саммари. */
+export enum TaskSuggesterKind {
+  /** Внешний LLM-API. */
+  External = 'external',
+  /** Свой OpenAI-совместимый endpoint в контуре. */
+  Local = 'local',
 }
 
 /**

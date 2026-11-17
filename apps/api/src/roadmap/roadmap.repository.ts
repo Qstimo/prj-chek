@@ -98,6 +98,34 @@ export class RoadmapRepository {
     };
   }
 
+  /**
+   * Обозначения версий проекта с их позициями.
+   *
+   * Нужен подсказке следующего обозначения в конструкторе задач: собирать
+   * весь роадмап с чекпоинтами, выпусками и сводкой ради двух колонок
+   * незачем. Уровня «метаданные» достаточно — обозначения версий видны
+   * уже на нём (ТЗ 4.3).
+   */
+  async labelsForProject(
+    subject: RequestSubject,
+    projectId: string,
+    executor: Executor = this.db,
+  ): Promise<{ label: string; position: number }[]> {
+    await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Roadmap,
+      AccessLevel.Metadata,
+      executor,
+    );
+
+    return executor
+      .select({ label: roadmapVersions.label, position: roadmapVersions.position })
+      .from(roadmapVersions)
+      .where(eq(roadmapVersions.projectId, projectId))
+      .orderBy(asc(roadmapVersions.position));
+  }
+
   /** Создаёт версию в конце последовательности. */
   async createVersion(
     subject: RequestSubject,

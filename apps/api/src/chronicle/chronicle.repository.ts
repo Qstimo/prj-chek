@@ -8,14 +8,19 @@ import {
   type ChronicleMetadata,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import { SectionNotVisibleError } from '../access/access.errors';
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
-import { chronicleEntries, type ChronicleEntry } from '../db/schema';
+import {
+  chronicleEntries,
+  summaries,
+  summaryTaskDrafts,
+  type ChronicleEntry,
+} from '../db/schema';
 import { chronicleProjection } from './chronicle.projection';
 
 /**
@@ -117,6 +122,22 @@ export class ChronicleRepository {
     await this.access.requireLevel(subject, projectId, Section.Chronicle, AccessLevel.Write, tx);
 
     const entry = await this.requireEntry(tx, projectId, entryId);
+
+    // Саммари ссылается на запись `restrict`, каскадов в проекте нет:
+    // без явной уборки запись с саммари стала бы неудаляемой. Отдельной
+    // записи в журнал удаление саммари не получает — человек удалял
+    // запись хроники, и журнал обязан описывать то, что он сделал.
+    const linked = await tx
+      .select({ id: summaries.id })
+      .from(summaries)
+      .where(eq(summaries.chronicleEntryId, entryId));
+
+    if (linked.length > 0) {
+      const ids = linked.map((row) => row.id);
+
+      await tx.delete(summaryTaskDrafts).where(inArray(summaryTaskDrafts.summaryId, ids));
+      await tx.delete(summaries).where(inArray(summaries.id, ids));
+    }
 
     await tx.delete(chronicleEntries).where(eq(chronicleEntries.id, entryId));
 
