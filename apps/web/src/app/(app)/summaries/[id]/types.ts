@@ -26,6 +26,8 @@ export interface ITasksProps {
   /** Отказ разбивки: объяснение по коду, черновик при этом не тронут. */
   suggestError?: string;
   onSave: (input: SummaryTasksReplace) => void;
+  /** Есть несохранённые правки черновика: шаг «Релиз» их обязан знать. */
+  onDirtyChange: (isDirty: boolean) => void;
   isSaving: boolean;
   saveError?: string;
 }

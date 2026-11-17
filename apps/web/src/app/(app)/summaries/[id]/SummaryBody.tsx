@@ -21,6 +21,7 @@ import { ChronicleForm } from '@/components/ChronicleForm';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { Loader } from '@/components/Loader';
 import { SummaryText } from '@/components/SummaryText';
+import { useUnsavedWarning } from '@/hooks/useUnsavedWarning';
 
 import { SUMMARY_TEXTS, failureMessageOf, releaseBlockedNoteOf } from '../constants';
 import { ReleaseBlock } from './ReleaseBlock';
@@ -33,6 +34,10 @@ import type { IBodyProps } from './types';
  * Текст правится **существующей** ручкой записи хроники: вторая дверь к
  * нему разошлась бы с первой. После правки перечитывается и саммари —
  * `isTextStale` и сам текст считаются из той же записи.
+ *
+ * Несохранённые правки черновика живут здесь, а не в редакторе: о них
+ * обязаны знать и шаг «Релиз» (он читает черновик из базы, и правка в
+ * памяти уехала бы мимо), и уход со страницы.
  */
 export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   const client = useQueryClient();
@@ -46,6 +51,9 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   const release = useMutationReleaseSummary(projectId, summaryId);
   const updateEntry = useMutationUpdateChronicleEntry(projectId);
   const [isEditing, setIsEditing] = useState(false);
+  const [hasUnsavedTasks, setHasUnsavedTasks] = useState(false);
+
+  useUnsavedWarning(hasUnsavedTasks);
 
   if (detail.isPending || sections.isPending || suggester.isPending) {
     return <Loader size="page" />;
@@ -92,13 +100,14 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
           describeApiError(suggest.error),
         )}
         onSave={(input) => save.mutate(input)}
+        onDirtyChange={setHasUnsavedTasks}
         isSaving={save.isPending}
         saveError={describeApiError(save.error)}
       />
 
       <ReleaseBlock
         summary={summary}
-        blockedNote={releaseBlockedNoteOf(sections.data[Section.Roadmap])}
+        blockedNote={releaseBlockedNoteOf(sections.data[Section.Roadmap], hasUnsavedTasks)}
         isRoadmapPublic={publicLink.data !== null && publicLink.data !== undefined}
         isReleasing={release.isPending}
         releaseError={failureMessageOf(

@@ -1,7 +1,7 @@
 'use client';
 
 import { SummaryTaskOrigin, type SummaryTask } from '@cairn/shared';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { FormError } from '../FormError';
 import { TaskRow } from './TaskRow';
@@ -41,11 +41,13 @@ function payloadOf({ id, title }: IDraftTask): { id?: string; title: string } {
  * Правки накапливаются в памяти и уходят одной кнопкой «Сохранить» в
  * прилипшей шапке, как у панели версии: `isDirty` считается сравнением с
  * загруженным набором. Компонент чистый — запросы, подтверждения и
- * перехват уходa со страницы живут на экране-контейнере.
+ * перехват уходa со страницы живут на экране-контейнере, которому
+ * несохранённое сообщается `onDirtyChange`.
  */
 export function SummaryTaskEditor({
   tasks,
   onSave,
+  onDirtyChange,
   isReleased = false,
   isSaving = false,
   error,
@@ -67,6 +69,12 @@ export function SummaryTaskEditor({
   const { draft } = state;
   const isDirty = signatureOf(draft) !== signature;
   const isComplete = draft.every((task) => task.title.trim().length > 0);
+
+  // Эффектом, а не из обработчика: сброс черновика свежим ответом идёт
+  // при отрисовке, и о нём контейнер обязан узнать так же, как о правке.
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   function update(next: IDraftTask[]): void {
     setState({ signature, draft: next });

@@ -24,6 +24,7 @@ export function TasksBlock({
   isSuggesting,
   suggestError,
   onSave,
+  onDirtyChange,
   isSaving,
   saveError,
 }: ITasksProps) {
@@ -110,6 +111,7 @@ export function TasksBlock({
       <SummaryTaskEditor
         tasks={summary.tasks}
         onSave={onSave}
+        onDirtyChange={onDirtyChange}
         isReleased={summary.isReleased}
         isSaving={isSaving}
         error={saveError}

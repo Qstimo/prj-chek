@@ -331,6 +331,58 @@ describe('экран саммари', () => {
     });
   });
 
+  it('несохранённые правки черновика релиз не пропускают', async () => {
+    // Сервер читает черновик из базы: релиз с правкой, оставшейся в
+    // памяти, уехал бы со старой формулировкой. Исправить это было бы
+    // уже нечем — после релиза `PUT …/tasks` отвечает `409`, а редактор
+    // становится только для чтения.
+    const release = mutation();
+    vi.mocked(hooks.useMutationReleaseSummary).mockReturnValue(release);
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    await userEvent.type(screen.getByRole('textbox'), ' быстрее');
+    await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(
+      (release as unknown as { mutate: ReturnType<typeof vi.fn> }).mutate,
+    ).not.toHaveBeenCalled();
+    expect(screen.getByText(/Сначала сохраните правки/)).toBeInTheDocument();
+  });
+
+  it('сохранённый черновик релиз пропускает', async () => {
+    // Обратная сторона: выключает кнопку именно несохранённое, а не сам
+    // факт непустого черновика.
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByText(/Сначала сохраните правки/)).not.toBeInTheDocument();
+  });
+
+  it('уход со страницы с несохранёнными правками предупреждает', async () => {
+    // Закладку, обновление и закрытие вкладки своим диалогом не
+    // перехватить: предупреждает браузер по `preventDefault`.
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    await userEvent.type(screen.getByRole('textbox'), ' быстрее');
+    const leaving = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leaving);
+
+    expect(leaving.defaultPrevented).toBe(true);
+  });
+
+  it('уход со страницы без правок не предупреждает', () => {
+    // Иначе предупреждение теряет смысл: его перестают читать.
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    const leaving = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leaving);
+
+    expect(leaving.defaultPrevented).toBe(false);
+  });
+
   it('правка текста открывает панель с полями записи хроники', async () => {
     renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
 
