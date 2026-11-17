@@ -64,8 +64,20 @@ services:
       # Поэтому адрес внешнего API живёт в `.env.example` заполненным
       # значением: приложение умолчание тоже подставляет, но только когда
       # переменной нет вовсе, а compose всегда передаёт её — пустой.
+      #
+      # И главное про все семь переменных узла: они — **запасной
+      # источник**. Настройка с экрана «Модели» лежит в базе и перебивает
+      # их целиком, пока запись не удалят кнопкой «Вернуть настройку
+      # окружения». Правка этого файла на установке, настроенной с
+      # экрана, не даст ничего — и экран прямо об этом говорит.
       CAIRN_TASK_SUGGESTER: ${CAIRN_TASK_SUGGESTER:-external}
       CAIRN_TASK_SUGGESTER_BASE_URL: ${CAIRN_TASK_SUGGESTER_BASE_URL:-}
+      # Схема авторизации и каталог передаются здесь по тому же правилу,
+      # что остальные: пропущенная в compose переменная уже стоила
+      # проекту дефекта. Умолчание схемы — bearer, у каталога умолчания
+      # нет: он нужен только службам Yandex.
+      CAIRN_TASK_SUGGESTER_AUTH_SCHEME: ${CAIRN_TASK_SUGGESTER_AUTH_SCHEME:-bearer}
+      CAIRN_TASK_SUGGESTER_FOLDER: ${CAIRN_TASK_SUGGESTER_FOLDER:-}
       CAIRN_TASK_SUGGESTER_API_KEY: ${CAIRN_TASK_SUGGESTER_API_KEY:-}
       CAIRN_TASK_SUGGESTER_MODEL: ${CAIRN_TASK_SUGGESTER_MODEL:-gpt-4o-mini}
       CAIRN_TASK_SUGGESTER_TIMEOUT_SECONDS: ${CAIRN_TASK_SUGGESTER_TIMEOUT_SECONDS:-60}
