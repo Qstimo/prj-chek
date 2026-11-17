@@ -1,4 +1,4 @@
-import { TaskSuggesterKind } from '@cairn/shared';
+import { ModelServicePlacement } from '@cairn/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -113,7 +113,7 @@ describe('настройки предложителя', () => {
   it('умолчание — внешний адаптер', () => {
     delete process.env.CAIRN_TASK_SUGGESTER;
 
-    expect(suggesterSettings().kind).toBe(TaskSuggesterKind.External);
+    expect(suggesterSettings().placement).toBe(ModelServicePlacement.External);
   });
 
   it('незнакомое значение вида даёт умолчание', () => {
@@ -121,7 +121,7 @@ describe('настройки предложителя', () => {
     // как настройка, а включённость — ключом и адресом.
     process.env.CAIRN_TASK_SUGGESTER = 'внешний';
 
-    expect(suggesterSettings().kind).toBe(TaskSuggesterKind.External);
+    expect(suggesterSettings().placement).toBe(ModelServicePlacement.External);
   });
 
   it('мусор в пределе ожидания даёт умолчание, а не бесконечность', () => {

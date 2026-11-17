@@ -1,4 +1,4 @@
-import type { TaskSuggesterKind } from '@cairn/shared';
+import type { ModelServicePlacement } from '@cairn/shared';
 
 /** Одна предложенная задача. Только формулировка — больше у чекпоинта нет. */
 export interface TaskSuggestion {
@@ -21,8 +21,8 @@ export interface SuggestResult {
  * в текст созвона: эскалации из вывода нет физически (дизайн, 5.6).
  */
 export interface TaskSuggester {
-  /** Вид: `external` либо `local`. Для журнала и экрана. */
-  readonly kind: TaskSuggesterKind;
+  /** Где стоит узел: `external` либо `local`. Для журнала и экрана. */
+  readonly placement: ModelServicePlacement;
   /** Модель, заданная настройкой. */
   readonly model: string;
   /**

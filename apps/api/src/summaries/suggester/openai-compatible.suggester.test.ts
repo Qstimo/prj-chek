@@ -1,4 +1,4 @@
-import { SUGGESTER_DISABLED, SUGGESTER_UNAVAILABLE, TaskSuggesterKind } from '@cairn/shared';
+import { SUGGESTER_DISABLED, SUGGESTER_UNAVAILABLE, ModelServicePlacement } from '@cairn/shared';
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { DisabledSuggester } from './disabled.suggester';
@@ -7,7 +7,7 @@ import type { SuggesterSettings } from './settings';
 
 /** Настройки боевого вида: точечные проверки меняют в них одно поле. */
 const SETTINGS: SuggesterSettings = {
-  kind: TaskSuggesterKind.External,
+  placement: ModelServicePlacement.External,
   baseUrl: 'https://api.openai.com/v1',
   apiKey: 'ключ',
   model: 'gpt-4o-mini',
@@ -227,7 +227,7 @@ describe('адаптер OpenAI-совместимого API', () => {
     const shown = suggester({ apiKey: 'секрет' });
 
     expect(shown).toMatchObject({
-      kind: TaskSuggesterKind.External,
+      placement: ModelServicePlacement.External,
       host: 'api.openai.com',
       model: 'gpt-4o-mini',
       maxChars: 40_000,

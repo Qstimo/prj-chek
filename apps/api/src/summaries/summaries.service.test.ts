@@ -10,7 +10,7 @@ import {
   SUMMARY_TEXT_TOO_LONG,
   SubjectKind,
   SummaryTaskOrigin,
-  TaskSuggesterKind,
+  ModelServicePlacement,
   type SummaryCreate,
 } from '@cairn/shared';
 import { BadGatewayException, BadRequestException, ConflictException } from '@nestjs/common';
@@ -81,7 +81,7 @@ describe('служба саммари', () => {
 
   /** Заглушка порта: ни один тест не ходит в сеть. */
   const suggesterStub: TaskSuggester & { suggest: ReturnType<typeof vi.fn> } = {
-    kind: TaskSuggesterKind.Local,
+    placement: ModelServicePlacement.Local,
     model: 'тестовая',
     host: 'llm.internal',
     maxChars: 40_000,

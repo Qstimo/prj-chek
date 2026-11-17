@@ -83,7 +83,7 @@ export class SummariesService implements OnModuleDestroy {
   /** Явная проекция не позволяет свойствам адаптера утечь в ответ. */
   suggesterInfo(): TaskSuggesterInfo {
     return {
-      isEnabled: this.suggester.isEnabled, kind: this.suggester.kind,
+      isEnabled: this.suggester.isEnabled, placement: this.suggester.placement,
       host: this.suggester.host, model: this.suggester.model || null,
       maxChars: this.suggester.maxChars,
     };
@@ -309,7 +309,7 @@ export class SummariesService implements OnModuleDestroy {
           entityId: summaryId,
           projectId,
           metadata: {
-            suggester: this.suggester.kind,
+            suggester: this.suggester.placement,
             model: this.suggester.model,
             host: this.suggester.host,
             chars: source.text.length,
@@ -335,7 +335,7 @@ export class SummariesService implements OnModuleDestroy {
           summaryId,
           result.tasks.map((task) => task.title),
           {
-            name: this.suggester.kind,
+            name: this.suggester.placement,
             model: this.suggester.model,
             textUpdatedAt: source.textUpdatedAt,
             dropped: result.dropped,
@@ -373,7 +373,7 @@ export class SummariesService implements OnModuleDestroy {
         entityId: summaryId,
         projectId,
         metadata: {
-          suggester: this.suggester.kind,
+          suggester: this.suggester.placement,
           host: this.suggester.host,
           code: codeOf(cause),
           durationMs,

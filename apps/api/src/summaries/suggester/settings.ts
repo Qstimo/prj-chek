@@ -1,4 +1,4 @@
-import { TaskSuggesterKind } from '@cairn/shared';
+import { ModelServicePlacement } from '@cairn/shared';
 
 /**
  * Настройки предложителя задач (дизайн, раздел 5.3).
@@ -46,7 +46,7 @@ export const DEFAULT_SUGGESTER_MAX_TASKS = 50;
 
 /** Разобранные настройки порта. Ключ здесь есть, наружу он не выходит. */
 export interface SuggesterSettings {
-  kind: TaskSuggesterKind;
+  placement: ModelServicePlacement;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -67,7 +67,7 @@ export interface SuggesterSettings {
  * как суперадмин впишет его в `.env`.
  */
 export function suggesterSettings(): SuggesterSettings {
-  const kind = kindOf(process.env[SUGGESTER_KIND_ENV]);
+  const placement = placementOf(process.env[SUGGESTER_KIND_ENV]);
   const isOff = (process.env[SUGGESTER_KIND_ENV] ?? '').trim().toLowerCase() === SUGGESTER_OFF;
   // Умолчание адреса есть только у внешнего адаптера: подставить его
   // локальному значило бы тихо отправить текст наружу при `local` без
@@ -79,13 +79,13 @@ export function suggesterSettings(): SuggesterSettings {
   // выключен при вписанном ключе — то есть ровно там, где он настроен.
   const baseUrl = nonEmptyOf(
     process.env[SUGGESTER_BASE_URL_ENV],
-    kind === TaskSuggesterKind.External ? EXTERNAL_BASE_URL : '',
+    placement === ModelServicePlacement.External ? EXTERNAL_BASE_URL : '',
   );
   const apiKey = (process.env[SUGGESTER_API_KEY_ENV] ?? '').trim();
-  const needsKey = kind === TaskSuggesterKind.External;
+  const needsKey = placement === ModelServicePlacement.External;
 
   return {
-    kind,
+    placement,
     baseUrl,
     apiKey,
     model: nonEmptyOf(process.env[SUGGESTER_MODEL_ENV], DEFAULT_SUGGESTER_MODEL),
@@ -116,11 +116,11 @@ export function hostOf(url: string): string | null {
   }
 }
 
-/** Вид адаптера; `off` и мусор дают умолчание — внешний. */
-function kindOf(value: string | undefined): TaskSuggesterKind {
-  return (value ?? '').trim().toLowerCase() === TaskSuggesterKind.Local
-    ? TaskSuggesterKind.Local
-    : TaskSuggesterKind.External;
+/** Где стоит узел; `off` и мусор дают умолчание — внешний. */
+function placementOf(value: string | undefined): ModelServicePlacement {
+  return (value ?? '').trim().toLowerCase() === ModelServicePlacement.Local
+    ? ModelServicePlacement.Local
+    : ModelServicePlacement.External;
 }
 
 /** Положительное число из настройки либо умолчание. */

@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
+import * as enums from './enums';
 import {
   AccessLevel,
   ChronicleSource,
+  ModelAuthScheme,
+  ModelProbeOutcome,
+  ModelServiceKind,
+  ModelServicePlacement,
+  ModelServiceSource,
   SummaryTaskOrigin,
-  TaskSuggesterKind,
   AuditSubjectKind,
   PlatformKind,
   PlatformReleaseState,
@@ -76,7 +81,46 @@ describe('перечни саммари', () => {
     expect(Object.values(SummaryTaskOrigin)).toEqual(['model', 'human']);
   });
 
-  it('вид предложителя говорит, куда уходит текст', () => {
-    expect(Object.values(TaskSuggesterKind)).toEqual(['external', 'local']);
+});
+
+describe('перечни служб модели', () => {
+  it('узел — закрытый перечень, и в этой итерации он один', () => {
+    // Настройки для службы, которой в сборке нет, не бывает: карточка
+    // узла расшифровки показывала бы форму, сохранение в которой ни на
+    // что не влияет (дизайн, 14.1 пункт 1).
+    expect(Object.values(ModelServiceKind)).toEqual(['task_suggester']);
+  });
+
+  it('схема авторизации отвечает за одно слово в одном заголовке', () => {
+    // `api_key` существует потому, что Yandex ждёт `Api-Key`, а не
+    // `Bearer`; `none` — потому, что «узел без ключа» и «забыли вписать
+    // ключ» обязаны различаться (дизайн, 6.2).
+    expect(Object.values(ModelAuthScheme)).toEqual(['bearer', 'api_key', 'none']);
+  });
+
+  it('вид узла задаётся человеком и несёт прежние значения', () => {
+    // Переименование `TaskSuggesterKind`: значения те же строки, значит
+    // `summaries.suggester_name` миграции данных не требует.
+    expect(Object.values(ModelServicePlacement)).toEqual(['external', 'local']);
+  });
+
+  it('источник настройки отвечает на первый вопрос экрана', () => {
+    expect(Object.values(ModelServiceSource)).toEqual(['database', 'environment', 'none']);
+  });
+
+  it('исходов проверки связи шесть: по ним человек делает разное', () => {
+    expect(Object.values(ModelProbeOutcome)).toEqual([
+      'ok',
+      'unauthorized',
+      'not_found',
+      'bad_request',
+      'unavailable',
+      'bad_response',
+    ]);
+  });
+
+  it('прежнего перечня предложителя не осталось', () => {
+    // Два перечня с одинаковыми значениями разошлись бы на втором порте.
+    expect('TaskSuggesterKind' in enums).toBe(false);
   });
 });

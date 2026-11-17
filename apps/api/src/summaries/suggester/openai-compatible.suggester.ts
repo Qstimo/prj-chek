@@ -1,4 +1,4 @@
-import { SUGGESTER_UNAVAILABLE, type TaskSuggesterKind } from '@cairn/shared';
+import { SUGGESTER_UNAVAILABLE, type ModelServicePlacement } from '@cairn/shared';
 
 import type { SuggesterSettings } from './settings';
 import { SuggesterFailure, type SuggestResult, type TaskSuggester } from './task-suggester';
@@ -70,8 +70,8 @@ export class OpenAiCompatibleSuggester implements TaskSuggester {
     this.#settings = settings;
   }
 
-  get kind(): TaskSuggesterKind {
-    return this.#settings.kind;
+  get placement(): ModelServicePlacement {
+    return this.#settings.placement;
   }
 
   get model(): string {

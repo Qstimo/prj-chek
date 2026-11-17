@@ -1,4 +1,4 @@
-import { SUGGESTER_DISABLED, TaskSuggesterKind } from '@cairn/shared';
+import { SUGGESTER_DISABLED, ModelServicePlacement } from '@cairn/shared';
 
 import { DEFAULT_SUGGESTER_MAX_CHARS } from './settings';
 import { SuggesterFailure, type SuggestResult, type TaskSuggester } from './task-suggester';
@@ -15,7 +15,7 @@ import { SuggesterFailure, type SuggestResult, type TaskSuggester } from './task
  * В сеть не ходит ни при каких условиях: это и проверяется тестом.
  */
 export class DisabledSuggester implements TaskSuggester {
-  readonly kind = TaskSuggesterKind.External;
+  readonly placement = ModelServicePlacement.External;
   readonly model = '';
   /** Называть узел, куда ничего не уходит, значило бы врать. */
   readonly host = null;

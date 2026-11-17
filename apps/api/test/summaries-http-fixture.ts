@@ -1,4 +1,4 @@
-import { AccessLevel, Section, SubjectKind, TaskSuggesterKind } from '@cairn/shared';
+import { AccessLevel, Section, SubjectKind, ModelServicePlacement } from '@cairn/shared';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -19,7 +19,7 @@ export function summariesHttpFixture() {
   let passwordHash: string;
   const state = { projectId: '', otherProjectId: '', memberId: '', adminUserId: '' };
   const suggester: TaskSuggester & { suggest: ReturnType<typeof vi.fn> } = {
-    kind: TaskSuggesterKind.Local, model: 'тест', host: 'llm.internal', maxChars: 40_000,
+    placement: ModelServicePlacement.Local, model: 'тест', host: 'llm.internal', maxChars: 40_000,
     isEnabled: true, suggest: vi.fn(),
   };
   beforeAll(async () => {
