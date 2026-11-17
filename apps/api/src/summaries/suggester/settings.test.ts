@@ -1,4 +1,4 @@
-import { ModelServicePlacement } from '@cairn/shared';
+import { ModelAuthScheme, ModelServicePlacement } from '@cairn/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -7,6 +7,11 @@ import {
   DEFAULT_SUGGESTER_MODEL,
   DEFAULT_SUGGESTER_TIMEOUT_SECONDS,
   EXTERNAL_BASE_URL,
+  SUGGESTER_API_KEY_ENV,
+  SUGGESTER_AUTH_SCHEME_ENV,
+  SUGGESTER_BASE_URL_ENV,
+  SUGGESTER_FOLDER_ENV,
+  SUGGESTER_NODE_ENV_NAMES,
   hostOf,
   suggesterSettings,
 } from './settings';
@@ -16,6 +21,8 @@ const NAMES = [
   'CAIRN_TASK_SUGGESTER',
   'CAIRN_TASK_SUGGESTER_BASE_URL',
   'CAIRN_TASK_SUGGESTER_API_KEY',
+  'CAIRN_TASK_SUGGESTER_AUTH_SCHEME',
+  'CAIRN_TASK_SUGGESTER_FOLDER',
   'CAIRN_TASK_SUGGESTER_MODEL',
   'CAIRN_TASK_SUGGESTER_TIMEOUT_SECONDS',
   'CAIRN_TASK_SUGGESTER_MAX_CHARS',
@@ -87,12 +94,93 @@ describe('настройки предложителя', () => {
     expect(suggesterSettings().isEnabled).toBe(false);
   });
 
-  it('локальный адаптер ключа не требует', () => {
+  it('локальный адаптер без ключа требует явной схемы none', () => {
+    // Названная несовместимость: ключ обязателен, когда схема не `none`,
+    // а умолчание схемы — `bearer`. Прежде `local` обходился без ключа
+    // сам по себе, и это и было той двусмысленностью, из-за которой
+    // «узел без ключа» и «забыли вписать ключ» в коде не различались
+    // (дизайн, 6.2).
     process.env.CAIRN_TASK_SUGGESTER = 'local';
     process.env.CAIRN_TASK_SUGGESTER_BASE_URL = 'http://llm.internal/v1';
     process.env.CAIRN_TASK_SUGGESTER_API_KEY = '';
 
+    expect(suggesterSettings().isEnabled).toBe(false);
+  });
+
+  it('разбор окружения отдаёт схему авторизации, а не домысливает её', () => {
+    process.env[SUGGESTER_AUTH_SCHEME_ENV] = 'api_key';
+
+    expect(suggesterSettings().authScheme).toBe(ModelAuthScheme.ApiKey);
+  });
+
+  it('умолчание схемы — bearer: так устроены OpenAI и ProxyAPI', () => {
+    delete process.env[SUGGESTER_AUTH_SCHEME_ENV];
+
+    expect(suggesterSettings().authScheme).toBe(ModelAuthScheme.Bearer);
+  });
+
+  it('мусор в схеме даёт умолчание, а не отказ', () => {
+    // Тот же принцип, что у чисел: мусор означает умолчание.
+    process.env[SUGGESTER_AUTH_SCHEME_ENV] = 'ПочтиApiKey';
+
+    expect(suggesterSettings().authScheme).toBe(ModelAuthScheme.Bearer);
+  });
+
+  it('при схеме none ключ не требуется для включённости', () => {
+    process.env[SUGGESTER_AUTH_SCHEME_ENV] = 'none';
+    process.env[SUGGESTER_BASE_URL_ENV] = 'http://llm.internal:8000/v1';
+    delete process.env[SUGGESTER_API_KEY_ENV];
+
     expect(suggesterSettings().isEnabled).toBe(true);
+  });
+
+  it('при схеме api_key ключ обязателен так же, как при bearer', () => {
+    process.env[SUGGESTER_AUTH_SCHEME_ENV] = 'api_key';
+    process.env[SUGGESTER_BASE_URL_ENV] = 'https://llm.api.cloud.yandex.net/v1';
+    delete process.env[SUGGESTER_API_KEY_ENV];
+
+    expect(suggesterSettings().isEnabled).toBe(false);
+  });
+
+  it('каталог читается и пустой означает отсутствие', () => {
+    process.env[SUGGESTER_FOLDER_ENV] = ' b1g… ';
+
+    expect(suggesterSettings().folder).toBe('b1g…');
+  });
+
+  it('каталога нет — null, а не пустая строка', () => {
+    // `null` отвечает на «задан ли каталог» одним значением на оба
+    // источника: в базе колонка обнуляема, и пустая строка здесь
+    // разошлась бы с ней.
+    delete process.env[SUGGESTER_FOLDER_ENV];
+
+    expect(suggesterSettings().folder).toBeNull();
+  });
+
+  it('выключатель off отличим от неполноты настройки', () => {
+    // Разрешение настройки показывает их разными причинами: `off` —
+    // решение человека, неполнота — недоделанная настройка.
+    process.env.CAIRN_TASK_SUGGESTER = 'off';
+    process.env[SUGGESTER_API_KEY_ENV] = 'ключ';
+
+    expect(suggesterSettings()).toMatchObject({ isOff: true, isEnabled: false });
+  });
+
+  it('имена переменных узла названы списком и не включают пределов потока', () => {
+    // Список нужен экрану администрирования: он называет переменные,
+    // которые перестали действовать, когда настройка задана в
+    // интерфейсе. `MAX_CHARS` и `MAX_TASKS` в него не входят — они
+    // остаются действующими всегда, потому что это поведение нашего
+    // потока, а не свойство узла (дизайн, 7.1).
+    expect(SUGGESTER_NODE_ENV_NAMES).toEqual([
+      'CAIRN_TASK_SUGGESTER',
+      'CAIRN_TASK_SUGGESTER_BASE_URL',
+      'CAIRN_TASK_SUGGESTER_AUTH_SCHEME',
+      'CAIRN_TASK_SUGGESTER_API_KEY',
+      'CAIRN_TASK_SUGGESTER_MODEL',
+      'CAIRN_TASK_SUGGESTER_FOLDER',
+      'CAIRN_TASK_SUGGESTER_TIMEOUT_SECONDS',
+    ]);
   });
 
   it('адрес внешнего API не подставляется локальному', () => {

@@ -1,4 +1,9 @@
-import { SUGGESTER_DISABLED, SUGGESTER_UNAVAILABLE, ModelServicePlacement } from '@cairn/shared';
+import {
+  SUGGESTER_DISABLED,
+  SUGGESTER_UNAVAILABLE,
+  ModelAuthScheme,
+  ModelServicePlacement,
+} from '@cairn/shared';
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { DisabledSuggester } from './disabled.suggester';
@@ -10,11 +15,14 @@ const SETTINGS: SuggesterSettings = {
   placement: ModelServicePlacement.External,
   baseUrl: 'https://api.openai.com/v1',
   apiKey: 'ключ',
+  authScheme: ModelAuthScheme.Bearer,
   model: 'gpt-4o-mini',
+  folder: null,
   timeoutSeconds: 60,
   maxChars: 40_000,
   maxTasks: 50,
   host: 'api.openai.com',
+  isOff: false,
   isEnabled: true,
 };
 
