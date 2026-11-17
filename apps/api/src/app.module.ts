@@ -14,6 +14,7 @@ import { HealthModule } from './health/health.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { IntakeModule } from './intake/intake.module';
 import { InvitationsModule } from './invitations/invitations.module';
+import { ModelServicesModule } from './model-services/model-services.module';
 import { PlatformsModule } from './platforms/platforms.module';
 import { ProjectsModule } from './projects/projects.module';
 import { PushModule } from './push/push.module';
@@ -53,6 +54,7 @@ import { VariablesModule } from './variables/variables.module';
     InvitationsModule,
     DomainsModule,
     ServersModule,
+    ModelServicesModule,
     UsersModule,
   ],
 })

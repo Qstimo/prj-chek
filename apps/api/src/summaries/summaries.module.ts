@@ -7,8 +7,6 @@ import { ChronicleModule } from '../chronicle/chronicle.module';
 import { DbModule } from '../db/db.module';
 import { ModelServicesModule } from '../model-services/model-services.module';
 import { RoadmapModule } from '../roadmap/roadmap.module';
-import { ModelServiceTaskSuggesterSource } from './suggester/task-suggester.source';
-import { TASK_SUGGESTER_SOURCE } from './suggester/task-suggester';
 import { SummariesController } from './summaries.controller';
 import { SummariesOverviewController } from './summaries-overview.controller';
 import { SummariesRepository } from './summaries.repository';
@@ -31,15 +29,11 @@ import { SummariesService } from './summaries.service';
     ModelServicesModule,
   ],
   controllers: [SummariesController, SummariesOverviewController],
-  providers: [
-    SummariesRepository,
-    SummariesService,
-    // За токеном стоит источник адаптера, а не адаптер: настройка
-    // меняется на ходу, значит и адаптер строится на каждый вызов
-    // (дизайн, 9.2). Прежняя фабрика строила его один раз при старте, и
-    // правка настройки не действовала до перезапуска.
-    { provide: TASK_SUGGESTER_SOURCE, useClass: ModelServiceTaskSuggesterSource },
-  ],
-  exports: [SummariesRepository, SummariesService, TASK_SUGGESTER_SOURCE],
+  providers: [SummariesRepository, SummariesService],
+  // Источник адаптера приходит из `ModelServicesModule`: он строится из
+  // одной только службы разрешения настройки, и проверка связи на экране
+  // администрирования нуждается в том же источнике. Две регистрации одного
+  // токена разошлись бы при первой правке фабрики.
+  exports: [SummariesRepository, SummariesService],
 })
 export class SummariesModule {}
