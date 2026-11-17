@@ -7,6 +7,7 @@ export * from './environments';
 export * from './grants';
 export * from './incidents';
 export * from './invitations';
+export * from './model-services';
 export * from './platforms';
 export * from './projects';
 export * from './push';
