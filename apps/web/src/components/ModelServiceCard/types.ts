@@ -1,4 +1,5 @@
 import type { ModelServiceSettings } from '@cairn/shared';
+import type { ReactNode } from 'react';
 
 /** Пропсы карточки узла службы модели. */
 export interface IProps {
@@ -10,7 +11,7 @@ export interface IProps {
   /** Сбросить настройку к окружению. */
   onClear: () => void;
   /** Исход последней проверки связи: карточка его только показывает. */
-  probe?: React.ReactNode;
+  probe?: ReactNode;
   /** Идёт ли проверка: кнопка на это время выключается. */
   isProbing?: boolean;
 }
