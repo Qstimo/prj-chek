@@ -11,6 +11,14 @@ const TRAILING_NUMBER = /^(.*?)(\d+)(\D*)$/;
 const ATTEMPTS = 10;
 
 /**
+ * Предел обозначения версии: столько принимает `roadmapVersionCreate`.
+ *
+ * Подсказка длиннее отвергалась бы роадмапом, а подсказка, которую
+ * система не примет, хуже её отсутствия.
+ */
+const MAX_LABEL = 100;
+
+/**
  * Подсказывает обозначение следующей версии (дизайн, раздел 7.4).
  *
  * Обозначение в CAIRN — свободная строка, и универсального «следующего»
@@ -39,14 +47,24 @@ export function nextVersionLabel(versions: VersionLabel[]): string | null {
 
   const [, prefix = '', digits = '', suffix = ''] = match;
   const taken = new Set(versions.map((version) => version.label));
-  let value = Number(digits);
+  // Целое произвольной длины, а не `Number`: за 2^53 точность теряется, и
+  // `v9007199254740993` давал подсказку **меньше** текущей версии, а с
+  // двадцати одного разряда `String` переходил на экспоненциальную
+  // запись, которую `padStart` добивал нулями (`v00000000000000001e+21`).
+  let value = BigInt(digits);
 
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
-    value += 1;
+    value += 1n;
 
     // Ширина сохраняется, пока число в неё помещается: `v1.08` → `v1.09`,
     // но `v1.99` → `v1.100`, а не `v1.00`.
     const candidate = `${prefix}${String(value).padStart(digits.length, '0')}${suffix}`;
+
+    if (candidate.length > MAX_LABEL) {
+      // Разрядов столько, что подсказка перестала быть обозначением
+      // версии: честный `null` лучше значения, которое роадмап отвергнет.
+      return null;
+    }
 
     if (!taken.has(candidate)) {
       return candidate;
