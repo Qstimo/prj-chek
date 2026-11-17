@@ -1,6 +1,6 @@
 'use client';
 
-import { SummaryTaskOrigin, type SummaryTask } from '@cairn/shared';
+import { MAX_SUMMARY_TASKS, SummaryTaskOrigin, type SummaryTask } from '@cairn/shared';
 import { useEffect, useRef, useState } from 'react';
 
 import { FormError } from '../FormError';
@@ -69,6 +69,7 @@ export function SummaryTaskEditor({
   const { draft } = state;
   const isDirty = signatureOf(draft) !== signature;
   const isComplete = draft.every((task) => task.title.trim().length > 0);
+  const isFull = draft.length >= MAX_SUMMARY_TASKS;
 
   // Эффектом, а не из обработчика: сброс черновика свежим ответом идёт
   // при отрисовке, и о нём контейнер обязан узнать так же, как о правке.
@@ -149,13 +150,18 @@ export function SummaryTaskEditor({
       )}
 
       {!isReleased && (
-        <button
-          type="button"
-          onClick={add}
-          className="rounded-md border border-border px-3 py-2 text-sm"
-        >
-          {EDITOR_TEXTS.add}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={add}
+            disabled={isFull}
+            className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+          >
+            {EDITOR_TEXTS.add}
+          </button>
+
+          {isFull && <p className="text-sm text-muted-foreground">{EDITOR_TEXTS.limit}</p>}
+        </div>
       )}
     </div>
   );

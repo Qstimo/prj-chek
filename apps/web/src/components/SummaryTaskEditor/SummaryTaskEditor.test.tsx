@@ -1,4 +1,9 @@
-import { SummaryTaskOrigin, type SummaryTask } from '@cairn/shared';
+import {
+  MAX_SUMMARY_TASKS,
+  MAX_SUMMARY_TASK_TITLE,
+  SummaryTaskOrigin,
+  type SummaryTask,
+} from '@cairn/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -158,6 +163,33 @@ describe('редактор черновика задач', () => {
 
     expect(screen.getByDisplayValue('<b>жирно</b>')).toBeInTheDocument();
     expect(document.querySelector('b')).toBeNull();
+  });
+
+  it('формулировка длиннее предела не набирается', async () => {
+    // Предел держит форма: 301-й знак получил бы `400` от zod с кодом,
+    // которого карта отказов не знает, и человек увидел бы общее
+    // сообщение сервера вместо объяснения.
+    const long = 'я'.repeat(MAX_SUMMARY_TASK_TITLE);
+    render(<SummaryTaskEditor tasks={[{ ...TASK_A, title: long }]} onSave={vi.fn()} />);
+
+    await userEvent.type(screen.getByRole('textbox'), 'ещё');
+
+    expect(screen.getByRole('textbox')).toHaveValue(long);
+  });
+
+  it('строк больше предела не добавляется, и предел назван', async () => {
+    const many = Array.from({ length: MAX_SUMMARY_TASKS }, (_, index) => ({
+      ...TASK_A,
+      id: `11111111-1111-1111-1111-${String(index).padStart(12, '0')}`,
+      title: `задача ${index + 1}`,
+      position: index + 1,
+    }));
+    render(<SummaryTaskEditor tasks={many} onSave={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Добавить задачу/ }));
+
+    expect(screen.getAllByRole('textbox')).toHaveLength(MAX_SUMMARY_TASKS);
+    expect(screen.getByText(new RegExp(String(MAX_SUMMARY_TASKS)))).toBeInTheDocument();
   });
 
   it('о несохранённых правках сказано рядом с кнопкой', async () => {

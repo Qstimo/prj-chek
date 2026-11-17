@@ -1,5 +1,6 @@
 'use client';
 
+import { MAX_SUMMARY_TASK_TITLE } from '@cairn/shared';
 import { useEffect, useRef } from 'react';
 
 import { EDITOR_TEXTS } from './constants';
@@ -11,6 +12,11 @@ import type { IRowProps } from './types';
  * Формулировка живёт в `input` и выводится значением поля, а не
  * разметкой: вывод модели недоверен, и ни Markdown-рендера, ни
  * `dangerouslySetInnerHTML` здесь быть не должно (дизайн, раздел 5.6).
+ *
+ * Предел длины держит само поле: `400` от zod пришёл бы с кодом, которого
+ * карта отказов не знает, и человек увидел бы общее сообщение сервера
+ * вместо объяснения. Обрезание моделью (`MAX_TASK_TITLE` в разборе
+ * ответа) этого не заменяет — руками дописать длиннее можно.
  */
 export function TaskRow({
   task,
@@ -36,6 +42,7 @@ export function TaskRow({
         ref={field}
         aria-label={EDITOR_TEXTS.titleLabel}
         value={task.title}
+        maxLength={MAX_SUMMARY_TASK_TITLE}
         disabled={isReadOnly}
         onChange={(event) => onChange(event.target.value)}
         className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-2"

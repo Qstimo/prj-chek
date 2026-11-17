@@ -20,6 +20,16 @@ export const SUMMARY_TEXT_NOT_PLAIN = 'summary_text_not_plain';
 /** Предел числа задач в черновике: предел формы, а не доверия к модели. */
 export const MAX_SUMMARY_TASKS = 200;
 
+/**
+ * Предел длины формулировки задачи.
+ *
+ * Столько принимает `roadmapCheckpointCreate`: иначе отказ пришёл бы не
+ * оттуда, где его ждут. Названо константой, а не числом в схеме, чтобы
+ * предел держала и форма — у `400` от zod нет кода, который интерфейс
+ * сумел бы объяснить.
+ */
+export const MAX_SUMMARY_TASK_TITLE = 300;
+
 /** Управляющие символы, кроме перевода строки и табуляции. */
 const FORBIDDEN_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
@@ -148,7 +158,7 @@ export const summaryTasksReplaceSchema = z
         z
           .object({
             id: z.string().uuid().optional(),
-            title: z.string().trim().min(1).max(300),
+            title: z.string().trim().min(1).max(MAX_SUMMARY_TASK_TITLE),
           })
           .strict(),
       )
