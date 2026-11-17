@@ -9,6 +9,25 @@ function columnNames(table: typeof summaries | typeof summaryTaskDrafts): string
   return getTableConfig(table).columns.map((column) => column.name);
 }
 
+/** Колонки индекса по порядку, с направлением каждой. */
+function columnsOf(
+  table: typeof summaries | typeof summaryTaskDrafts,
+  name: string,
+): [string, string | undefined][] {
+  const index = getTableConfig(table).indexes.find(
+    (candidate) => candidate.config.name === name,
+  );
+
+  return (index?.config.columns ?? []).map((column) => {
+    const { name: columnName, indexConfig } = column as {
+      name?: string;
+      indexConfig?: { order?: string };
+    };
+
+    return [columnName ?? '', indexConfig?.order];
+  });
+}
+
 describe('саммари', () => {
   it('ссылается на запись хроники, а не копирует текст', () => {
     // Вторая копия текста разошлась бы с первой при первой же правке.
@@ -55,9 +74,13 @@ describe('саммари', () => {
   });
 
   it('читается по своему индексу: свежие сверху', () => {
-    expect(getTableConfig(summaries).indexes.map((index) => index.config.name)).toContain(
-      'summaries_project_created_idx',
-    );
+    // Состав и порядок колонок, а не одно имя: индекс по тем же полям в
+    // другом порядке — другой индекс, а без `desc` у даты «свежие
+    // сверху» достаётся сортировке, а не чтению.
+    expect(columnsOf(summaries, 'summaries_project_created_idx')).toEqual([
+      ['project_id', 'asc'],
+      ['created_at', 'desc'],
+    ]);
   });
 });
 
@@ -84,10 +107,18 @@ describe('черновик задач', () => {
   });
 
   it('читается по своему индексу в порядке позиций', () => {
-    const index = getTableConfig(summaryTaskDrafts).indexes.find(
-      (candidate) => candidate.config.name === 'summary_task_drafts_summary_idx',
-    );
-
-    expect(index?.config.unique).toBe(false);
+    // Порядок колонок проверяется, а не просто «индекс не уникальный»:
+    // `(position, summary_id)` чтению черновика одного саммари не
+    // помогает, а уникальность позиций внутри саммари **не выражается**
+    // намеренно — их целиком перенумеровывает `PUT …/tasks`.
+    expect(columnsOf(summaryTaskDrafts, 'summary_task_drafts_summary_idx')).toEqual([
+      ['summary_id', 'asc'],
+      ['position', 'asc'],
+    ]);
+    expect(
+      getTableConfig(summaryTaskDrafts).indexes.find(
+        (candidate) => candidate.config.name === 'summary_task_drafts_summary_idx',
+      )?.config.unique,
+    ).toBe(false);
   });
 });

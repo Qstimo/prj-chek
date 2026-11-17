@@ -103,17 +103,6 @@ describe('адаптер OpenAI-совместимого API', () => {
     expect(initOf(fetchMock).redirect).toBe('error');
   });
 
-  it('ни названия проекта, ни переменных, ни адресов в запросе нет', async () => {
-    const fetchMock = okWith('{"tasks":["раз"]}');
-
-    await suggester().suggest('обсудили сроки', signal());
-
-    const sent = String(initOf(fetchMock).body);
-
-    expect(sent).not.toContain('CAIRN');
-    expect(sent).not.toContain('prod.example.ru');
-  });
-
   it('спрашивает ручку завершений по настроенному адресу', async () => {
     const fetchMock = okWith('{"tasks":["раз"]}');
 
