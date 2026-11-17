@@ -85,6 +85,21 @@ export enum AuditAction {
   ServerCreated = 'server.created',
   ServerUpdated = 'server.updated',
   ServerDeleted = 'server.deleted',
+  ModelServiceUpdated = 'model_service.updated',
+  /**
+   * Своё действие, а не метаданные у `model_service.updated`: метаданные
+   * записи на экране журнала не показываются ни у одного действия, значит
+   * название обязано отвечать на вопрос «что произошло» само. «Изменена
+   * настройка службы модели» с `secretChanged: true` в метаданных
+   * прочитать глазами нельзя; «Изменён ключ службы модели» — можно.
+   *
+   * И смена ключа — единственная правка здесь, которая невосстановима
+   * (версий значения нет) и способна сломать работающую установку молча,
+   * до первого вызова (дизайн, 11.2).
+   */
+  ModelServiceSecretSet = 'model_service.secret_set',
+  ModelServiceCleared = 'model_service.cleared',
+  ModelServiceProbed = 'model_service.probed',
   DocPageCreated = 'doc_page.created',
   DocPageUpdated = 'doc_page.updated',
   DocPageDeleted = 'doc_page.deleted',
