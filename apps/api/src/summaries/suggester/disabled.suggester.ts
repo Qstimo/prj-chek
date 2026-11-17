@@ -1,4 +1,4 @@
-import { SUGGESTER_DISABLED, ModelServicePlacement } from '@cairn/shared';
+import { SUGGESTER_DISABLED, ModelServicePlacement, type ModelProbeResult } from '@cairn/shared';
 
 import { DEFAULT_SUGGESTER_MAX_CHARS } from './settings';
 import { SuggesterFailure, type SuggestResult, type TaskSuggester } from './task-suggester';
@@ -25,7 +25,23 @@ export class DisabledSuggester implements TaskSuggester {
 
   /** Аргументы объявлены, но не читаются: текст наружу не уходит вовсе. */
   async suggest(_text: string, _signal: AbortSignal): Promise<SuggestResult> {
-    throw new SuggesterFailure(
+    throw this.disabled();
+  }
+
+  /**
+   * Проверять нечего: узла нет, и в сеть этот порт не ходит.
+   *
+   * Отказ, а не исход `unavailable`: «узел не ответил» и «узел не задан»
+   * чинятся разным действием, и свести их значило бы отправить
+   * администратора ждать ответа от адреса, которого он не вписал.
+   */
+  async probe(_signal: AbortSignal): Promise<ModelProbeResult> {
+    throw this.disabled();
+  }
+
+  /** Один и тот же отказ на оба метода: причина у них одна. */
+  private disabled(): SuggesterFailure {
+    return new SuggesterFailure(
       SUGGESTER_DISABLED,
       'Разбивка не настроена: обратитесь к администратору.',
     );

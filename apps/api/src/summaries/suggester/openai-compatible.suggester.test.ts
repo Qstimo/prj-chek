@@ -2,12 +2,20 @@ import {
   SUGGESTER_DISABLED,
   SUGGESTER_UNAVAILABLE,
   ModelAuthScheme,
+  ModelProbeOutcome,
   ModelServicePlacement,
 } from '@cairn/shared';
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { DisabledSuggester } from './disabled.suggester';
-import { OpenAiCompatibleSuggester, SYSTEM_PROMPT, TEXT_END, TEXT_START } from './openai-compatible.suggester';
+import {
+  OpenAiCompatibleSuggester,
+  PROBE_MAX_TOKENS,
+  PROBE_TEXT,
+  SYSTEM_PROMPT,
+  TEXT_END,
+  TEXT_START,
+} from './openai-compatible.suggester';
 import type { SuggesterSettings } from './settings';
 
 /** Настройки боевого вида: точечные проверки меняют в них одно поле. */
@@ -289,6 +297,108 @@ describe('адаптер OpenAI-совместимого API', () => {
   });
 });
 
+describe('проверка связи', () => {
+  it('наружу уходит константа, а не данные проекта', async () => {
+    // Иначе проверка связи стала бы способом отправить наружу
+    // содержимое проекта действием, которое выглядит технической
+    // проверкой (дизайн, 8.2). Тело сравнивается целиком.
+    const fetchMock = okWith('{"tasks":[]}');
+
+    await suggester().probe(signal());
+
+    expect(bodyOf(fetchMock)).toEqual({
+      model: 'gpt-4o-mini',
+      max_tokens: PROBE_MAX_TOKENS,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `${TEXT_START}\n${PROBE_TEXT}\n${TEXT_END}` },
+      ],
+    });
+  });
+
+  it.each([
+    [200, ModelProbeOutcome.Ok],
+    [401, ModelProbeOutcome.Unauthorized],
+    [403, ModelProbeOutcome.Unauthorized],
+    [404, ModelProbeOutcome.NotFound],
+    [400, ModelProbeOutcome.BadRequest],
+    [429, ModelProbeOutcome.Unavailable],
+    [500, ModelProbeOutcome.Unavailable],
+  ])('ответ %i даёт исход %s', async (status, outcome) => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ choices: [{ message: { content: 'ок' } }] }), { status }),
+        ),
+    );
+
+    expect((await suggester().probe(signal())).outcome).toBe(outcome);
+  });
+
+  it('пустой список задач — успех: текст без задач законен', async () => {
+    okWith('{"tasks":[]}');
+
+    expect((await suggester().probe(signal())).outcome).toBe(ModelProbeOutcome.Ok);
+  });
+
+  it('ответ без содержимого — ответил, но не тем', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"choices":[]}')));
+
+    expect((await suggester().probe(signal())).outcome).toBe(ModelProbeOutcome.BadResponse);
+  });
+
+  it('узел, не ответивший вовсе, даёт недоступность без кода', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('сеть молчит')));
+
+    expect(await suggester().probe(signal())).toMatchObject({
+      outcome: ModelProbeOutcome.Unavailable,
+      status: null,
+    });
+  });
+
+  it('тело чужого ответа в результат не попадает', async () => {
+    // В нём бывает и эхо присланного, и «key sk-…abc is revoked», а
+    // иногда и сам ключ в сообщении о неверном заголовке (дизайн, 8.3).
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response('{"error":{"message":"key sk-утечка is revoked"}}', { status: 401 }),
+        ),
+    );
+
+    const result = await suggester({ apiKey: 'sk-утечка' }).probe(signal());
+
+    expect(JSON.stringify(result)).not.toContain('sk-утечка');
+    expect(result).toEqual({
+      outcome: ModelProbeOutcome.Unauthorized,
+      status: 401,
+      host: 'api.openai.com',
+      model: 'gpt-4o-mini',
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it('ключ предъявляется по той же схеме, что и разбивке', async () => {
+    const fetchMock = okWith('{"tasks":[]}');
+
+    await suggester({ authScheme: ModelAuthScheme.ApiKey, apiKey: 'ключ' }).probe(signal());
+
+    expect(headersOf(fetchMock)).toMatchObject({ Authorization: 'Api-Key ключ' });
+  });
+
+  it('переадресацию не выполняет и здесь', async () => {
+    const fetchMock = okWith('{"tasks":[]}');
+
+    await suggester().probe(signal());
+
+    expect(initOf(fetchMock).redirect).toBe('error');
+  });
+});
+
 describe('выключенный предложитель', () => {
   it('говорит, что не настроен, и в сеть не ходит', async () => {
     const fetchMock = vi.fn();
@@ -297,6 +407,16 @@ describe('выключенный предложитель', () => {
     await expect(
       new DisabledSuggester().suggest('текст', AbortSignal.timeout(1)),
     ).rejects.toMatchObject({ code: SUGGESTER_DISABLED });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('проверка связи у выключенного порта в сеть не ходит', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new DisabledSuggester().probe(AbortSignal.timeout(1))).rejects.toMatchObject({
+      code: SUGGESTER_DISABLED,
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

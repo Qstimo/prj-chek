@@ -20,7 +20,9 @@ export function summariesHttpFixture() {
   const state = { projectId: '', otherProjectId: '', memberId: '', adminUserId: '' };
   const suggester: TaskSuggester & { suggest: ReturnType<typeof vi.fn> } = {
     placement: ModelServicePlacement.Local, model: 'тест', host: 'llm.internal', maxChars: 40_000,
-    isEnabled: true, suggest: vi.fn(),
+    // `probe` заглушкой: ни один тест не ходит в сеть, и проверка связи
+    // этих маршрутов не касается — она живёт в администрировании.
+    isEnabled: true, suggest: vi.fn(), probe: vi.fn(),
   };
   beforeAll(async () => {
     db = await startTestDatabase();

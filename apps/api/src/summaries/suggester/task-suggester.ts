@@ -1,4 +1,4 @@
-import type { ModelServicePlacement } from '@cairn/shared';
+import type { ModelProbeResult, ModelServicePlacement } from '@cairn/shared';
 
 /** Одна предложенная задача. Только формулировка — больше у чекпоинта нет. */
 export interface TaskSuggestion {
@@ -38,6 +38,16 @@ export interface TaskSuggester {
   /** Настроен ли: без адреса или ключа порт выключен. */
   readonly isEnabled: boolean;
   suggest(text: string, signal: AbortSignal): Promise<SuggestResult>;
+  /**
+   * Живая проверка связи. Наружу уходит константа, не данные проекта.
+   *
+   * В порту, а не в службе администрирования: без неё неверный ключ
+   * выясняется на первом созвоне, через дни после правки настройки
+   * (дизайн, 8.1). Отказ узла — **результат** проверки, а не исключение:
+   * исключением остаётся только выключенный порт, которому проверять
+   * нечего.
+   */
+  probe(signal: AbortSignal): Promise<ModelProbeResult>;
 }
 
 /** Токен внедрения порта: адаптер выбирается фабрикой при старте. */
