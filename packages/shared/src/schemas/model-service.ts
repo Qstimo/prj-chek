@@ -15,6 +15,24 @@ export const MODEL_SERVICE_INSECURE_URL = 'model_service_insecure_url';
 /** Проверка связи невозможна: узел не настроен. */
 export const MODEL_SERVICE_NOT_CONFIGURED = 'model_service_not_configured';
 
+/**
+ * Почему узел не работает — значения поля `blockedBy`.
+ *
+ * Код, а не фраза, по образцу `CARRY_OVER_NEEDS_LABEL`: код интерфейс
+ * разбирает, фразу можно переписать. Причины не сводятся в «не настроено»,
+ * потому что чинятся разным действием: ключ берут у провайдера, адрес
+ * вписывают, `CAIRN_ENCRYPTION_KEY` возвращают прежний, а галочку ставят
+ * обратно (дизайн, 4.1).
+ */
+/** Схема требует ключа, а ключа нет. */
+export const MODEL_SERVICE_SECRET_MISSING = 'secret_missing';
+/** Адреса узла нет: отправлять некуда. */
+export const MODEL_SERVICE_BASE_URL_MISSING = 'base_url_missing';
+/** Ключ есть, но расшифровать его нечем: подменён `CAIRN_ENCRYPTION_KEY`. */
+export const MODEL_SERVICE_SECRET_UNDECRYPTABLE = 'secret_undecryptable';
+/** Настройка полна, но человек снял галочку. */
+export const MODEL_SERVICE_DISABLED = 'disabled';
+
 /** Разобранный адрес службы: что писать в базу и что показывать человеку. */
 export interface ParsedModelServiceUrl {
   /** Адрес без замыкающей косой черты: к нему адаптер дописывает путь. */
