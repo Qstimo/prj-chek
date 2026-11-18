@@ -1,4 +1,12 @@
-import { AccessLevel, EnvironmentKind, PlatformKind, PlatformReleaseState, Section, SubjectKind } from '@cairn/shared';
+import {
+  AccessLevel,
+  EnvironmentKind,
+  PlatformKind,
+  PlatformReleaseState,
+  Section,
+  SubjectKind,
+  SummaryTaskOrigin,
+} from '@cairn/shared';
 import { ConflictException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -7,6 +15,7 @@ import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import {
   checkpointPlatforms,
+  chronicleEntries,
   environmentPlatforms,
   environments,
   grants,
@@ -15,6 +24,9 @@ import {
   roadmapCheckpoints,
   roadmapVersions,
   subjects,
+  summaries,
+  summaryTaskDrafts,
+  summaryTaskPlatforms,
   users,
   versionPlatformReleases,
 } from '../db/schema';
@@ -133,6 +145,39 @@ describe('репозиторий платформ', () => {
     return created!.id;
   }
 
+  /**
+   * Задача черновика саммари с тегом этой платформы.
+   *
+   * Вставкой целиком: репозитории саммари здесь нет вовсе, а нужен один
+   * факт — тег существует и ссылается `restrict`.
+   */
+  async function addDraftTag(platformId: string): Promise<void> {
+    const [entry] = await testDb.db
+      .insert(chronicleEntries)
+      .values({
+        projectId,
+        occurredOn: '2026-11-17',
+        title: 'Созвон',
+        content: 'текст',
+        createdBySubjectId: adminSubjectId,
+      })
+      .returning();
+    const [summary] = await testDb.db
+      .insert(summaries)
+      .values({ projectId, chronicleEntryId: entry!.id, createdBySubjectId: adminSubjectId })
+      .returning();
+    const [draft] = await testDb.db
+      .insert(summaryTaskDrafts)
+      .values({
+        summaryId: summary!.id,
+        title: 'Сделать',
+        position: 1,
+        origin: SummaryTaskOrigin.Human,
+      })
+      .returning();
+    await testDb.db.insert(summaryTaskPlatforms).values({ draftId: draft!.id, platformId });
+  }
+
   it('скрывает платформы от субъекта без выдачи', async () => {
     // Отсутствие доступа — 404, а не 403: ответ 403 сообщил бы, что
     // проект существует (ТЗ 4.2).
@@ -238,6 +283,38 @@ describe('репозиторий платформ', () => {
     );
 
     expect(removed.releases).toBe(2);
+  });
+
+  it('удаление платформы уносит её теги из черновиков саммари', async () => {
+    // Удаление платформы — штатный способ сменить её вид, и упереться в
+    // черновик оно не вправе.
+    const platformId = await createPlatform('API');
+    await addDraftTag(platformId);
+
+    await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, platformId));
+
+    expect(await testDb.rowsOf(summaryTaskPlatforms)).toHaveLength(0);
+    expect(await testDb.rowsOf(projectPlatforms)).toHaveLength(0);
+  });
+
+  it('число унесённых выпусков тегами черновика не растёт', async () => {
+    // Журнал называет числом потерю фактических дат релиза. Тег в
+    // черновике факта о релизе не составляет (дизайн, 4.4).
+    const platformId = await createPlatform('API');
+    await addDraftTag(platformId);
+    const [version] = await testDb.db
+      .insert(roadmapVersions)
+      .values({ projectId, label: 'v1.0', position: 1 })
+      .returning();
+    await testDb.db
+      .insert(versionPlatformReleases)
+      .values({ versionId: version!.id, platformId, state: PlatformReleaseState.Released });
+
+    const removed = await testDb.db.transaction((tx) =>
+      repository.remove(admin(), tx, projectId, platformId),
+    );
+
+    expect(removed.releases).toBe(1);
   });
 
   it('у платформы без выпусков число нулевое, а не пустое', async () => {

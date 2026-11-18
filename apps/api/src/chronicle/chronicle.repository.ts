@@ -19,6 +19,7 @@ import {
   chronicleEntries,
   summaries,
   summaryTaskDrafts,
+  summaryTaskPlatforms,
   type ChronicleEntry,
 } from '../db/schema';
 import { chronicleProjection } from './chronicle.projection';
@@ -134,6 +135,23 @@ export class ChronicleRepository {
 
     if (linked.length > 0) {
       const ids = linked.map((row) => row.id);
+
+      // Теги черновика уносятся своим кодом, а не вызовом
+      // `SummariesRepository`: тот уже зависит от этого репозитория, и
+      // обратная зависимость замкнула бы круг в инжекторе.
+      const drafts = await tx
+        .select({ id: summaryTaskDrafts.id })
+        .from(summaryTaskDrafts)
+        .where(inArray(summaryTaskDrafts.summaryId, ids));
+
+      if (drafts.length > 0) {
+        await tx.delete(summaryTaskPlatforms).where(
+          inArray(
+            summaryTaskPlatforms.draftId,
+            drafts.map((row) => row.id),
+          ),
+        );
+      }
 
       await tx.delete(summaryTaskDrafts).where(inArray(summaryTaskDrafts.summaryId, ids));
       await tx.delete(summaries).where(inArray(summaries.id, ids));

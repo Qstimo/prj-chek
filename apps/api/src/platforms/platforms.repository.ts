@@ -19,6 +19,7 @@ import {
   environmentPlatforms,
   environments,
   projectPlatforms,
+  summaryTaskPlatforms,
   versionPlatformReleases,
   type ProjectPlatformRow,
 } from '../db/schema';
@@ -177,6 +178,11 @@ export class PlatformsRepository {
    * у проекта с платформами живут фактические даты релизов, а удаление
    * платформы — штатный способ сменить её вид. Журналу нужно назвать
    * потерю числом, и считать его потом уже негде.
+   *
+   * Теги черновиков саммари уносятся тем же порядком, но числом **не
+   * называются**: выпуск — факт о релизе, а тег в черновике факта о
+   * релизе не составляет, его видно на экране и правится он руками
+   * (дизайн, 4.4).
    */
   async remove(
     subject: RequestSubject,
@@ -189,6 +195,7 @@ export class PlatformsRepository {
     const platform = await this.requireInProject(tx, projectId, platformId);
 
     await tx.delete(checkpointPlatforms).where(eq(checkpointPlatforms.platformId, platformId));
+    await tx.delete(summaryTaskPlatforms).where(eq(summaryTaskPlatforms.platformId, platformId));
     const releases = await tx
       .delete(versionPlatformReleases)
       .where(eq(versionPlatformReleases.platformId, platformId))

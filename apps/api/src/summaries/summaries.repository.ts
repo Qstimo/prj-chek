@@ -4,6 +4,7 @@ import {
   Section,
   SUMMARY_ALREADY_RELEASED,
   SummaryTaskOrigin,
+  type Platform,
   type ProjectMetadata,
   type SummaryCreate,
   type SummaryDetail,
@@ -22,10 +23,12 @@ import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
 import {
   chronicleEntries,
+  projectPlatforms,
   projects,
   roadmapVersions,
   summaries,
   summaryTaskDrafts,
+  summaryTaskPlatforms,
   type SummaryRow,
 } from '../db/schema';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
@@ -100,6 +103,7 @@ export class SummariesRepository {
       projectId,
       rows.map((row) => row.summary.releasedVersionId),
       executor,
+      await this.seesRoadmap(subject, projectId, executor),
     );
 
     return rows.map((row) => ({
@@ -190,29 +194,61 @@ export class SummariesRepository {
     }
 
     const existing = await this.tasksOf(tx, summaryId);
-    const origins = new Map(existing.map((task) => [task.id, task.origin]));
+    const kept = new Map(existing.map((task) => [task.id, task]));
+
+    // Набор тегов по позиции новой строки: сопоставлять по порядку
+    // `RETURNING` нельзя — стандарт его не обещает, а позиции внутри
+    // саммари уникальны по построению, их нумерует этот же метод.
+    const tagsByPosition = new Map<number, string[]>();
 
     const values = input.tasks.map((task, index) => {
       // Присланный `id`, которого в черновике этого саммари нет, — либо
       // исчезнувшая строка, либо чужая. Молча заводить её заново значило
       // бы сделать правку черновика способом увести строку из другого
       // саммари.
-      if (task.id !== undefined && !origins.has(task.id)) {
+      if (task.id !== undefined && !kept.has(task.id)) {
         throw new NotFoundException(`Задача ${task.id} в черновике не найдена.`);
+      }
+
+      const previous = task.id === undefined ? undefined : kept.get(task.id)!;
+      const platformIds = task.platformIds ?? previous?.platformIds ?? [];
+      const position = index + 1;
+
+      if (platformIds.length > 0) {
+        tagsByPosition.set(position, [...new Set(platformIds)]);
       }
 
       return {
         summaryId,
         title: task.title,
-        position: index + 1,
-        origin: task.id === undefined ? SummaryTaskOrigin.Human : origins.get(task.id)!,
+        // Отсутствие поля означает «не трогать»: редактор субъекта без
+        // выдачи на роадмап чипов не видит и набор не отправляет, и его
+        // правка формулировки не вправе стереть чужую работу. У новой
+        // строки сохранять нечего — она пуста (дизайн, 3.3).
+        url: task.url === undefined ? (previous?.url ?? null) : task.url,
+        position,
+        origin: task.id === undefined ? SummaryTaskOrigin.Human : previous!.origin,
       };
     });
 
-    await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
+    await this.clearTasks(tx, summaryId);
 
     if (values.length > 0) {
-      await tx.insert(summaryTaskDrafts).values(values);
+      const inserted = await tx
+        .insert(summaryTaskDrafts)
+        .values(values)
+        .returning({ id: summaryTaskDrafts.id, position: summaryTaskDrafts.position });
+
+      const tags = inserted.flatMap((row) =>
+        (tagsByPosition.get(row.position) ?? []).map((platformId) => ({
+          draftId: row.id,
+          platformId,
+        })),
+      );
+
+      if (tags.length > 0) {
+        await tx.insert(summaryTaskPlatforms).values(tags);
+      }
     }
 
     const [updated] = await tx
@@ -292,11 +328,14 @@ export class SummariesRepository {
     }
 
     if (titles.length > 0) {
-      await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
+      await this.clearTasks(tx, summaryId);
+      // Ни ссылки, ни тегов: из вывода модели берётся только
+      // формулировка, и назвать платформу ей нечем (дизайн, 1.1).
       await tx.insert(summaryTaskDrafts).values(
         titles.map((title, index) => ({
           summaryId,
           title,
+          url: null,
           position: index + 1,
           origin: SummaryTaskOrigin.Model,
         })),
@@ -337,7 +376,7 @@ export class SummariesRepository {
     const row = await this.requireForWrite(subject, tx, projectId, summaryId);
     const detail = await this.detailOf(subject, tx, row);
 
-    await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
+    await this.clearTasks(tx, summaryId);
     await tx.delete(summaries).where(eq(summaries.id, summaryId));
 
     return detail;
@@ -392,12 +431,75 @@ export class SummariesRepository {
       .where(eq(summaryTaskDrafts.summaryId, summaryId))
       .orderBy(asc(summaryTaskDrafts.position));
 
+    const tags = await this.tagsOf(
+      executor,
+      rows.map((row) => row.id),
+    );
+
     return rows.map((row) => ({
       id: row.id,
       title: row.title,
       position: row.position,
       origin: row.origin,
+      url: row.url,
+      platformIds: tags.get(row.id) ?? [],
     }));
+  }
+
+  /**
+   * Теги всех строк черновика — одним запросом, а не по строке.
+   *
+   * Порядок внутри набора — порядок платформ проекта, как у тегов
+   * чекпоинта (`RoadmapRepository.tagsOf`): без него набор приходил бы
+   * в порядке вставки, и две одинаковые разметки выглядели бы разными.
+   */
+  private async tagsOf(executor: Executor, draftIds: string[]): Promise<Map<string, string[]>> {
+    if (draftIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await executor
+      .select({
+        draftId: summaryTaskPlatforms.draftId,
+        platformId: summaryTaskPlatforms.platformId,
+      })
+      .from(summaryTaskPlatforms)
+      .innerJoin(projectPlatforms, eq(projectPlatforms.id, summaryTaskPlatforms.platformId))
+      .where(inArray(summaryTaskPlatforms.draftId, draftIds))
+      .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt));
+
+    const tags = new Map<string, string[]>();
+
+    for (const row of rows) {
+      tags.set(row.draftId, [...(tags.get(row.draftId) ?? []), row.platformId]);
+    }
+
+    return tags;
+  }
+
+  /**
+   * Уносит черновик саммари целиком: сначала теги, потом строки.
+   *
+   * Один помощник на три замены и удаление: на ссылках `restrict`, и
+   * забытый порядок в одном из четырёх мест упёрся бы в целостность — то
+   * есть сломал бы не теги, а само удаление.
+   */
+  private async clearTasks(tx: Transaction, summaryId: string): Promise<void> {
+    const ids = await tx
+      .select({ id: summaryTaskDrafts.id })
+      .from(summaryTaskDrafts)
+      .where(eq(summaryTaskDrafts.summaryId, summaryId));
+
+    if (ids.length > 0) {
+      await tx.delete(summaryTaskPlatforms).where(
+        inArray(
+          summaryTaskPlatforms.draftId,
+          ids.map((row) => row.id),
+        ),
+      );
+    }
+
+    await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
   }
 
   /**
@@ -473,11 +575,16 @@ export class SummariesRepository {
       .limit(1);
 
     const tasks = await this.tasksOf(executor, row.id);
+    // Уровень роадмапа резолвится один раз на сборку детали: три поля
+    // того же гейта дали бы три запроса прав, а деталь собирается на
+    // каждое сохранение черновика (дизайн, 6.3).
+    const seesRoadmap = await this.seesRoadmap(subject, row.projectId, executor);
     const labels = await this.releasedLabels(
       subject,
       row.projectId,
       [row.releasedVersionId],
       executor,
+      seesRoadmap,
     );
 
     return {
@@ -500,8 +607,35 @@ export class SummariesRepository {
       // (дизайн, раздел 2.5).
       isTextStale:
         row.suggestedTextAt !== null && entry.updatedAt.getTime() > row.suggestedTextAt.getTime(),
-      suggestedVersionLabel: await this.suggestedLabel(subject, row.projectId, executor),
+      suggestedVersionLabel: await this.suggestedLabel(
+        subject,
+        row.projectId,
+        executor,
+        seesRoadmap,
+      ),
+      platforms: await this.platformsOf(subject, row.projectId, executor, seesRoadmap),
     };
+  }
+
+  /**
+   * Платформы проекта для чипов тегов — только при `Roadmap ≥ metadata`.
+   *
+   * Пустой список означает «показывать нечего» и накрывает два случая
+   * намеренно неотличимо: у проекта нет платформ либо у субъекта нет
+   * выдачи на роадмап. Отличимость второго и была бы утечкой признака
+   * (дизайн, 3.2).
+   */
+  private async platformsOf(
+    subject: RequestSubject,
+    projectId: string,
+    executor: Executor,
+    seesRoadmap: boolean,
+  ): Promise<Platform[]> {
+    if (!seesRoadmap) {
+      return [];
+    }
+
+    return this.roadmap.platformsForProject(subject, projectId, executor);
   }
 
   /** Число задач по каждому саммари — одним запросом, а не N+1. */
@@ -527,12 +661,17 @@ export class SummariesRepository {
    *
    * Без выдачи на роадмап карта пуста, и «ушло в роадмап» остаётся видно
    * само по себе: это состояние потока, а не данные роадмапа.
+   *
+   * Признак видимости приходит параметром: его резолвит вызывающая
+   * сторона один раз на всю сборку — иначе каждое поле того же гейта
+   * добавляло бы свой запрос прав (дизайн, 6.3).
    */
   private async releasedLabels(
     subject: RequestSubject,
     projectId: string,
     versionIds: (string | null)[],
     executor: Executor,
+    seesRoadmap: boolean,
   ): Promise<Map<string, string>> {
     const ids = [...new Set(versionIds.filter((id): id is string => id !== null))];
 
@@ -540,7 +679,7 @@ export class SummariesRepository {
       return new Map();
     }
 
-    if (!(await this.seesRoadmap(subject, projectId, executor))) {
+    if (!seesRoadmap) {
       return new Map();
     }
 
@@ -562,8 +701,9 @@ export class SummariesRepository {
     subject: RequestSubject,
     projectId: string,
     executor: Executor,
+    seesRoadmap: boolean,
   ): Promise<string | null> {
-    if (!(await this.seesRoadmap(subject, projectId, executor))) {
+    if (!seesRoadmap) {
       return null;
     }
 
