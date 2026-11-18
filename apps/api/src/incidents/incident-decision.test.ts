@@ -20,10 +20,13 @@ describe('решение об инциденте', () => {
     expect(decideIncident({ ...CALM, health: HealthState.Down })).toBe(IncidentAction.Open);
   });
 
-  it('упавший адрес с открытым инцидентом не открывает второй', () => {
-    // Иначе пуш повторялся бы каждые пятнадцать минут.
+  it('упавший адрес с открытым инцидентом дописывает ход, а не открывает второй', () => {
+    // Второго инцидента быть не должно — иначе пуш повторялся бы каждые
+    // пятнадцать минут. Но и «ничего не делать» было неправдой: причина
+    // замерзала на открытии, и «HTTP 404» стоял в истории шесть суток,
+    // хотя адрес давно отвечал другим.
     expect(decideIncident({ ...CALM, health: HealthState.Down, hasOpenIncident: true })).toBe(
-      IncidentAction.None,
+      IncidentAction.Touch,
     );
   });
 
@@ -61,6 +64,18 @@ describe('решение об инциденте', () => {
     expect(decideIncident({ ...CALM, health: HealthState.Down, isArchived: true })).toBe(
       IncidentAction.None,
     );
+  });
+
+  it('пауза и архив не мешают дописывать ход открытого падения', () => {
+    // То же правило, что у закрытия: пауза и архив гасят только открытие.
+    // Инцидент уже есть, адрес действительно не отвечает, и запись об
+    // этом никого не будит — пуш уходит на открытии и закрытии.
+    expect(
+      decideIncident({ ...CALM, health: HealthState.Down, isPaused: true, hasOpenIncident: true }),
+    ).toBe(IncidentAction.Touch);
+    expect(
+      decideIncident({ ...CALM, health: HealthState.Down, isArchived: true, hasOpenIncident: true }),
+    ).toBe(IncidentAction.Touch);
   });
 
   it('архивный проект всё равно закрывает открытый инцидент', () => {

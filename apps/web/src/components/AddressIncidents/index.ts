@@ -1,10 +1,12 @@
 export { AddressIncidents } from './AddressIncidents';
 export {
-  dayTextOf,
+  checksTextOf,
   downSinceTextOf,
   downtimeTextOf,
-  durationTextOf,
+  exactDurationTextOf,
   fallCountTextOf,
+  incidentRangeTextOf,
+  recoveryTextOf,
   uptimeTextOf,
 } from './utils';
 export type { IProps } from './types';

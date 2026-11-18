@@ -77,10 +77,22 @@ export class IncidentsService {
       }
 
       if (action === IncidentAction.Open) {
-        const incident = await this.openUnlessRaced(state);
+        const incident = await this.openUnlessRaced(state, now);
 
         if (incident) {
           events.push(eventOf(IncidentEventKind.Opened, state, incident));
+        }
+
+        continue;
+      }
+
+      if (action === IncidentAction.Touch) {
+        try {
+          // Молча: события тут нет и быть не должно — пуш уходит на
+          // открытии и закрытии, а это запись наблюдения.
+          await this.repository.touch(state.domainId, state.healthError, now);
+        } catch (cause) {
+          this.logger.warn(`Ход падения адреса ${state.name} не записан: ${cause}`);
         }
 
         continue;
@@ -117,9 +129,10 @@ export class IncidentsService {
    */
   private async openUnlessRaced(
     state: AddressState,
+    at: Date,
   ): Promise<{ startedAt: Date; resolvedAt: Date | null; cause: string | null } | null> {
     try {
-      return await this.repository.open(state.domainId, state.healthError);
+      return await this.repository.open(state.domainId, state.healthError, at);
     } catch (cause) {
       const raced = (await this.repository.openByDomain()).get(state.domainId);
 

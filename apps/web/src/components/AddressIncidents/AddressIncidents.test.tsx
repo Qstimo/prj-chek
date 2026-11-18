@@ -20,6 +20,9 @@ const OPEN_INCIDENT: Incident = {
   startedAt: '2026-10-20T14:20:00.000Z',
   resolvedAt: null,
   cause: 'HTTP 500',
+  lastCause: 'HTTP 500',
+  lastDownAt: '2026-10-20T14:35:00.000Z',
+  checks: 2,
 };
 
 const PAST_INCIDENT: Incident = {
@@ -71,11 +74,14 @@ describe('инциденты адреса', () => {
     expect(screen.getByText(/падал 1 раз за 30 дней/)).toBeInTheDocument();
   });
 
-  it('список закрытых раскрывается', async () => {
+  it('список закрытых раскрывается и называет время падения', async () => {
+    // Один день без времени не давал сопоставить падение ни с деплоем,
+    // ни с письмом.
     render(<AddressIncidents incidents={{ ...EMPTY, past: [PAST_INCIDENT], fallsInWindow: 1 }} />);
     await userEvent.click(screen.getByText(/падал/));
 
-    expect(screen.getByText(/40 минут/)).toBeInTheDocument();
+    expect(screen.getByText(/19\.10\.2026, 13:00 → 13:40/)).toBeInTheDocument();
+    expect(screen.getByText(/40 мин/)).toBeInTheDocument();
   });
 
   it('считает все падения, а не только показанные: список усечён сервером', () => {

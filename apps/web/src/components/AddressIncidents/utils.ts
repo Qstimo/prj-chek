@@ -1,8 +1,5 @@
 import type { Incident } from '@cairn/shared';
 
-const MINUTE_MS = 60 * 1000;
-const HOUR_MS = 60 * MINUTE_MS;
-
 const MINUTE_S = 60;
 const HOUR_S = 60 * MINUTE_S;
 const DAY_S = 24 * HOUR_S;
@@ -95,30 +92,94 @@ export function uptimeTextOf(uptime: number): string {
   return `${percent.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`;
 }
 
-/** Длительность закрытого инцидента: минуты до часа, дальше часы. */
-export function durationTextOf(incident: Incident): string {
+/** Время по московскому формату: «11:20». */
+function timeOf(at: Date): string {
+  return at.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * Отрезок падения целиком: «17.11.2026, 11:20 → 12:03».
+ *
+ * Дата конца пишется только тогда, когда он пришёлся на другой день:
+ * иначе строка вдвое длиннее без единой новой мысли. А без неё
+ * трёхсуточное падение читалось бы как сорокаминутное.
+ */
+export function incidentRangeTextOf(incident: Incident): string {
+  const from = new Date(incident.startedAt);
+  const start = `${from.toLocaleDateString('ru-RU')}, ${timeOf(from)}`;
+
+  if (!incident.resolvedAt) {
+    return `${start} → не закрыто`;
+  }
+
+  const to = new Date(incident.resolvedAt);
+  const end =
+    to.toDateString() === from.toDateString()
+      ? timeOf(to)
+      : `${to.toLocaleDateString('ru-RU')}, ${timeOf(to)}`;
+
+  return `${start} → ${end}`;
+}
+
+/**
+ * Длительность падения без округления до старшей единицы.
+ *
+ * Отличается от {@link downtimeTextOf} намеренно: сводка за окно
+ * отвечает на вопрос «много ли», и там две старшие единицы — то, что
+ * нужно. Отдельное падение отвечает на вопрос «сколько именно», и
+ * «159 часов» вместо «6 д 16 ч 12 мин» прячет ответ.
+ */
+export function exactDurationTextOf(incident: Incident): string {
   if (!incident.resolvedAt) {
     return '';
   }
 
-  const elapsed = new Date(incident.resolvedAt).getTime() - new Date(incident.startedAt).getTime();
+  const seconds = Math.max(
+    0,
+    Math.round(
+      (new Date(incident.resolvedAt).getTime() - new Date(incident.startedAt).getTime()) / 1000,
+    ),
+  );
 
-  if (elapsed < MINUTE_MS) {
-    return 'меньше минуты';
+  if (seconds < MINUTE_S) {
+    // Мигнувший на полминуты адрес и лежавший минуту — разные события.
+    return `${seconds} с`;
   }
 
-  if (elapsed < HOUR_MS) {
-    const minutes = Math.round(elapsed / MINUTE_MS);
+  const parts = [
+    Math.floor(seconds / DAY_S) > 0 ? `${Math.floor(seconds / DAY_S)} д` : null,
+    Math.floor((seconds % DAY_S) / HOUR_S) > 0
+      ? `${Math.floor((seconds % DAY_S) / HOUR_S)} ч`
+      : null,
+    Math.floor((seconds % HOUR_S) / MINUTE_S) > 0
+      ? `${Math.floor((seconds % HOUR_S) / MINUTE_S)} мин`
+      : null,
+  ].filter((part): part is string => part !== null);
 
-    return `${minutes} ${pluralOf(minutes, ['минуту', 'минуты', 'минут'])}`;
+  return parts.join(' ');
+}
+
+/**
+ * Вилка возвращения: «ответил между 12:01 и 12:03».
+ *
+ * Прогон идёт раз в четверть часа, и момент закрытия — это время
+ * проверки, а не время события: адрес поднялся где-то между последней
+ * упавшей проверкой и ответившей. Назвать одно из них моментом
+ * возвращения значило бы выдать шаг прогона за точность измерения.
+ *
+ * @returns `null`, если вилки нет: падение открыто либо строка заведена
+ * до появления подробностей и последней упавшей проверки не помнит.
+ */
+export function recoveryTextOf(incident: Incident): string | null {
+  if (!incident.resolvedAt || !incident.lastDownAt) {
+    return null;
   }
 
-  const hours = Math.round(elapsed / HOUR_MS);
-
-  return `${hours} ${pluralOf(hours, ['час', 'часа', 'часов'])}`;
+  return `ответил между ${timeOf(new Date(incident.lastDownAt))} и ${timeOf(new Date(incident.resolvedAt))}`;
 }
 
-/** День падения для строки списка. */
-export function dayTextOf(startedAt: string): string {
-  return new Date(startedAt).toLocaleDateString('ru-RU');
+/** «подтверждено 3 проверками» — сколько проверок застали адрес упавшим. */
+export function checksTextOf(checks: number): string {
+  return `подтверждено ${checks} ${pluralOf(checks, ['проверкой', 'проверками', 'проверками'])}`;
 }
+

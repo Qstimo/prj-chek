@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 import { environmentDomains } from './environments';
 
@@ -30,6 +30,24 @@ export const addressIncidents = pgTable(
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     /** Причина на момент падения; могла и не определиться. */
     cause: text('cause'),
+    /**
+     * Причина на последней проверке, заставшей адрес упавшим.
+     *
+     * Вторая колонка, а не правка первой: падение длится часами, и
+     * «с чего началось» и «чем кончилось» — разные вопросы. Пока
+     * колонка была одна, причина замерзала на открытии.
+     */
+    lastCause: text('last_cause'),
+    /**
+     * Время последней проверки, заставшей адрес упавшим.
+     *
+     * Вместе с `resolved_at` ограничивает момент возвращения сверху и
+     * снизу: адрес поднялся где-то между ними. Точнее прогон не
+     * измеряет, и делать вид, что измеряет, нельзя.
+     */
+    lastDownAt: timestamp('last_down_at', { withTimezone: true }),
+    /** Сколько проверок подтвердили падение, считая открывшую. */
+    checks: integer('checks').notNull().default(1),
   },
   (table) => [
     uniqueIndex('address_incidents_open')

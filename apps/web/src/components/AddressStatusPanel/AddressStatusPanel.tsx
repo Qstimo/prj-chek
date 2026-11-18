@@ -1,14 +1,16 @@
 'use client';
 
 import { Loader } from '@/components/Loader';
-import type { AddressIncidentHistory } from '@cairn/shared';
+import type { AddressIncidentHistory, Incident } from '@cairn/shared';
 
 import { useQueryAddressIncidents } from '@/api/hooks';
 import {
-  dayTextOf,
+  checksTextOf,
   downSinceTextOf,
   downtimeTextOf,
-  durationTextOf,
+  exactDurationTextOf,
+  incidentRangeTextOf,
+  recoveryTextOf,
 } from '@/components/AddressIncidents';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import {
@@ -75,6 +77,44 @@ export function AddressStatusPanel({ projectId, address, warnings, onClose }: IP
         />}
       </section>
     </Drawer>
+  );
+}
+
+/**
+ * Одно падение: отрезок, ход и граница возвращения.
+ *
+ * Три строки, а не одна: «день — длительность (причина)» отвечал только
+ * на вопрос «сколько», и то округлённо. Здесь по отдельности названы
+ * время начала и конца, точная длительность, причина в начале и в
+ * конце, число подтвердивших проверок и вилка возвращения.
+ *
+ * Причина конца пишется только тогда, когда отличается от начальной:
+ * «HTTP 500 → HTTP 500» — шум, а не наблюдение.
+ */
+function IncidentRow({ incident }: { incident: Incident }) {
+  const changed = incident.lastCause && incident.lastCause !== incident.cause;
+  const recovery = recoveryTextOf(incident);
+  const duration = exactDurationTextOf(incident);
+
+  return (
+    <li className="border-l-2 border-border pl-3">
+      <p className="text-sm tabular-nums">
+        {incidentRangeTextOf(incident)}
+        {duration && <span className="text-muted-foreground"> · {duration}</span>}
+      </p>
+
+      {incident.cause && (
+        <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+          {incident.cause}
+          {changed && ` → ${incident.lastCause}`}
+        </p>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        {checksTextOf(incident.checks)}
+        {recovery && ` · ${recovery}`}
+      </p>
+    </li>
   );
 }
 
@@ -155,13 +195,9 @@ function History({
       </dl>
 
       {history.incidents.length > 0 && (
-        <ul aria-label="Падения" className="space-y-0.5 text-xs text-muted-foreground">
+        <ul aria-label="Падения" className="space-y-2">
           {history.incidents.map((incident) => (
-            <li key={incident.id}>
-              {dayTextOf(incident.startedAt)} —{' '}
-              {incident.resolvedAt ? durationTextOf(incident) : 'не закрыто'}
-              {incident.cause ? ` (${incident.cause})` : ''}
-            </li>
+            <IncidentRow key={incident.id} incident={incident} />
           ))}
         </ul>
       )}
