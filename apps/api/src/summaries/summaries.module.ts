@@ -5,7 +5,7 @@ import { AccessModule } from '../access/access.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { ChronicleModule } from '../chronicle/chronicle.module';
-import { DbModule } from '../db/db.module';
+import { DATABASE, DbModule } from '../db/db.module';
 import { ModelServicesModule } from '../model-services/model-services.module';
 import { RoadmapModule } from '../roadmap/roadmap.module';
 import { SummariesController } from './summaries.controller';
@@ -18,6 +18,10 @@ import { FfmpegExtractor, ffmpegCommandsOf } from './transcription/ffmpeg.extrac
 import { RecordingStore } from './transcription/recording-store';
 import { transcriberSettings } from './transcription/settings';
 import { TRANSCRIBER, type Transcriber } from './transcription/transcriber';
+import {
+  TRANSCRIPTION_RUN_LOCK_DB,
+  TranscriptionRunnerService,
+} from './transcription/transcription-runner.service';
 import { TranscriptionRepository } from './transcription/transcription.repository';
 import { TranscriptionService } from './transcription/transcription.service';
 import { UnavailableExtractor } from './transcription/unavailable.extractor';
@@ -50,6 +54,13 @@ import { YandexSpeechKitTranscriber } from './transcription/yandex-speechkit.tra
     // (дизайн, 5).
     TranscriptionRepository,
     TranscriptionService,
+    TranscriptionRunnerService,
+    // Замку тика нужно соединение на всё его время. В развёртывании оно
+    // берётся из того же пула, что рабочие запросы (их там десяток, одного
+    // не жалко); отдельным токеном он объявлен затем, что в тестах рабочий
+    // пул состоит из единственного соединения — занять его значило бы
+    // запереть сам прогон.
+    { provide: TRANSCRIPTION_RUN_LOCK_DB, useExisting: DATABASE },
     // Две фабрики, и **ни одна не читает настройку другой**: порты
     // выключаются независимо, потому что различны по природе — расшифровка
     // уходит наружу и стоит денег, извлечение идёт на нашей машине

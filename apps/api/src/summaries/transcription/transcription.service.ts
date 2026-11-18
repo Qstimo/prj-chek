@@ -602,8 +602,15 @@ function isLostAccess(cause: unknown): boolean {
   return cause instanceof InsufficientLevelError || cause instanceof SectionNotVisibleError;
 }
 
-/** Строит действующее лицо журнала из субъекта запроса. */
-function actorOf(subject: RequestSubject): AuditActor {
+/**
+ * Строит действующее лицо журнала из субъекта запроса.
+ *
+ * Экспортируется ради прогона: записи о передаче и о неудаче пишет он, но
+ * **действующее лицо у них то же** — человек, попросивший расшифровку, — и
+ * второй способ его собрать разошёлся бы с этим при первой правке.
+ * Системного лица здесь нет намеренно (дизайн, 6.4).
+ */
+export function actorOf(subject: RequestSubject): AuditActor {
   return {
     kind: subject.kind as unknown as Exclude<AuditSubjectKind, AuditSubjectKind.System>,
     id: subject.id,

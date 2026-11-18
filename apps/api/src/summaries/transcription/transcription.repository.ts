@@ -360,13 +360,19 @@ export class TranscriptionRepository {
    *
    * Одной транзакцией: `audio_*` без возврата в `queued` читались бы как
    * «дорожка есть, а работа висит».
+   *
+   * Переводит **только из `extracting`**, и `false` означает «задачу успели
+   * закрыть». Это охрана, а не аккуратность: отмена закрывает строку, но
+   * идущий `ffmpeg` не убивает, — и без условия дошедшее до конца
+   * извлечение вернуло бы отменённую задачу в очередь, то есть отправило бы
+   * запись наружу **после** отмены.
    */
   async markExtracted(
     tx: Transaction,
     jobId: string,
     audio: { path: string; bytes: number; type: string },
-  ): Promise<void> {
-    await tx
+  ): Promise<boolean> {
+    const updated = await tx
       .update(transcriptionJobs)
       .set({
         state: TranscriptionState.Queued,
@@ -374,7 +380,15 @@ export class TranscriptionRepository {
         audioBytes: audio.bytes,
         audioType: audio.type,
       })
-      .where(eq(transcriptionJobs.id, jobId));
+      .where(
+        and(
+          eq(transcriptionJobs.id, jobId),
+          eq(transcriptionJobs.state, TranscriptionState.Extracting),
+        ),
+      )
+      .returning({ id: transcriptionJobs.id });
+
+    return updated.length > 0;
   }
 
   /**
