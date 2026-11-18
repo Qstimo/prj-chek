@@ -6,6 +6,8 @@ import {
   Section,
   SummaryTaskOrigin,
   ModelServicePlacement,
+  TranscriberKind,
+  TranscriptionState,
   type SummaryDetail,
   type TaskSuggesterInfo,
 } from '@cairn/shared';
@@ -70,6 +72,40 @@ const WITH_TASKS: SummaryDetail = {
   suggester: { name: 'external', model: 'gpt-4o-mini', at: '2026-11-16T10:00:00.000Z', dropped: 0 },
 };
 
+/** Саммари, родившееся из записи созвона: исходник убран на `done`. */
+const FROM_RECORDING: SummaryDetail = {
+  ...TEXT_ONLY,
+  recording: {
+    bytes: 11_534_336,
+    mediaType: 'audio/ogg',
+    uploadBytes: 566_231_040,
+    uploadType: 'video/mp4',
+    isSourceRemoved: true,
+    uploadedAt: '2026-11-17T10:00:00.000Z',
+  },
+  transcription: {
+    id: '77777777-7777-7777-7777-777777777777',
+    projectId: PROJECT_ID,
+    projectName: 'CAIRN',
+    summaryId: SUMMARY_ID,
+    occurredOn: null,
+    title: null,
+    state: TranscriptionState.Done,
+    transcriber: TranscriberKind.External,
+    model: 'general',
+    host: 'stt.api.cloud.yandex.net',
+    uploadBytes: 566_231_040,
+    uploadType: 'video/mp4',
+    audioBytes: 11_534_336,
+    audioType: 'audio/ogg',
+    hasRecording: true,
+    failureCode: null,
+    startedAt: '2026-11-17T10:00:00.000Z',
+    sentAt: '2026-11-17T10:04:12.000Z',
+    finishedAt: '2026-11-17T10:12:00.000Z',
+  },
+};
+
 const RELEASED_DETAIL: SummaryDetail = {
   ...WITH_TASKS,
   isReleased: true,
@@ -111,6 +147,11 @@ function mutation() {
   return { mutate: vi.fn(), isPending: false, error: null } as never;
 }
 
+/** Шпион `mutate` у подменённой мутации: мок объявлен как `never`. */
+function mutateOf(stub: unknown): ReturnType<typeof vi.fn> {
+  return (stub as { mutate: ReturnType<typeof vi.fn> }).mutate;
+}
+
 /** Мутация, уже вернувшая отказ с кодом из контракта. */
 function failed(code: string, extra: Record<string, unknown> = {}) {
   return {
@@ -144,6 +185,7 @@ beforeEach(() => {
   vi.mocked(hooks.useMutationSaveSummaryTasks).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationReleaseSummary).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationUpdateChronicleEntry).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationRetryTranscription).mockReturnValue(mutation());
 });
 
 describe('экран саммари', () => {
@@ -474,6 +516,41 @@ describe('экран саммари', () => {
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByLabelText('Содержимое')).toHaveValue('обсудили сроки');
+  });
+
+  it('у саммари из записи есть плеер дорожки', () => {
+    // Человек загружал видео, а слушает звук: ручка отдаёт дорожку.
+    renderScreen(FROM_RECORDING, LOCAL_SUGGESTER);
+
+    expect(screen.getByTestId('recording-audio')).toHaveAttribute(
+      'src',
+      `/api/projects/${PROJECT_ID}/summaries/${SUMMARY_ID}/recording`,
+    );
+    expect(screen.getByText(/дорожка 11 МБ/)).toBeInTheDocument();
+  });
+
+  it('у набранного руками саммари блока записи нет вовсе', () => {
+    // «Запись недоступна» у текста, который никто не записывал, было бы
+    // рассказом о записи, которой не существовало.
+    renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
+
+    expect(screen.queryByText('Запись')).not.toBeInTheDocument();
+    expect(screen.queryByText('Запись недоступна')).not.toBeInTheDocument();
+  });
+
+  it('повторная расшифровка уходит после подтверждения', async () => {
+    const retry = mutation();
+
+    vi.mocked(hooks.useMutationRetryTranscription).mockReturnValue(retry);
+    renderScreen(FROM_RECORDING, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Расшифровать снова' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Заменить текст' }));
+
+    expect(mutateOf(retry)).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      summaryId: SUMMARY_ID,
+    });
   });
 
   it('саммари из чужого проекта не раскрывается', () => {
