@@ -68,6 +68,20 @@ export interface AcceptedRecording {
   path: string;
   /** Посчитано по ходу приёма, а не взято из `Content-Length`. */
   bytes: number;
+  /**
+   * `OGG` с потоком Opus внутри.
+   *
+   * Отвечает приём, а не решение: признак читается **из подписи**, а
+   * подпись есть ровно здесь — в голове первого куска потока. Спрашивать
+   * его потом значило бы читать файл с диска второй раз ради восьми байт,
+   * которые уже были в руках.
+   *
+   * Нужен одному — `prepareDecision`: `OGG/Vorbis` службе отдать нельзя, а
+   * перекодировать можно, и различить их нечем, кроме этого признака
+   * (дизайн, 4.1 и 7.6). У остальных контейнеров всегда `false`, и это не
+   * «неизвестно»: вопрос задаётся только про `OGG`.
+   */
+  isOpus: boolean;
 }
 
 /**
@@ -172,12 +186,12 @@ export class RecordingStore {
     let moved = false;
 
     try {
-      const bytes = await this.drain(stream, partPath, uploadType, maxBytes);
+      const drained = await this.drain(stream, partPath, uploadType, maxBytes);
 
       await rename(partPath, join(root, name));
       moved = true;
 
-      return { path: name, bytes };
+      return { path: name, ...drained };
     } finally {
       if (!moved) {
         // ENOENT здесь законен: файл мог и не успеть появиться.
@@ -199,11 +213,12 @@ export class RecordingStore {
     partPath: string,
     uploadType: string,
     maxBytes: number,
-  ): Promise<number> {
+  ): Promise<{ bytes: number; isOpus: boolean }> {
     const file = createWriteStream(partPath);
     const head: Buffer[] = [];
     let headBytes = 0;
     let checked = false;
+    let isOpus = false;
     let bytes = 0;
 
     try {
@@ -228,7 +243,10 @@ export class RecordingStore {
           // Решение принимается, как только головы хватает, либо на конце
           // потока: короткий файл тоже обязан получить ответ.
           if (headBytes >= RECORDING_HEAD_BYTES) {
-            this.requireSignature(Buffer.concat(head), uploadType, stream);
+            const complete = Buffer.concat(head);
+
+            this.requireSignature(complete, uploadType, stream);
+            isOpus = hasOpusHead(complete);
             checked = true;
           }
         }
@@ -237,10 +255,13 @@ export class RecordingStore {
       }
 
       if (!checked) {
-        this.requireSignature(Buffer.concat(head), uploadType, stream);
+        const complete = Buffer.concat(head);
+
+        this.requireSignature(complete, uploadType, stream);
+        isOpus = hasOpusHead(complete);
       }
 
-      return bytes;
+      return { bytes, isOpus };
     } finally {
       await new Promise<void>((done) => file.close(() => done()));
     }
@@ -365,6 +386,19 @@ export class RecordingStore {
 
     return error;
   }
+}
+
+/**
+ * Виден ли в голове файла заголовок потока Opus.
+ *
+ * `OpusHead` лежит в первом пакете первой страницы `OGG`, то есть внутри
+ * тех же {@link RECORDING_HEAD_BYTES}, по которым проверяется подпись. Ищем
+ * подстроку, а не читаем страницу по полям: разбирать контейнер здесь нечем
+ * и незачем — на вопрос «Opus или Vorbis» этого хватает, а ошибка в сторону
+ * «не Opus» означает лишнее перекодирование, а не отказ.
+ */
+function hasOpusHead(head: Buffer): boolean {
+  return head.includes('OpusHead', 0, 'latin1');
 }
 
 /** `ENOENT`: файла нет. Законный случай, а не авария (дизайн, 3.5). */

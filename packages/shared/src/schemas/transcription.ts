@@ -192,6 +192,18 @@ export const TRANSCRIPTION_TIMED_OUT = 'transcription_timed_out';
 export const TRANSCRIPTION_CANCELLED = 'transcription_cancelled';
 /** По этому саммари расшифровка уже идёт. */
 export const TRANSCRIPTION_ALREADY_RUNNING = 'transcription_already_running';
+/**
+ * Выдачу отозвали, пока запись расшифровывалась (дизайн, 6.5).
+ *
+ * Кодом ответа не приходит никогда: право проверяется **на момент укладки
+ * текста**, то есть через минуты после того, как ручка ответила `202`.
+ * Поэтому это состояние задачи, а не отказ HTTP, — как и отказы извлечения.
+ *
+ * Единственный код, при котором файлы убираются, а не остаются: повторять
+ * **некому** — у субъекта больше нет права писать в этот проект, а значит
+ * нет и доступа к задаче.
+ */
+export const TRANSCRIPTION_NO_ACCESS = 'transcription_no_access';
 
 /** Тип данных контракта расшифровки. */
 export type TranscriptionJob = z.infer<typeof transcriptionJobSchema>;

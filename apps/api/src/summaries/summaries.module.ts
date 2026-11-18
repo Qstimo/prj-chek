@@ -18,6 +18,8 @@ import { FfmpegExtractor, ffmpegCommandsOf } from './transcription/ffmpeg.extrac
 import { RecordingStore } from './transcription/recording-store';
 import { transcriberSettings } from './transcription/settings';
 import { TRANSCRIBER, type Transcriber } from './transcription/transcriber';
+import { TranscriptionRepository } from './transcription/transcription.repository';
+import { TranscriptionService } from './transcription/transcription.service';
 import { UnavailableExtractor } from './transcription/unavailable.extractor';
 import { YandexSpeechKitTranscriber } from './transcription/yandex-speechkit.transcriber';
 
@@ -42,6 +44,12 @@ import { YandexSpeechKitTranscriber } from './transcription/yandex-speechkit.tra
     SummariesRepository,
     SummariesService,
     RecordingStore,
+    // Расшифровка живёт в **том же** модуле: это вторая итерация того же
+    // потока, а второй модуль рядом означал бы второй токен порта, вторую
+    // регистрацию и вторую точку, где можно забыть проверку права
+    // (дизайн, 5).
+    TranscriptionRepository,
+    TranscriptionService,
     // Две фабрики, и **ни одна не читает настройку другой**: порты
     // выключаются независимо, потому что различны по природе — расшифровка
     // уходит наружу и стоит денег, извлечение идёт на нашей машине

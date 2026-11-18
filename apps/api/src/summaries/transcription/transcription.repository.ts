@@ -17,8 +17,10 @@ import { DATABASE } from '../../db/db.module';
 import type { Database, Executor, Transaction } from '../../db/db.types';
 import {
   projects,
+  subjects,
   summaries,
   transcriptionJobs,
+  users,
   type TranscriptionJobRow,
 } from '../../db/schema';
 import { mediaPathsOf } from './media-paths';
@@ -57,6 +59,15 @@ export interface TranscriptionCreate extends TranscriptionService {
   uploadPath: string;
   uploadBytes: number;
   uploadType: string;
+  /**
+   * Дорожка, если извлечение не понадобилось вовсе.
+   *
+   * `null` — обычный случай: дорожки ещё нет, её сделает прогон. Непустое
+   * значение приходит от `prepareDecision`, ответившего `Pass`, и тогда это
+   * **тот же путь**, что `uploadPath`, — не копия файла. Отсюда правило
+   * уборки: равенство путей означает «убирать нечего» (дизайн, 2.1).
+   */
+  audio?: { path: string; bytes: number; type: string } | null;
 }
 
 /** Что уйдёт на уборку с диска после фиксации транзакции. */
@@ -114,6 +125,9 @@ export class TranscriptionRepository {
         uploadPath: input.uploadPath,
         uploadBytes: input.uploadBytes,
         uploadType: input.uploadType,
+        audioPath: input.audio?.path ?? null,
+        audioBytes: input.audio?.bytes ?? null,
+        audioType: input.audio?.type ?? null,
       })
       .returning();
 
@@ -208,9 +222,50 @@ export class TranscriptionRepository {
     jobId: string,
     executor: Executor = this.db,
   ): Promise<TranscriptionJob> {
-    const row = await this.requireJob(subject, executor, projectId, jobId);
+    const row = await this.requireRow(subject, executor, projectId, jobId);
 
     return this.projectionOf(executor, row);
+  }
+
+  /**
+   * Субъект, который попросил расшифровку, — для фонового прогона.
+   *
+   * Собирается тем же запросом, которым это делает `SessionGuard`
+   * (`subjects left join users`): прогон не действует «от системы», он
+   * работает правом человека, и второй путь записи «без проверки» был бы
+   * дыркой в модели прав (дизайн, 6.4).
+   *
+   * Отличие от guard'а одно и важное: `isRevoked` **читается**, а не
+   * ставится в `false`. Guard отозванного субъекта просто не пускает, а
+   * здесь он уже внутри — и отзыв обязан дойти до проверки права, иначе
+   * текст лёг бы в проект от лица, которого больше нет.
+   *
+   * `null` означает «субъекта не стало совсем»: строка задачи ссылается на
+   * `subjects` с `restrict`, так что это невозможно, пока задача жива, —
+   * проверка охраняет инвариант, а не ожидаемый случай.
+   */
+  async requesterOf(
+    subjectId: string,
+    executor: Executor = this.db,
+  ): Promise<RequestSubject | null> {
+    const [found] = await executor
+      .select({ subject: subjects, user: users })
+      .from(subjects)
+      .leftJoin(users, eq(users.subjectId, subjects.id))
+      .where(eq(subjects.id, subjectId))
+      .limit(1);
+
+    if (!found) {
+      return null;
+    }
+
+    return {
+      id: found.subject.id,
+      kind: found.subject.kind as unknown as RequestSubject['kind'],
+      label: found.subject.label,
+      isSuperadmin: found.user?.isSuperadmin ?? false,
+      isRevoked: found.subject.revokedAt !== null,
+    };
   }
 
   /**
@@ -330,7 +385,14 @@ export class TranscriptionRepository {
    * `prepareDecision`, и это второе место, где правило держится: решение
    * можно переписать, охрану забыть нельзя (дизайн, 2.6).
    */
-  async markSending(tx: Transaction, jobId: string, target: { host: string }): Promise<void> {
+  async markSending(
+    tx: Transaction,
+    jobId: string,
+    // Имя узла обнуляемо, как и колонка: у локального адаптера адрес может
+    // быть без имени хоста, и выдумывать его ради `not null` значило бы
+    // записать в журнал передачи неправду.
+    target: { host: string | null },
+  ): Promise<void> {
     const updated = await tx
       .update(transcriptionJobs)
       .set({ state: TranscriptionState.Sending, sentAt: new Date(), host: target.host })
@@ -403,7 +465,18 @@ export class TranscriptionRepository {
    * правило «исходник переживает любую неудачу» держалось бы на
    * внимательности.
    */
-  async markDone(tx: Transaction, jobId: string): Promise<{ sourcePath: string | null }> {
+  async markDone(
+    tx: Transaction,
+    jobId: string,
+    // Саммари первой расшифровки родилось в **этой же** транзакции, и
+    // связать строку с ним больше негде: до укладки текста саммари не
+    // существовало. У повторной связь уже стоит, и передавать нечего.
+    //
+    // Без этой связи задача после успеха осталась бы сиротой: удаление
+    // саммари ищет свои расшифровки по `summary_id` (`clearTranscriptions`),
+    // и дорожка не ушла бы с тома никогда.
+    summaryId?: string,
+  ): Promise<{ sourcePath: string | null }> {
     const [row] = await tx
       .select()
       .from(transcriptionJobs)
@@ -425,6 +498,7 @@ export class TranscriptionRepository {
       .set({
         state: TranscriptionState.Done,
         finishedAt: new Date(),
+        ...(summaryId === undefined ? {} : { summaryId }),
         ...(sourcePath === null ? {} : { uploadPath: null }),
       })
       .where(eq(transcriptionJobs.id, jobId));
@@ -444,7 +518,7 @@ export class TranscriptionRepository {
     projectId: string,
     jobId: string,
   ): Promise<RemovedMedia> {
-    const row = await this.requireJob(subject, tx, projectId, jobId);
+    const row = await this.requireRow(subject, tx, projectId, jobId);
 
     await tx.delete(transcriptionJobs).where(eq(transcriptionJobs.id, jobId));
 
@@ -465,8 +539,14 @@ export class TranscriptionRepository {
       .where(eq(transcriptionJobs.id, jobId));
   }
 
-  /** Задача проекта из адреса под правом записи на «Хронику». */
-  private async requireJob(
+  /**
+   * Строка задачи проекта из адреса под правом записи на «Хронику».
+   *
+   * Публична, в отличие от проекции: отмене нужен `external_id`, а
+   * удалению — состояние и код отказа для журнала, и ни того, ни другого в
+   * проекции нет намеренно (идентификатор чужой операции наружу не идёт).
+   */
+  async requireRow(
     subject: RequestSubject,
     executor: Executor,
     projectId: string,
