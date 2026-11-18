@@ -222,13 +222,19 @@ export class RecordingStore {
     let bytes = 0;
 
     try {
-      for await (const chunk of stream) {
+      // `destroyOnReturn: false` — не украшение, а условие названного
+      // отказа: обычное `for await` при выходе по исключению **разрушает
+      // поток**, а поток здесь — соединение запроса, и разрушенное
+      // соединение отвечает клиенту обрывом вместо `400` или `413`. Читать
+      // мы перестаём (`refuse` ниже), но сокет оставляем живым, пока по
+      // нему не уйдёт ответ.
+      for await (const chunk of stream.iterator({ destroyOnReturn: false })) {
         const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
 
         bytes += buffer.length;
 
         if (bytes > maxBytes) {
-          stream.destroy();
+          refuse(stream);
 
           throw new RecordingStoreFailure(
             RECORDING_TOO_LARGE,
@@ -284,7 +290,7 @@ export class RecordingStore {
     const family = uploadFamilyOf(head);
 
     if (family === null || !familyAcceptsType(family, uploadType)) {
-      stream.destroy();
+      refuse(stream);
 
       throw new RecordingStoreFailure(
         RECORDING_NOT_AUDIO,
@@ -386,6 +392,21 @@ export class RecordingStore {
 
     return error;
   }
+}
+
+/**
+ * Перестаёт читать поток, не разрушая его.
+ *
+ * Два гигабайта чужого формата на том не попадают — приём обрывается на
+ * первом куске, — но **разрушать** поток нельзя: это соединение запроса, и
+ * разрушенное соединение не донесёт до человека ни `400`, ни `413`, а
+ * покажет обрыв. Поэтому мы отцепляемся и ставим паузу; остаток тела
+ * клиент не допишет, потому что ответ уже уйдёт и соединение закроется.
+ * Так же поступает `raw-body` у `express`, и причина у него та же.
+ */
+function refuse(stream: Readable): void {
+  stream.unpipe?.();
+  stream.pause();
 }
 
 /**

@@ -168,12 +168,7 @@ export class TranscriptionRepository {
       throw new SectionNotVisibleError();
     }
 
-    const [source] = await tx
-      .select()
-      .from(transcriptionJobs)
-      .where(eq(transcriptionJobs.summaryId, summaryId))
-      .orderBy(desc(transcriptionJobs.startedAt))
-      .limit(1);
+    const source = await latestOf(tx, summaryId);
 
     if (!source?.audioPath) {
       // Накрывает и «текст вставили руками» (задач нет вовсе), и «дорожку
@@ -322,6 +317,37 @@ export class TranscriptionRepository {
       .orderBy(desc(transcriptionJobs.startedAt));
 
     return this.projectionsOf(this.db, rows);
+  }
+
+  /**
+   * Последняя задача расшифровки саммари либо `null`.
+   *
+   * Нужна отдаче дорожки и проекции деталей: «запись саммари» — это
+   * дорожка его последней задачи, и своих колонок под неё у `summaries` не
+   * появилось (дизайн, 2.2).
+   *
+   * Чужое саммари выглядит несуществующим — выборка по `(id, project_id)`:
+   * `403` сообщил бы, что объект существует.
+   */
+  async lastForSummary(
+    subject: RequestSubject,
+    projectId: string,
+    summaryId: string,
+    executor: Executor = this.db,
+  ): Promise<TranscriptionJobRow | null> {
+    await this.requireWrite(subject, projectId, executor);
+
+    const [summary] = await executor
+      .select({ id: summaries.id })
+      .from(summaries)
+      .where(and(eq(summaries.id, summaryId), eq(summaries.projectId, projectId)))
+      .limit(1);
+
+    if (!summary) {
+      throw new SectionNotVisibleError();
+    }
+
+    return latestOf(executor, summaryId);
   }
 
   /**
@@ -630,26 +656,62 @@ export class TranscriptionRepository {
       names.set(project.id, project.name);
     }
 
-    return rows.map((row) => ({
-      id: row.id,
-      projectId: row.projectId,
-      projectName: names.get(row.projectId) ?? '',
-      summaryId: row.summaryId,
-      occurredOn: row.occurredOn,
-      title: row.title,
-      state: row.state,
-      transcriber: row.transcriber,
-      model: row.model,
-      host: row.host,
-      uploadBytes: row.uploadBytes,
-      uploadType: row.uploadType,
-      audioBytes: row.audioBytes,
-      audioType: row.audioType,
-      hasRecording: row.audioPath !== null,
-      failureCode: row.failureCode,
-      startedAt: row.startedAt.toISOString(),
-      sentAt: row.sentAt?.toISOString() ?? null,
-      finishedAt: row.finishedAt?.toISOString() ?? null,
-    }));
+    return rows.map((row) => jobProjectionOf(row, names.get(row.projectId) ?? ''));
   }
+}
+
+/**
+ * Последняя задача саммари; `null` — расшифровок не было.
+ *
+ * Своей функцией, а не методом: её зовут и репозиторий расшифровок, и
+ * проекция деталей саммари, и второй порядок сортировки разошёлся бы с
+ * первым — «последняя» должна означать одно и то же в обоих местах.
+ */
+export async function latestOf(
+  executor: Executor,
+  summaryId: string,
+): Promise<TranscriptionJobRow | null> {
+  const [row] = await executor
+    .select()
+    .from(transcriptionJobs)
+    .where(eq(transcriptionJobs.summaryId, summaryId))
+    .orderBy(desc(transcriptionJobs.startedAt))
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
+ * Проекция строки задачи в контракт.
+ *
+ * Чистой функцией и экспортом, потому что её зовут из двух репозиториев:
+ * задачи видны и своей очередью, и деталью саммари, а две проекции одной
+ * строки разошлись бы на первой же новой колонке.
+ *
+ * Чего в проекции **нет**: `external_id` (чужой идентификатор операции
+ * наружу не идёт), путей файлов (вместо них признак `hasRecording`) и
+ * идентификатора субъекта.
+ */
+export function jobProjectionOf(row: TranscriptionJobRow, projectName: string): TranscriptionJob {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    projectName,
+    summaryId: row.summaryId,
+    occurredOn: row.occurredOn,
+    title: row.title,
+    state: row.state,
+    transcriber: row.transcriber,
+    model: row.model,
+    host: row.host,
+    uploadBytes: row.uploadBytes,
+    uploadType: row.uploadType,
+    audioBytes: row.audioBytes,
+    audioType: row.audioType,
+    hasRecording: row.audioPath !== null,
+    failureCode: row.failureCode,
+    startedAt: row.startedAt.toISOString(),
+    sentAt: row.sentAt?.toISOString() ?? null,
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+  };
 }

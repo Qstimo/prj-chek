@@ -1,12 +1,14 @@
 import {
   AuditSubjectKind,
   ChronicleSource,
+  RECORDING_MISSING,
   RECORDING_NOT_AUDIO,
   RECORDING_TOO_LARGE,
   TRANSCRIBER_DISABLED,
   TRANSCRIPTION_CANCELLED,
   TRANSCRIPTION_NO_ACCESS,
   TranscriptionState,
+  type TranscriberInfo,
   type TranscriptionJob,
   type TranscriptionRequest,
 } from '@cairn/shared';
@@ -16,6 +18,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   PayloadTooLargeException,
   type OnModuleInit,
 } from '@nestjs/common';
@@ -179,6 +182,84 @@ export class TranscriptionService implements OnModuleInit {
 
       throw cause;
     }
+  }
+
+  /**
+   * Настройки службы, видимые любому вошедшему.
+   *
+   * Явная проекция, а не свойства адаптера: ключ и каталог не должны иметь
+   * физической возможности утечь в ответ. Список принимаемых контейнеров
+   * считает **сервер** — вычитать его в браузере значило бы завести второе
+   * место, где живёт правило, и первым же расхождением показать человеку
+   * формат, который сервер отвергнет (дизайн, 5.1).
+   *
+   * У выключенной службы узла и модели нет: называть узел, куда ничего не
+   * уходит, значило бы врать подписью. И список пуст — загрузка не
+   * принимает ничего, а не «принимает, но некуда».
+   */
+  async transcriberInfo(): Promise<TranscriberInfo> {
+    const settings = transcriberSettings();
+    const isEnabled = this.transcriber.isEnabled;
+
+    return {
+      isEnabled,
+      kind: this.transcriber.kind,
+      host: isEnabled ? this.transcriber.host : null,
+      model: isEnabled ? this.transcriber.model || null : null,
+      maxUploadBytes: settings.maxUploadBytes,
+      maxSendBytes: this.transcriber.maxSendBytes,
+      canExtract: this.extractor.isAvailable,
+      acceptedTypes: isEnabled ? this.extractor.acceptedTypes : [],
+      audioBitrate: this.extractor.bitrate,
+    };
+  }
+
+  /**
+   * Контейнеры, которые **умеет** эта установка.
+   *
+   * Отличается от `acceptedTypes` настроек, и различие намеренное: тот
+   * список отвечает на «что можно загрузить сейчас» (у выключенной службы —
+   * ничего), а этот — на «какие контейнеры установка понимает», и он нужен
+   * телу отказа `415`, чтобы экран назвал форматы словами.
+   */
+  uploadTypesOf(): string[] {
+    return this.extractor.acceptedTypes;
+  }
+
+  /**
+   * Абсолютный путь дорожки саммари и её тип содержимого.
+   *
+   * Отдаётся **дорожка**, а не загруженный файл: отдавать полгигабайта
+   * видео, чтобы услышать спорную фразу, незачем, и ручки для исходника
+   * нет вовсе (дизайн, 3.3).
+   *
+   * Отсутствие файла — законный случай (поднялись из копии базы, том
+   * пересоздали), и он разбирается **при чтении**: проверять существование
+   * файла в проекции списка значило бы ходить на диск на каждую строку
+   * каждого списка ради сведения, важного ровно в один момент — когда
+   * человек нажал «слушать» (дизайн, 3.5).
+   */
+  async recordingOf(
+    subject: RequestSubject,
+    projectId: string,
+    summaryId: string,
+  ): Promise<{ path: string; mediaType: string }> {
+    const job = await this.repository.lastForSummary(subject, projectId, summaryId);
+
+    if (!job?.audioPath) {
+      throw this.missing();
+    }
+
+    try {
+      await this.store.size(job.audioPath);
+    } catch {
+      throw this.missing();
+    }
+
+    return {
+      path: this.store.absolutePathOf(job.audioPath),
+      mediaType: job.audioType ?? 'audio/ogg',
+    };
   }
 
   /** Очередь проекта: незакрытые и неудавшиеся задачи. */
@@ -547,6 +628,14 @@ export class TranscriptionService implements OnModuleInit {
     }
 
     return decision.action;
+  }
+
+  /** Записи нет: `404` с названным кодом, а не пустой ответ. */
+  private missing(): NotFoundException {
+    return new NotFoundException({
+      code: RECORDING_MISSING,
+      message: 'Запись этого саммари недоступна.',
+    });
   }
 
   /** Приём байтов с переводом отказов хранилища в коды ответа. */

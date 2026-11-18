@@ -22,6 +22,7 @@ import {
   TRANSCRIPTION_RUN_LOCK_DB,
   TranscriptionRunnerService,
 } from './transcription/transcription-runner.service';
+import { TranscriptionsController } from './transcription/transcriptions.controller';
 import { TranscriptionRepository } from './transcription/transcription.repository';
 import { TranscriptionService } from './transcription/transcription.service';
 import { UnavailableExtractor } from './transcription/unavailable.extractor';
@@ -43,7 +44,11 @@ import { YandexSpeechKitTranscriber } from './transcription/yandex-speechkit.tra
     RoadmapModule,
     ModelServicesModule,
   ],
-  controllers: [SummariesController, SummariesOverviewController],
+  // Порядок значим: `GET …/summaries/transcriptions` и
+  // `GET …/summaries/:id` живут на одном префиксе, и отвечает тот, кто
+  // объявлен раньше. Поставь расшифровки вторыми — и очередь попадала бы в
+  // маршрут саммари, получая `400` про негодный UUID.
+  controllers: [TranscriptionsController, SummariesController, SummariesOverviewController],
   providers: [
     SummariesRepository,
     SummariesService,

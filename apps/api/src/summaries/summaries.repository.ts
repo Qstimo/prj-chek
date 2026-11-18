@@ -31,11 +31,16 @@ import {
   summaryTaskPlatforms,
   transcriptionJobs,
   type SummaryRow,
+  type TranscriptionJobRow,
 } from '../db/schema';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
 import { nextVersionLabel } from './next-version-label';
 import { mediaPathsOf } from './transcription/media-paths';
-import type { RemovedMedia } from './transcription/transcription.repository';
+import {
+  jobProjectionOf,
+  latestOf,
+  type RemovedMedia,
+} from './transcription/transcription.repository';
 
 /**
  * Доступ к саммари созвонов и их черновикам задач.
@@ -606,6 +611,7 @@ export class SummariesRepository {
       .limit(1);
 
     const tasks = await this.tasksOf(executor, row.id);
+    const job = await latestOf(executor, row.id);
     // Уровень роадмапа резолвится один раз на сборку детали: три поля
     // того же гейта дали бы три запроса прав, а деталь собирается на
     // каждое сохранение черновика (дизайн, 6.3).
@@ -645,12 +651,15 @@ export class SummariesRepository {
         seesRoadmap,
       ),
       platforms: await this.platformsOf(subject, row.projectId, executor, seesRoadmap),
-      // Пока пусто у каждого саммари, и это верный ответ на сегодня:
-      // задачи расшифровки ещё никто не заводит, значит записи созвона
-      // ни у одного саммари нет. Поля заполнит проекция чанка 4 — там же,
-      // где появляется ручка, отдающая дорожку.
-      recording: null,
-      transcription: null,
+      // Два вычисляемых поля из последней задачи расшифровки: своих
+      // колонок под запись у `summaries` не появилось, и это главное
+      // решение дизайна расшифровки (2.2). Правка проекции, не схемы.
+      //
+      // Выдача не проверяется второй раз: задача принадлежит тому же
+      // проекту, и право на неё — то же `Chronicle ≥ write`, которое уже
+      // потребовал `requireForWrite` выше.
+      recording: recordingOf(job),
+      transcription: job === null ? null : jobProjectionOf(job, project?.name ?? ''),
     };
   }
 
@@ -777,6 +786,32 @@ function releasedOf(
   return {
     releasedVersionId: label === undefined ? null : versionId,
     releasedVersionLabel: label ?? null,
+  };
+}
+
+/**
+ * Запись созвона у саммари либо `null`.
+ *
+ * Запись — это **дорожка**: её человек слушает, и она хранится, пока живёт
+ * саммари. Пустой `audio_path` означает «слушать нечего»: либо текст
+ * вставили руками, либо расшифровка ещё не дошла до дорожки.
+ *
+ * `isSourceRemoved` вычисляется как «исходника нет, а дорожка есть», и
+ * гадать по типу содержимого нельзя: загруженный `mp3` мог и
+ * перекодироваться, если был крупным (дизайн, 3.3).
+ */
+function recordingOf(job: TranscriptionJobRow | null): SummaryDetail['recording'] {
+  if (job === null || job.audioPath === null || job.audioBytes === null || job.audioBytes <= 0) {
+    return null;
+  }
+
+  return {
+    bytes: job.audioBytes,
+    mediaType: job.audioType ?? 'audio/ogg',
+    uploadBytes: job.uploadBytes,
+    uploadType: job.uploadType,
+    isSourceRemoved: job.uploadPath === null,
+    uploadedAt: job.startedAt.toISOString(),
   };
 }
 
