@@ -1,6 +1,8 @@
 import { RECORDING_BROKEN, UPLOAD_TYPES } from '@cairn/shared';
 import { Logger } from '@nestjs/common';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { delimiter, dirname, join } from 'node:path';
 
 import {
   ExtractionFailure,
@@ -12,7 +14,7 @@ import {
 } from './extractor';
 import { ExtractStage, ffmpegFailureOf } from './ffmpeg-failure';
 import type { RecordingStore } from './recording-store';
-import { transcriberSettings } from './settings';
+import { FFMPEG_AUTO, FFMPEG_OFF, transcriberSettings } from './settings';
 
 /** Тип извлечённой дорожки: `OGG/Opus`, моно, 16 кГц. */
 const AUDIO_TYPE = 'audio/ogg';
@@ -240,6 +242,81 @@ export class FfmpegExtractor implements AudioExtractor {
 
     return new ExtractionFailure(code, `${message} (${code}).`);
   }
+}
+
+/**
+ * Разрешает настройку `CAIRN_RECORDING_FFMPEG` в пару исполняемых файлов.
+ *
+ * Зовётся **один раз при старте**, фабрикой порта: «есть ли исполняемый
+ * файл» — вопрос к файловой системе, и задавать его на каждую загрузку
+ * значило бы ходить на диск ради того, что за время жизни процесса не
+ * меняется (дизайн, 7.4).
+ *
+ * `null` означает «извлечение недоступно», и три повода неразличимы
+ * намеренно: `off`, отсутствие `ffmpeg` и отсутствие `ffprobe` рядом с ним.
+ * Человеку во всех трёх случаях говорится одно и то же, а установка
+ * остаётся рабочей, только уже.
+ *
+ * `ffprobe` обязателен вместе с `ffmpeg`: без него не ответить, есть ли в
+ * файле звук, — а это разница между «выгрузите созвон заново со звуком» и
+ * «нажмите снова».
+ */
+export function ffmpegCommandsOf(setting: string): FfmpegCommands | null {
+  if (setting === FFMPEG_OFF) {
+    return null;
+  }
+
+  if (setting === FFMPEG_AUTO) {
+    const ffmpeg = inPath('ffmpeg');
+    const ffprobe = inPath('ffprobe');
+
+    return ffmpeg !== null && ffprobe !== null ? { ffmpeg, ffprobe } : null;
+  }
+
+  if (!existsSync(setting)) {
+    return null;
+  }
+
+  // Названный путь говорит о `ffmpeg`; `ffprobe` ищется рядом с ним, а не
+  // в `PATH`: администратор, положивший сборку в свой каталог, имел в виду
+  // её целиком, а не её половину вперемешку с системной.
+  const probe = withExecutableSuffix(join(dirname(setting), 'ffprobe')).find((candidate) =>
+    existsSync(candidate),
+  );
+
+  return probe === undefined ? null : { ffmpeg: setting, ffprobe: probe };
+}
+
+/** Исполняемый файл в `PATH` либо `null`. */
+function inPath(name: string): string | null {
+  const dirs = (process.env.PATH ?? '').split(delimiter).filter((dir) => dir !== '');
+
+  for (const dir of dirs) {
+    const found = withExecutableSuffix(join(dir, name)).find((candidate) => existsSync(candidate));
+
+    if (found !== undefined) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Имя файла со всеми расширениями, которые на этой системе исполняемы.
+ *
+ * Windows здесь не прихоть: разработка идёт на ней, и `ffmpeg` там
+ * называется `ffmpeg.exe`. Поиск без расширений нашёл бы его только в
+ * контейнере.
+ */
+function withExecutableSuffix(path: string): string[] {
+  if (process.platform !== 'win32') {
+    return [path];
+  }
+
+  const suffixes = (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').filter((ext) => ext !== '');
+
+  return [path, ...suffixes.map((ext) => `${path}${ext.toLowerCase()}`)];
 }
 
 /**

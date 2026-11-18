@@ -38,11 +38,12 @@ export class UnavailableExtractor implements AudioExtractor {
     return [...SERVICE_AUDIO_TYPES];
   }
 
-  probe(): Promise<MediaProbe> {
+  /** Аргументы объявлены, но не читаются: процесс не запускается вовсе. */
+  probe(_uploadPath: string, _signal: AbortSignal): Promise<MediaProbe> {
     return Promise.reject(this.failure());
   }
 
-  extract(): Promise<ExtractedAudio> {
+  extract(_uploadPath: string, _jobId: string, _signal: AbortSignal): Promise<ExtractedAudio> {
     return Promise.reject(this.failure());
   }
 

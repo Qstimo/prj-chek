@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExtractionFailure, type ProcessOutcome, type ProcessRunner } from './extractor';
-import { FfmpegExtractor } from './ffmpeg.extractor';
+import { FfmpegExtractor, ffmpegCommandsOf } from './ffmpeg.extractor';
 import { RecordingStore } from './recording-store';
 import { RECORDING_AUDIO_BITRATE_ENV, TRANSCRIBER_MAX_BYTES_ENV } from './settings';
 import { UnavailableExtractor } from './unavailable.extractor';
@@ -212,9 +212,10 @@ describe('адаптер ffmpeg', () => {
       stderrTail: '/var/lib/cairn/recordings/j.mp4: Invalid data',
     };
 
-    const failure = await extractor
+    const failure = (await extractor
       .extract(UPLOAD, JOB_ID, AbortSignal.timeout(1000))
-      .catch((error: unknown) => error as ExtractionFailure);
+      .then(() => null)
+      .catch((error: unknown) => error)) as ExtractionFailure;
 
     expect(failure.code).toBe(EXTRACTION_FAILED);
     expect(failure.message).not.toContain('/var/lib/cairn');
@@ -271,6 +272,26 @@ describe('адаптер ffmpeg', () => {
     await extractor.extract(UPLOAD, JOB_ID, AbortSignal.timeout(1000));
 
     expect(removed).toEqual([]);
+  });
+});
+
+describe('разрешение исполняемых файлов', () => {
+  it('off выключает извлечение, не спрашивая файловую систему', () => {
+    expect(ffmpegCommandsOf('off')).toBeNull();
+  });
+
+  it('несуществующий путь даёт недоступность, а не аварию при старте', () => {
+    // Опечатка в пути — обычный случай, и падать на подъёме из-за неё
+    // значило бы уронить всю установку ради необязательной возможности.
+    expect(ffmpegCommandsOf('/нет/такого/ffmpeg')).toBeNull();
+  });
+
+  it('названный путь без ffprobe рядом не годится', () => {
+    // `ffprobe` обязателен вместе с `ffmpeg`: без него не ответить, есть
+    // ли в файле звук, — а это разница между «выгрузите заново со
+    // звуком» и «нажмите снова». Подставлен настоящий существующий файл
+    // (сам node), рядом с которым `ffprobe` заведомо не лежит.
+    expect(ffmpegCommandsOf(process.execPath)).toBeNull();
   });
 });
 
