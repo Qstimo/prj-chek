@@ -288,6 +288,20 @@
       "when": 1794929706911,
       "tag": "0040_nebulous_pete_wisdom",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795003490677,
+      "tag": "0041_cynical_smiling_tiger",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795003600000,
+      "tag": "0042_summary_task_platform_privileges",
+      "breakpoints": true
     }
   ]
 }
