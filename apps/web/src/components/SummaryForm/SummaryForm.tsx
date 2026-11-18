@@ -6,26 +6,23 @@ import { useState, type FormEvent } from 'react';
 import { today } from '@/utils';
 
 import { FormActions } from '../FormActions';
-import { Select } from '../Select';
-import { TextField } from '../TextField';
-import { RecordingField } from './RecordingField';
-import { TextFileField } from './TextFileField';
-import { FIELD_LABELS, FORM_TEXTS, SOURCE_LABELS, SummarySource } from './constants';
+import { PassportFields } from './PassportFields';
+import { SourceFields } from './SourceFields';
+import { FORM_TEXTS, SummarySource, isRecordingMode } from './constants';
 import type { IReadRecording } from './readRecording';
 import type { IProps, ISummaryFormValues } from './types';
 
 /**
- * Создание саммари: проект, дата, заголовок и текст — тремя способами.
+ * Создание саммари: паспорт, текст — тремя способами, одно действие.
  *
- * Проект сохранённого саммари неизменяем, поэтому спрашивается здесь и
- * больше нигде: перенос в другой проект сломал бы и происхождение записи
- * хроники, и проверку прав, которая уже состоялась (дизайн, раздел 7.2).
+ * Третий способ — **запись созвона**, и он добавляет к форме ровно одну
+ * развилку отправки: вместо `POST …/summaries` с готовым текстом уходит
+ * `POST …/transcriptions` с паспортом и сырыми байтами, а саммари родится
+ * позже, из расшифровки (дизайн расшифровки, 8.2). Без пропса `recording`
+ * формы записи нет вовсе, и форма работает ровно как в первой итерации.
  *
- * Третий способ — **запись созвона**, и он выбирается переключателем над
- * полем: выбор записи убирает поле текста, потому что текста ещё нет —
- * саммари родится из расшифровки, через минуты после того, как панель
- * закроется (дизайн расшифровки, 8.2). Без пропса `recording` формы записи
- * нет вовсе, и форма работает ровно как в первой итерации.
+ * Пока запись отправляется, отправить нельзя ничего: кнопка выключена, а
+ * процент идёт рядом с выбором файла.
  */
 export function SummaryForm({
   projects,
@@ -44,8 +41,7 @@ export function SummaryForm({
   const [textError, setTextError] = useState<string>();
   const [picked, setPicked] = useState<IReadRecording>();
 
-  const canChooseRecording = recording !== undefined && recording.transcriber.isEnabled;
-  const isRecording = canChooseRecording && values.source === SummarySource.Recording;
+  const isRecording = isRecordingMode(values.source, recording);
   const isUploading = recording?.percent !== undefined;
   const canSubmit =
     values.projectId.length > 0 &&
@@ -97,84 +93,16 @@ export function SummaryForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-1">
-        <label htmlFor="projectId" className="block text-sm font-medium">
-          {FIELD_LABELS.projectId}
-        </label>
-        <Select
-          id="projectId"
-          value={values.projectId}
-          onChange={(projectId) => change('projectId', projectId)}
-        >
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </Select>
-      </div>
+      <PassportFields projects={projects} values={values} onChange={change} />
 
-      <TextField
-        id="occurredOn"
-        label={FIELD_LABELS.occurredOn}
-        type="date"
-        value={values.occurredOn}
-        onChange={(occurredOn) => change('occurredOn', occurredOn)}
+      <SourceFields
+        source={values.source}
+        text={values.text}
+        {...(recording === undefined ? {} : { recording })}
+        onSource={(source) => change('source', source)}
+        onText={(text) => change('text', text)}
+        onPick={setPicked}
       />
-
-      <TextField
-        id="title"
-        label={FIELD_LABELS.title}
-        value={values.title}
-        onChange={(title) => change('title', title)}
-      />
-
-      {canChooseRecording && (
-        <div className="space-y-1">
-          <label htmlFor="source" className="block text-sm font-medium">
-            {FIELD_LABELS.source}
-          </label>
-          <Select
-            id="source"
-            value={values.source}
-            onChange={(source) => change('source', source as SummarySource)}
-          >
-            {Object.values(SummarySource).map((source) => (
-              <option key={source} value={source}>
-                {SOURCE_LABELS[source]}
-              </option>
-            ))}
-          </Select>
-        </div>
-      )}
-
-      {/* Служба не настроена: предложить загрузку впустую нельзя, а
-          промолчать — заставить искать то, чего нет (дизайн, 7.5). */}
-      {recording !== undefined && !recording.transcriber.isEnabled && (
-        <p className="text-xs text-muted-foreground">{FORM_TEXTS.transcriberDisabled}</p>
-      )}
-
-      {isRecording && recording !== undefined ? (
-        <RecordingField
-          transcriber={recording.transcriber}
-          {...(recording.percent === undefined ? {} : { percent: recording.percent })}
-          {...(recording.onCancel === undefined ? {} : { onCancel: recording.onCancel })}
-          {...(recording.error === undefined ? {} : { error: recording.error })}
-          onPick={setPicked}
-        />
-      ) : (
-        <>
-          <TextField
-            id="text"
-            label={FIELD_LABELS.text}
-            value={values.text}
-            onChange={(text) => change('text', text)}
-            multiline
-          />
-
-          <TextFileField hasText={values.text.length > 0} onText={(text) => change('text', text)} />
-        </>
-      )}
 
       <FormActions
         submitLabel={isRecording ? FORM_TEXTS.submitRecording : FORM_TEXTS.submit}

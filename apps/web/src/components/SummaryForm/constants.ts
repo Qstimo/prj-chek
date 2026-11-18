@@ -52,6 +52,21 @@ export const SOURCE_LABELS: Record<SummarySource, string> = {
   [SummarySource.Recording]: 'Запись созвона',
 };
 
+/**
+ * Выбрана ли запись — с учётом того, доступна ли она вообще.
+ *
+ * Одной функцией, а не условием в двух местах: про режим обязаны знать и
+ * поля (что показывать), и сама форма (что отправлять и чем подписать
+ * кнопку), а разъехавшееся условие дало бы форму, которая показывает
+ * выбор файла и отправляет текст.
+ */
+export function isRecordingMode(
+  source: SummarySource,
+  recording: { transcriber: { isEnabled: boolean } } | undefined,
+): boolean {
+  return recording !== undefined && recording.transcriber.isEnabled && source === SummarySource.Recording;
+}
+
 /** Тексты формы создания. */
 export const FORM_TEXTS = {
   noProjects: 'Нет проектов, в которые вы можете писать хронику.',

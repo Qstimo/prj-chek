@@ -42,6 +42,24 @@ export interface IRecordingSupport {
   error?: string;
 }
 
+/** Пропсы паспорта саммари: три поля, одинаковые у всех способов. */
+export interface IPassportProps {
+  projects: ProjectMetadata[];
+  values: Pick<ISummaryFormValues, 'projectId' | 'occurredOn' | 'title'>;
+  onChange: (key: 'projectId' | 'occurredOn' | 'title', value: string) => void;
+}
+
+/** Пропсы выбора способа дать текст. */
+export interface ISourceProps {
+  source: SummarySource;
+  text: string;
+  /** Загрузка записи; нет пропса — нет и выбора способа. */
+  recording?: IRecordingSupport;
+  onSource: (source: SummarySource) => void;
+  onText: (text: string) => void;
+  onPick: (recording: IReadRecording | undefined) => void;
+}
+
 /** Пропсы загрузки текстового файла. */
 export interface IFileProps {
   /** Поле текста не пусто: замена спросит подтверждение. */
