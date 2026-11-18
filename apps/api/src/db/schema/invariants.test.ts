@@ -31,6 +31,7 @@ import { subjects } from './subjects';
 import { summaries, summaryTaskDrafts, summaryTaskPlatforms } from './summaries';
 import { projectTags, tags } from './tags';
 import { totpChallenges } from './totp-challenges';
+import { transcriptionJobs } from './transcription';
 import { users } from './users';
 import { variableVersions, variables } from './variables';
 
@@ -56,6 +57,7 @@ const ALL_TABLES = [
   { name: 'summaries', table: summaries },
   { name: 'summary_task_drafts', table: summaryTaskDrafts },
   { name: 'summary_task_platforms', table: summaryTaskPlatforms },
+  { name: 'transcription_jobs', table: transcriptionJobs },
   { name: 'doc_pages', table: docPages },
   { name: 'agent_tokens', table: agentTokens },
   { name: 'variables', table: variables },

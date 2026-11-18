@@ -302,6 +302,20 @@
       "when": 1795003600000,
       "tag": "0042_summary_task_platform_privileges",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795008743241,
+      "tag": "0043_thick_silver_centurion",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795008744241,
+      "tag": "0044_transcription_privileges",
+      "breakpoints": true
     }
   ]
 }
