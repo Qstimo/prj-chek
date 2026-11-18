@@ -72,4 +72,31 @@ describe('apiClient', () => {
       body: JSON.stringify({ name: 'Проект' }),
     });
   });
+
+  it('объект по-прежнему сериализуется в JSON', async () => {
+    // Сторож прежнего поведения: сырое тело не изменило ни одного из
+    // существующих запросов.
+    const fetchMock = stubFetch({});
+
+    await apiClient('/путь', { method: 'POST', body: { a: 1 } });
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      body: '{"a":1}',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  it('сырое тело уходит как есть, с заданным типом', async () => {
+    // Для мелких сырых тел: двухгигабайтную запись этим путём не ведут —
+    // `fetch` не даёт прогресса отправки (дизайн, 8.4).
+    const fetchMock = stubFetch({});
+    const blob = new Blob([new Uint8Array([1, 2, 3])]);
+
+    await apiClient('/путь', { method: 'POST', body: blob, contentType: 'audio/mpeg' });
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      body: blob,
+      headers: { 'Content-Type': 'audio/mpeg' },
+    });
+  });
 });
