@@ -1,8 +1,19 @@
 import { SummaryTaskOrigin } from '@cairn/shared';
 import { sql } from 'drizzle-orm';
-import { check, index, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  check,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { chronicleEntries } from './chronicle';
+import { projectPlatforms } from './platforms';
 import { projects } from './projects';
 import { roadmapVersions } from './roadmap';
 import { subjects } from './subjects';
@@ -70,11 +81,17 @@ export const summaries = pgTable(
 /**
  * Задача черновика до переезда в роадмап.
  *
- * По составу полей **беднее** чекпоинта, а не богаче: ни адреса задачи,
- * ни тегов платформ, ни даты, ни исполнителя (ТЗ 1.4). Адрес и теги
- * ставятся после переезда штатной формой чекпоинта: придуманный моделью
- * тег платформы поставил бы в роадмап заявление, которого никто не
- * делал.
+ * По составу полей **беднее чекпоинта или равна ему, но не богаче**: ни
+ * исполнителя, ни оценки, ни даты, ни вложенности (ТЗ 1.4). Адрес задачи
+ * и теги платформ — ровно те два поля, которые у чекпоинта есть, и в
+ * черновике они появились потому, что без них человек проходил список
+ * **дважды**: формулировки здесь, ссылки и теги — формой чекпоинта в
+ * роадмапе, уже без текста созвона перед глазами.
+ *
+ * Заполняет оба поля **человек**. Из вывода модели по-прежнему берётся
+ * только формулировка: у строк с `origin = model` ссылки нет и тегов нет,
+ * и придуманный моделью тег платформы так и остаётся невозможным — ей
+ * нечем назвать платформу.
  *
  * Реляционная таблица, а не `draft jsonb`: проверять состав элементов в
  * базе пришлось бы своей SQL-функцией, а в проекте нет ни триггеров, ни
@@ -89,12 +106,50 @@ export const summaryTaskDrafts = pgTable(
       .notNull()
       .references(() => summaries.id, { onDelete: 'restrict' }),
     title: text('title').notNull(),
+    /**
+     * Ссылка на задачу во внешнем трекере; ставит человек, у строк от
+     * модели всегда пусто. Та же колонка, что у чекпоинта: формат
+     * проверяет zod на входе, а не база.
+     */
+    url: text('url'),
     position: integer('position').notNull(),
     /** Признак «предложено моделью» для интерфейса и журнала релиза. */
     origin: summaryTaskOriginEnum('origin').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('summary_task_drafts_summary_idx').on(table.summaryId, table.position)],
+);
+
+/**
+ * Теги платформ у задачи черновика: куда едет результат.
+ *
+ * Зеркало `checkpoint_platforms` — та же пара, тот же составной ключ, тот
+ * же `restrict`: теги уезжают в чекпоинт как есть, и расхождение в
+ * устройстве двух наборов одних и тех же тегов пришлось бы помнить при
+ * каждой правке.
+ *
+ * Не массив `uuid[]` у строки черновика: массив не ссылается, и удалённая
+ * платформа оставила бы висячий идентификатор, который уронил бы **шаг
+ * релиза** — единственный необратимый шаг потока (дизайн, 4.2).
+ *
+ * Имя короче, чем `summary_task_draft_platforms`, намеренно: имя внешнего
+ * ключа по соглашению drizzle вышло бы за 63 байта, PostgreSQL молча
+ * обрезал бы его, и снапшот разошёлся бы с базой.
+ */
+export const summaryTaskPlatforms = pgTable(
+  'summary_task_platforms',
+  {
+    draftId: uuid('draft_id')
+      .notNull()
+      .references(() => summaryTaskDrafts.id, { onDelete: 'restrict' }),
+    platformId: uuid('platform_id')
+      .notNull()
+      .references(() => projectPlatforms.id, { onDelete: 'restrict' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.draftId, table.platformId] }),
+    index('summary_task_platforms_platform_idx').on(table.platformId),
+  ],
 );
 
 /** Строка саммари. */

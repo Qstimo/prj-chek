@@ -28,7 +28,7 @@ import { servers } from './servers';
 import { sessions } from './sessions';
 import { domainStatuses } from './status';
 import { subjects } from './subjects';
-import { summaries, summaryTaskDrafts } from './summaries';
+import { summaries, summaryTaskDrafts, summaryTaskPlatforms } from './summaries';
 import { projectTags, tags } from './tags';
 import { totpChallenges } from './totp-challenges';
 import { users } from './users';
@@ -55,6 +55,7 @@ const ALL_TABLES = [
   { name: 'chronicle_entries', table: chronicleEntries },
   { name: 'summaries', table: summaries },
   { name: 'summary_task_drafts', table: summaryTaskDrafts },
+  { name: 'summary_task_platforms', table: summaryTaskPlatforms },
   { name: 'doc_pages', table: docPages },
   { name: 'agent_tokens', table: agentTokens },
   { name: 'variables', table: variables },

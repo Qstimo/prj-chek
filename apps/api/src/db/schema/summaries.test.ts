@@ -1,19 +1,23 @@
 import { SummaryTaskOrigin } from '@cairn/shared';
 import { getTableConfig } from 'drizzle-orm/pg-core';
+import type { PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
-import { summaries, summaryTaskDrafts, summaryTaskOriginEnum } from './summaries';
+import { roadmapCheckpoints } from './roadmap';
+import { summaries, summaryTaskDrafts, summaryTaskOriginEnum, summaryTaskPlatforms } from './summaries';
 
 /** Имена колонок таблицы: проверки состава читают именно их. */
-function columnNames(table: typeof summaries | typeof summaryTaskDrafts): string[] {
+function columnNames(table: PgTable): string[] {
   return getTableConfig(table).columns.map((column) => column.name);
 }
 
+/** Имена индексов таблицы. */
+function indexNames(table: PgTable): string[] {
+  return getTableConfig(table).indexes.map((index) => index.config.name ?? '');
+}
+
 /** Колонки индекса по порядку, с направлением каждой. */
-function columnsOf(
-  table: typeof summaries | typeof summaryTaskDrafts,
-  name: string,
-): [string, string | undefined][] {
+function columnsOf(table: PgTable, name: string): [string, string | undefined][] {
   const index = getTableConfig(table).indexes.find(
     (candidate) => candidate.config.name === name,
   );
@@ -89,14 +93,28 @@ describe('черновик задач', () => {
     expect(summaryTaskOriginEnum.enumValues).toEqual(Object.values(SummaryTaskOrigin));
   });
 
-  it('беднее чекпоинта: ни адреса, ни платформ, ни даты', () => {
-    // ТЗ 1.4 и дизайн 2.1: расширить роадмап через эту дверь нельзя
-    // физически.
+  it('не богаче чекпоинта: своих полей у задачи нет', () => {
+    // ТЗ 1.4 остаётся в силе, а дизайн 2.1 отменён только в части двух
+    // полей, которые у чекпоинта есть. Сторож считает разницу составов,
+    // а не перечисляет запреты: перечисление пропустило бы поле, которое
+    // никому не пришло в голову запретить.
+    const own = columnNames(summaryTaskDrafts).filter(
+      (column) => !columnNames(roadmapCheckpoints).includes(column),
+    );
+
+    expect(own.sort()).toEqual(['summary_id', 'origin'].sort());
+  });
+
+  it('ссылка на задачу во внешнем трекере есть и необязательна', () => {
+    expect(columnNames(summaryTaskDrafts)).toContain('url');
+    expect(summaryTaskDrafts.url.notNull).toBe(false);
+  });
+
+  it('ни исполнителя, ни оценки, ни даты, ни вложенности', () => {
     const columns = columnNames(summaryTaskDrafts);
 
-    expect(columns).toEqual(expect.arrayContaining(['summary_id', 'title', 'position', 'origin']));
-    expect(columns).not.toContain('url');
     expect(columns).not.toContain('assignee_id');
+    expect(columns).not.toContain('estimate');
     expect(columns).not.toContain('due_on');
     expect(columns).not.toContain('parent_id');
   });
@@ -120,5 +138,34 @@ describe('черновик задач', () => {
         (candidate) => candidate.config.name === 'summary_task_drafts_summary_idx',
       )?.config.unique,
     ).toBe(false);
+  });
+});
+
+describe('теги платформ у задачи черновика', () => {
+  it('пара и есть сущность: составной первичный ключ', () => {
+    // Своего `id` нет — второй экземпляр пары бессмыслен. Зеркало
+    // `checkpoint_platforms`.
+    const [primary] = getTableConfig(summaryTaskPlatforms).primaryKeys;
+
+    expect(primary?.columns.map((column) => column.name)).toEqual(['draft_id', 'platform_id']);
+  });
+
+  it('ссылки не каскадные: уборка явная в пяти местах', () => {
+    expect(getTableConfig(summaryTaskPlatforms).foreignKeys.map((key) => key.onDelete)).toEqual([
+      'restrict',
+      'restrict',
+    ]);
+  });
+
+  it('индекс по платформе есть: за удалённой платформой уносят теги', () => {
+    expect(indexNames(summaryTaskPlatforms)).toContain('summary_task_platforms_platform_idx');
+  });
+
+  it('имена внешних ключей умещаются в предел PostgreSQL', () => {
+    // 63 байта. Длиннее — PostgreSQL молча обрежет, и в снапшоте
+    // останется одно имя, а в базе другое (см. роадмап, carried_from).
+    for (const key of getTableConfig(summaryTaskPlatforms).foreignKeys) {
+      expect(key.getName().length).toBeLessThanOrEqual(63);
+    }
   });
 });
