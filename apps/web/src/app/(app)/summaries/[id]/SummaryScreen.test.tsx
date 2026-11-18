@@ -1,5 +1,6 @@
 import {
   AccessLevel,
+  PlatformKind,
   RoadmapVersionState,
   SUGGESTER_UNAVAILABLE,
   Section,
@@ -25,6 +26,13 @@ const PROJECT_ID = '11111111-1111-1111-1111-111111111111';
 const SUMMARY_ID = '22222222-2222-2222-2222-222222222222';
 const TASK_ID = '33333333-3333-3333-3333-333333333333';
 const VERSION_ID = '44444444-4444-4444-4444-444444444444';
+
+const API = {
+  id: '66666666-6666-6666-6666-666666666666',
+  kind: PlatformKind.Server,
+  name: 'API',
+  position: 1,
+};
 
 const LIST_ITEM = {
   id: SUMMARY_ID,
@@ -180,6 +188,36 @@ describe('экран саммари', () => {
       (suggest as unknown as { mutate: ReturnType<typeof vi.fn> }).mutate,
     ).not.toHaveBeenCalled();
     expect(screen.getByText(/будет заменён/)).toBeInTheDocument();
+  });
+
+  it('подтверждение повторной разбивки называет потерю ссылок и тегов', async () => {
+    // Диалог, обещающий меньше, чем делает, хуже отсутствия диалога:
+    // повторная разбивка уносит теперь и проставленные ссылки с
+    // тегами, а не только формулировки (дизайн, 7.4).
+    renderScreen({ ...WITH_TASKS, platforms: [API] }, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: /Создать задачи/ }));
+
+    expect(screen.getByText(/ссылки и теги/i)).toBeInTheDocument();
+  });
+
+  it('чипы платформ приходят из детали саммари', async () => {
+    // Один запрос и один гейт: платформы едут тем же ответом, что
+    // обозначение версии-получателя (дизайн, 3.2).
+    renderScreen({ ...WITH_TASKS, platforms: [API] }, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
+
+    expect(screen.getByRole('checkbox', { name: 'API' })).toBeInTheDocument();
+  });
+
+  it('без платформ в детали чипов на экране нет', async () => {
+    // Неотличимо от проекта без платформ — это и есть нераскрытие.
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
+
+    expect(screen.queryByRole('group', { name: 'Платформы' })).not.toBeInTheDocument();
   });
 
   it('подтверждение отпускает разбивку', async () => {
