@@ -22,6 +22,18 @@ WORKDIR /app
 
 RUN corepack enable
 
+# ffmpeg и ffprobe: из загруженной записи созвона извлекается звуковая
+# дорожка, и она же, а не видео, уходит службе расшифровки (дизайн
+# 2026-11-17, раздел 7.6). Только в ступень `runner`: сборке они не нужны и
+# утяжелили бы промежуточный слой.
+#
+# Без пакета установка остаётся **рабочей, только уже**: принимаются MP3, WAV
+# и OGG, которые служба берёт как есть, а видео получает названный отказ
+# `recording_needs_ffmpeg`. То же правило, что «без ключа порт выключен»:
+# отсутствующая возможность сужает поток, а не ломает его. Отказаться от
+# извлечения, не трогая образ, можно настройкой `CAIRN_RECORDING_FFMPEG=off`.
+RUN apk add --no-cache ffmpeg
+
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/api/package.json ./apps/api/
