@@ -1,4 +1,4 @@
-import type { SummaryTask, SummaryTasksReplace } from '@cairn/shared';
+import type { Platform, SummaryTask, SummaryTasksReplace } from '@cairn/shared';
 
 /**
  * Строка черновика в памяти редактора.
@@ -14,6 +14,16 @@ export interface IDraftTask {
   title: string;
   /** Пришла от модели: строка несёт метку «предложено моделью». */
   isFromModel: boolean;
+  /**
+   * Адрес задачи во внешнем трекере.
+   *
+   * В памяти — строка, а не `string | null`: пустая означает «ссылки
+   * нет» и уезжает как `null`, а `null` в поле ввода пришлось бы
+   * отличать от пустой строки у самого поля.
+   */
+  url: string;
+  /** Теги платформ. Только те, что есть в переданном списке платформ. */
+  platformIds: string[];
 }
 
 /** Пропсы одной строки черновика. */
@@ -26,15 +36,46 @@ export interface IRowProps {
   isReadOnly: boolean;
   /** Поставить фокус при появлении: только у строки, добавленной руками. */
   shouldFocus: boolean;
+  /** Платформы проекта для чипов. Пустой список — чипов нет вовсе. */
+  platforms: Platform[];
+  /** Строка раскрыта: видны поле ссылки и чипы платформ. */
+  isOpen: boolean;
+  onToggle: () => void;
   onChange: (title: string) => void;
+  onUrlChange: (url: string) => void;
+  onPlatformsChange: (platformIds: string[]) => void;
+  /** Объяснение негодного адреса; у годного и пустого его нет. */
+  urlError?: string;
   onMove: (step: number) => void;
   onRemove: () => void;
 }
+
+/**
+ * Пропсы раскрытой части строки.
+ *
+ * Подмножество пропсов строки, а не свой набор: раскрытие — часть той же
+ * строки, и второе определение тех же полей разошлось бы с первым.
+ */
+export type IDetailsProps = Pick<
+  IRowProps,
+  'task' | 'platforms' | 'isReadOnly' | 'onUrlChange' | 'onPlatformsChange' | 'urlError'
+>;
 
 /** Пропсы редактора черновика. */
 export interface IProps {
   /** Загруженный набор: от него считается `isDirty`. */
   tasks: SummaryTask[];
+  /**
+   * Платформы проекта для чипов тегов — из детали саммари и ниоткуда
+   * больше: она отдаёт их под `Roadmap ≥ metadata`.
+   *
+   * Обязателен намеренно, а не `?: []`: забытый проп означал бы «тегов
+   * не видно», а невидимых тегов редактор не отправляет — правка
+   * формулировки молча оставляла бы теги прежними там, где человек их
+   * правил. Пустой список передаётся явно и означает «показывать
+   * нечего».
+   */
+  platforms: Platform[];
   /** Сохранение целиком: порядок задаёт порядок массива. */
   onSave: (input: SummaryTasksReplace) => void;
   /**

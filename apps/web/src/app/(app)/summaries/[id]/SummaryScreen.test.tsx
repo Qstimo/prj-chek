@@ -47,12 +47,15 @@ const TEXT_ONLY: SummaryDetail = {
   releasedVersionId: null,
   isTextStale: false,
   suggestedVersionLabel: 'v1.3',
+  platforms: [],
 };
 
 const WITH_TASKS: SummaryDetail = {
   ...TEXT_ONLY,
   taskCount: 1,
-  tasks: [{ id: TASK_ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model }],
+  tasks: [
+    { id: TASK_ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model, url: null, platformIds: [] },
+  ],
   suggester: { name: 'external', model: 'gpt-4o-mini', at: '2026-11-16T10:00:00.000Z', dropped: 0 },
 };
 
@@ -317,7 +320,16 @@ describe('экран саммари', () => {
     renderScreen(
       {
         ...WITH_TASKS,
-        tasks: [{ id: TASK_ID, title: '<b>жирно</b>', position: 1, origin: SummaryTaskOrigin.Model }],
+        tasks: [
+          {
+            id: TASK_ID,
+            title: '<b>жирно</b>',
+            position: 1,
+            origin: SummaryTaskOrigin.Model,
+            url: null,
+            platformIds: [],
+          },
+        ],
       },
       LOCAL_SUGGESTER,
     );

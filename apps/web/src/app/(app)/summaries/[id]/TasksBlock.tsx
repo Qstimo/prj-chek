@@ -108,8 +108,11 @@ export function TasksBlock({
         </p>
       )}
 
+      {/* Платформы едут деталью саммари: ни нового запроса, ни нового
+          хука — список уже загружен, и гейт у него один и тот же. */}
       <SummaryTaskEditor
         tasks={summary.tasks}
+        platforms={summary.platforms}
         onSave={onSave}
         onDirtyChange={onDirtyChange}
         isReleased={summary.isReleased}
