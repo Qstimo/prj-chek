@@ -284,6 +284,14 @@ describe('очередь расшифровок', () => {
     expect(screen.queryByRole('row')).not.toBeInTheDocument();
   });
 
+  it('повторная расшифровка названа повторной, а не пустой строкой', () => {
+    // Паспорта у неё нет: он принадлежит записи хроники, и второй копии
+    // не бывает. Пустая клетка читалась бы как «заголовок потеряли».
+    renderQueue([{ ...JOB, summaryId: SUMMARY_ID, occurredOn: null, title: null }]);
+
+    expect(screen.getByText('Повторная расшифровка')).toBeInTheDocument();
+  });
+
   it('называет дату, заголовок и проект', () => {
     renderQueue([JOB]);
 

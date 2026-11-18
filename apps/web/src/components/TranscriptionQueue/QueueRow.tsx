@@ -37,9 +37,9 @@ export function QueueRow({ job, now, onCancel, onRetry, onDelete }: IRowProps) {
   return (
     <tr className="border-b border-border/50 align-top">
       <td className="whitespace-nowrap px-3 py-2 tabular-nums">
-        {job.occurredOn === null ? QUEUE_TEXTS.finished : formatDate(job.occurredOn)}
+        {job.occurredOn === null ? QUEUE_TEXTS.dash : formatDate(job.occurredOn)}
       </td>
-      <td className="px-3 py-2">{job.title}</td>
+      <td className="px-3 py-2">{job.title ?? QUEUE_TEXTS.repeat}</td>
       <td className="px-3 py-2 text-muted-foreground">{job.projectName}</td>
       <td className="whitespace-nowrap px-3 py-2 tabular-nums">
         {sizesOf(job.uploadBytes, job.audioBytes)}
@@ -52,7 +52,7 @@ export function QueueRow({ job, now, onCancel, onRetry, onDelete }: IRowProps) {
         )}
       </td>
       <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">
-        {isFailed ? QUEUE_TEXTS.finished : elapsedOf(job.startedAt, now)}
+        {isFailed ? QUEUE_TEXTS.dash : elapsedOf(job.startedAt, now)}
       </td>
       <td className="px-3 py-2">
         <div className="flex flex-wrap gap-2">

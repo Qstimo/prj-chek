@@ -155,10 +155,9 @@ export function recordingErrorOf(
  * машину, и это тоже сказано прямо.
  */
 export function recordingNoticeOf(transcriber: TranscriberInfo): string {
-  if (!transcriber.isEnabled) {
-    return FORM_TEXTS.transcriberDisabled;
-  }
-
+  // Ветви «служба выключена» здесь нет намеренно: при выключенной службе
+  // выбора записи на экране не появляется вовсе, и такая ветвь была бы
+  // недостижимой — то есть кодом, который нечем проверить.
   const host = transcriber.host ?? 'настроенный узел';
   const model = transcriber.model === null ? '' : `, модель ${transcriber.model}`;
   const isLocal = transcriber.kind === TranscriberKind.Local;
