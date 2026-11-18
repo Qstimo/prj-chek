@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SummaryTaskOrigin } from '../enums';
+import { PlatformKind, SummaryTaskOrigin } from '../enums';
 import {
   MAX_SUMMARY_TASKS,
   normalizeSummaryText,
@@ -12,6 +12,7 @@ import {
 } from './summary';
 
 const ID = '00000000-0000-0000-0000-000000000001';
+const PLATFORM_ID = '00000000-0000-0000-0000-000000000002';
 
 /** Минимально полная строка истории: от неё отталкивается и деталь. */
 const LIST_ITEM = {
@@ -36,6 +37,7 @@ const DETAIL = {
   suggester: null,
   isTextStale: false,
   suggestedVersionLabel: null,
+  platforms: [],
 };
 
 describe('создание саммари', () => {
@@ -151,10 +153,137 @@ describe('деталь саммари', () => {
   it('задача несёт происхождение', () => {
     const parsed = summaryDetailSchema.parse({
       ...DETAIL,
-      tasks: [{ id: ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model }],
+      tasks: [
+        {
+          id: ID,
+          title: 'Сделать',
+          position: 1,
+          origin: SummaryTaskOrigin.Model,
+          url: null,
+          platformIds: [],
+        },
+      ],
     });
 
     expect(parsed.tasks[0]?.origin).toBe(SummaryTaskOrigin.Model);
+  });
+});
+
+describe('поля чекпоинта в черновике', () => {
+  it('задача несёт ссылку и теги платформ', () => {
+    // Два поля чекпоинта, которые заполняет человек до переезда: иначе
+    // список пришлось бы проходить дважды (дизайн, раздел 1).
+    const parsed = summaryDetailSchema.parse({
+      ...DETAIL,
+      tasks: [
+        {
+          id: ID,
+          title: 'Сделать',
+          position: 1,
+          origin: SummaryTaskOrigin.Human,
+          url: 'https://tracker.example/CAIRN-1',
+          platformIds: [PLATFORM_ID],
+        },
+      ],
+    });
+
+    expect(parsed.tasks[0]?.url).toBe('https://tracker.example/CAIRN-1');
+    expect(parsed.tasks[0]?.platformIds).toEqual([PLATFORM_ID]);
+  });
+
+  it('у задачи без ссылки она пуста, а не отсутствует', () => {
+    // `null` — состояние «ссылки нет»; необязательного поля в выдаче не
+    // бывает, иначе клиент различал бы два вида пустоты.
+    expect(() =>
+      summaryDetailSchema.parse({
+        ...DETAIL,
+        tasks: [{ id: ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model }],
+      }),
+    ).toThrow();
+  });
+
+  it('деталь несёт платформы проекта для чипов', () => {
+    const parsed = summaryDetailSchema.parse({
+      ...DETAIL,
+      platforms: [{ id: PLATFORM_ID, kind: PlatformKind.Server, name: 'API', position: 1 }],
+    });
+
+    expect(parsed.platforms[0]?.name).toBe('API');
+  });
+
+  it('пустой список платформ законен и накрывает два случая', () => {
+    // «У проекта нет платформ» и «у субъекта нет выдачи на роадмап» —
+    // намеренно неотличимы: отличимость второго и была бы утечкой
+    // признака (дизайн, 3.2).
+    expect(summaryDetailSchema.parse(DETAIL).platforms).toEqual([]);
+  });
+});
+
+describe('замена черновика: два новых поля', () => {
+  it('принимает ссылку и теги', () => {
+    const parsed = summaryTasksReplaceSchema.parse({
+      tasks: [
+        {
+          id: ID,
+          title: 'Сделать',
+          url: 'https://tracker.example/1',
+          platformIds: [PLATFORM_ID],
+        },
+      ],
+    });
+
+    expect(parsed.tasks[0]?.platformIds).toEqual([PLATFORM_ID]);
+  });
+
+  it('отсутствие полей законно: означает «не трогать»', () => {
+    // Редактор субъекта без выдачи на роадмап чипов не видит и набор не
+    // отправляет — и теги выживают (дизайн, 3.3).
+    const parsed = summaryTasksReplaceSchema.parse({ tasks: [{ id: ID, title: 'Сделать' }] });
+
+    expect(parsed.tasks[0]?.platformIds).toBeUndefined();
+    expect(parsed.tasks[0]?.url).toBeUndefined();
+  });
+
+  it('снять ссылку и теги можно явно', () => {
+    const parsed = summaryTasksReplaceSchema.parse({
+      tasks: [{ id: ID, title: 'Сделать', url: null, platformIds: [] }],
+    });
+
+    expect(parsed.tasks[0]?.url).toBeNull();
+    expect(parsed.tasks[0]?.platformIds).toEqual([]);
+  });
+
+  it('отвергает адрес не адресом', () => {
+    expect(() =>
+      summaryTasksReplaceSchema.parse({ tasks: [{ title: 'Сделать', url: 'CAIRN-1' }] }),
+    ).toThrow();
+  });
+
+  it('отвергает адрес длиннее предела чекпоинта', () => {
+    // Предел взят оттуда, куда значение поедет: 2000 у `url` чекпоинта.
+    const url = `https://tracker.example/${'a'.repeat(2000)}`;
+
+    expect(() => summaryTasksReplaceSchema.parse({ tasks: [{ title: 'Сделать', url }] })).toThrow();
+  });
+
+  it('отвергает повторяющиеся теги', () => {
+    // Та же `platformIdsSchema`, что у чекпоинта: своей схемы не заводим.
+    expect(() =>
+      summaryTasksReplaceSchema.parse({
+        tasks: [{ title: 'Сделать', platformIds: [PLATFORM_ID, PLATFORM_ID] }],
+      }),
+    ).toThrow();
+  });
+
+  it('отвергает больше двадцати тегов на строку', () => {
+    const platformIds = Array.from(
+      { length: 21 },
+      (_, index) => `00000000-0000-0000-0000-0000000000${String(index + 10)}`,
+    );
+
+    expect(() =>
+      summaryTasksReplaceSchema.parse({ tasks: [{ title: 'Сделать', platformIds }] }),
+    ).toThrow();
   });
 });
 

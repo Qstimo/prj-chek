@@ -2,7 +2,9 @@ import { z } from 'zod';
 
 import { ModelServicePlacement, SummaryTaskOrigin } from '../enums';
 import { requiredDaySchema } from './day-date';
+import { platformIdsSchema, platformSchema } from './platform';
 import { HAS_NUL, isNulFree } from './plain-text';
+import { checkpointUrlSchema } from './roadmap';
 
 /** Разбивка не настроена: ни адреса, ни ключа. */
 export const SUGGESTER_DISABLED = 'suggester_disabled';
@@ -56,12 +58,27 @@ export function normalizeSummaryText(raw: string): string {
 /** Предел объёма текста в контракте: столько принимает запись хроники. */
 const summaryTextSchema = z.string().trim().min(1).max(65_536);
 
-/** Задача черновика: формулировка, порядок, происхождение. */
+/** Задача черновика: формулировка, порядок, происхождение, поля чекпоинта. */
 export const summaryTaskSchema = z.object({
   id: z.string().uuid(),
   title: z.string(),
   position: z.number().int().positive(),
   origin: z.nativeEnum(SummaryTaskOrigin),
+  /**
+   * Ссылка на задачу во внешнем трекере.
+   *
+   * Поле чекпоинта, заполняемое человеком до переезда: иначе список
+   * пришлось бы проходить дважды — здесь формулировки, в роадмапе
+   * ссылки. У строки с `origin = model` всегда `null`: из вывода модели
+   * берётся только формулировка (дизайн порта, 5.6 пункт 3).
+   */
+  url: checkpointUrlSchema,
+  /**
+   * Теги платформ. Намеренно без `platformIdsSchema`: это выдача, а не
+   * приём, и проверять в ней повторы и предел незачем — ровно как у
+   * `roadmapCheckpointSchema`.
+   */
+  platformIds: z.array(z.string().uuid()),
 });
 
 /** Чем построена текущая разбивка. Ключ API здесь не бывает никогда. */
@@ -104,7 +121,7 @@ export const summaryListItemSchema = z.object({
   createdAt: z.string(),
 });
 
-/** Саммари целиком: текст, черновик, подсказка обозначения версии. */
+/** Саммари целиком: текст, черновик, платформы для тегов, подсказка версии. */
 export const summaryDetailSchema = summaryListItemSchema.extend({
   /** Запись хроники с текстом: правка идёт её собственной ручкой. */
   chronicleEntryId: z.string().uuid(),
@@ -126,6 +143,19 @@ export const summaryDetailSchema = summaryListItemSchema.extend({
    * содержат чисел, или у субъекта нет выдачи на роадмап.
    */
   suggestedVersionLabel: z.string().nullable(),
+  /**
+   * Платформы проекта для чипов — только при `Roadmap ≥ metadata`.
+   *
+   * Пустой массив означает «показывать нечего» и накрывает два случая
+   * намеренно неотличимо: у проекта нет платформ либо у субъекта нет
+   * выдачи на роадмап. Отличимость второго от первого и была бы утечкой
+   * признака (дизайн, 3.2).
+   *
+   * Гейт тот же, что у `releasedVersionLabel` и `suggestedVersionLabel`:
+   * список платформ проекта роадмап отдаёт сам, в сводке релизов, и
+   * «Инфо» здесь не участвует (дизайн, 3.1).
+   */
+  platforms: z.array(platformSchema),
 });
 
 /**
@@ -150,6 +180,14 @@ export const summaryCreateSchema = z
  * Строка с `id` — оставить существующую (вместе с её происхождением), без
  * `id` — новая, набранная человеком. Позиции не принимаются: порядок задаёт
  * порядок массива, и второе место для порядка разошлось бы с первым.
+ *
+ * **Отсутствие ссылки или набора тегов означает «оставить как было»**, и
+ * сохраняется прежнее значение по `id` — тем же способом, которым уже
+ * сохраняется происхождение строки. Иначе редактор субъекта без выдачи на
+ * роадмап, который чипов не видит и набор не отправляет, молча стирал бы
+ * проставленные теги — работу того, у кого права есть (дизайн, 3.3). Снять
+ * можно явно: `url: null` и `platformIds: []`. У строки без `id` сохранять
+ * нечего: она новая, и отсутствие поля означает пустоту.
  */
 export const summaryTasksReplaceSchema = z
   .object({
@@ -159,6 +197,10 @@ export const summaryTasksReplaceSchema = z
           .object({
             id: z.string().uuid().optional(),
             title: z.string().trim().min(1).max(MAX_SUMMARY_TASK_TITLE),
+            /** Отсутствие — «не трогать», `null` — «снять». */
+            url: checkpointUrlSchema.optional(),
+            /** Отсутствие — «не трогать», пустой массив — «снять все». */
+            platformIds: platformIdsSchema.optional(),
           })
           .strict(),
       )
