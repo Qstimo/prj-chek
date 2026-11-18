@@ -22,6 +22,7 @@ import { BadGatewayException, BadRequestException, ConflictException } from '@ne
 import { asc, eq, like } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SectionNotVisibleError } from '../access/access.errors';
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
@@ -555,6 +556,98 @@ describe('служба саммари', () => {
         if (level) await testDb.db.insert(grants).values({ subjectId: member!.id, projectId, section, level, grantedBy: admin!.id });
       }
       await expect(service.release({ ...writer(), id: member!.id, isSuperadmin: false }, projectId, summaryId, { label: 'v1.3' })).rejects.toMatchObject({ status });
+    });
+
+    describe('ссылка и теги доезжают в чекпоинт', () => {
+      let apiPlatformId: string;
+
+      beforeEach(async () => {
+        const [platform] = await testDb.db
+          .insert(projectPlatforms)
+          .values({ projectId, name: 'API', kind: PlatformKind.Server, position: 1 })
+          .returning();
+        apiPlatformId = platform!.id;
+      });
+
+      /** Размечает первую строку черновика, остальные оставляет как есть. */
+      async function tagFirstTask(platformId = apiPlatformId): Promise<void> {
+        const detail = await service.findById(writer(), projectId, summaryId);
+
+        await service.replaceTasks(writer(), projectId, summaryId, {
+          tasks: detail.tasks.map(({ id, title }, index) =>
+            index === 0
+              ? { id, title, url: 'https://tracker.example/1', platformIds: [platformId] }
+              : { id, title },
+          ),
+        });
+      }
+
+      it('чекпоинт получает ссылку и теги задачи', async () => {
+        // Путь записи один: поля доезжают существующим `createCheckpoint`,
+        // который их принимает уже сегодня. Роадмап не правится.
+        await tagFirstTask();
+
+        await service.release(writer(), projectId, summaryId, { label: 'v1.4' });
+
+        const rows = await testDb.db
+          .select()
+          .from(roadmapCheckpoints)
+          .orderBy(asc(roadmapCheckpoints.position));
+
+        expect(rows.map((row) => row.url)).toEqual(['https://tracker.example/1', null, null]);
+        expect(await testDb.rowsOf(checkpointPlatforms)).toEqual([
+          { checkpointId: rows[0]!.id, platformId: apiPlatformId },
+        ]);
+      });
+
+      it('задача без ссылки и тегов даёт чекпоинт без них', async () => {
+        await service.release(writer(), projectId, summaryId, { label: 'v1.5' });
+
+        const rows = await testDb.rowsOf(roadmapCheckpoints);
+
+        expect(rows.map((row) => row.url)).toEqual([null, null, null]);
+        expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+      });
+
+      it('журнал чекпоинта не меняется: только формулировка', async () => {
+        // У штатного создания чекпоинта в метаданных тоже один `title`, и
+        // расхождение означало бы, что приехавший из саммари чекпоинт
+        // журналируется иначе.
+        await tagFirstTask();
+
+        await service.release(writer(), projectId, summaryId, { label: 'v1.4' });
+
+        expect((await auditRecords(AuditAction.CheckpointCreated))[0]?.metadata).toEqual({
+          title: 'раз',
+        });
+      });
+
+      it('чужая платформа в черновике отвергает весь релиз', async () => {
+        // Вторая проверка не заводится: её держит `RoadmapRepository`.
+        // Названная граница — редактор такого черновика создать не может
+        // (дизайн, 5.5).
+        const [other] = await testDb.db
+          .insert(projects)
+          .values({ slug: 'chuzhoj', name: 'Чужой' })
+          .returning();
+        const [foreign] = await testDb.db
+          .insert(projectPlatforms)
+          .values({
+            projectId: other!.id,
+            name: 'Чужая',
+            kind: PlatformKind.Server,
+            position: 1,
+          })
+          .returning();
+        await tagFirstTask(foreign!.id);
+
+        await expect(
+          service.release(writer(), projectId, summaryId, { label: 'v1.6' }),
+        ).rejects.toBeInstanceOf(SectionNotVisibleError);
+
+        expect(await testDb.rowsOf(roadmapVersions)).toHaveLength(0);
+        expect((await testDb.rowsOf(summaries))[0]?.releasedVersionId).toBeNull();
+      });
     });
   });
 

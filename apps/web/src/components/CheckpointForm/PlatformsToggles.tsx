@@ -9,6 +9,15 @@ interface IProps {
   onChange: (platformIds: string[]) => void;
   /** Различитель идентификаторов: форм на панели бывает две. */
   idPrefix: string;
+  /**
+   * Только для чтения.
+   *
+   * Нужен редактору черновика саммари: после сформированного релиза он
+   * показывает теги, но не правит их — чекпоинты живут в роадмапе и
+   * правятся там. Формы чекпоинта это не касается: она доступна лишь
+   * тому, кто вправе писать.
+   */
+  isDisabled?: boolean;
 }
 
 /**
@@ -18,7 +27,13 @@ interface IProps {
  * и в Android. Это не исполнитель и не оценка — ограничение ТЗ 1.4
  * остаётся в силе.
  */
-export function PlatformsToggles({ platforms, value, onChange, idPrefix }: IProps) {
+export function PlatformsToggles({
+  platforms,
+  value,
+  onChange,
+  idPrefix,
+  isDisabled = false,
+}: IProps) {
   if (platforms.length === 0) {
     return null;
   }
@@ -42,6 +57,7 @@ export function PlatformsToggles({ platforms, value, onChange, idPrefix }: IProp
               type="checkbox"
               id={`${idPrefix}-platform-${platform.id}`}
               checked={value.includes(platform.id)}
+              disabled={isDisabled}
               onChange={() => toggle(platform.id)}
             />
             <label htmlFor={`${idPrefix}-platform-${platform.id}`} className="text-sm">

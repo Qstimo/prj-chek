@@ -1,6 +1,7 @@
 import {
   AccessLevel,
   ChronicleSource,
+  PlatformKind,
   Section,
   SubjectKind,
   SummaryTaskOrigin,
@@ -8,7 +9,7 @@ import {
   type SummaryCreate,
 } from '@cairn/shared';
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
@@ -18,16 +19,26 @@ import { ChronicleRepository } from '../chronicle/chronicle.repository';
 import {
   chronicleEntries,
   grants,
+  projectPlatforms,
   projects,
   roadmapVersions,
   subjects,
   summaries,
   summaryTaskDrafts,
+  summaryTaskPlatforms,
   users,
 } from '../db/schema';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
 import { SummariesRepository } from './summaries.repository';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+
+/** Отметка разбивки: шаг релиза её не читает, а тестам нужна одна и та же. */
+const STAMP = {
+  name: 'external',
+  model: 'gpt-4o-mini',
+  textUpdatedAt: new Date('2026-11-16T10:00:00.000Z'),
+  dropped: 0,
+};
 
 /** Входные данные создания: точечные проверки меняют в них одно поле. */
 const CREATE_INPUT: SummaryCreate = {
@@ -161,6 +172,24 @@ describe('репозиторий саммари', () => {
       .update(chronicleEntries)
       .set({ content: 'текст поправили', updatedAt: at })
       .where(eq(chronicleEntries.id, entryId));
+  }
+
+  /**
+   * Платформа вставкой: репозиторий платформ потребовал бы «Инфо»,
+   * которого у субъекта этого потока может не быть вовсе.
+   */
+  async function createPlatform(
+    name: string,
+    kind = PlatformKind.Server,
+    position = 1,
+    target = projectId,
+  ): Promise<string> {
+    const [created] = await testDb.db
+      .insert(projectPlatforms)
+      .values({ projectId: target, name, kind, position })
+      .returning();
+
+    return created!.id;
   }
 
   /** Строка черновика вставкой: её происхождение задаёт сам тест. */
@@ -487,6 +516,227 @@ describe('репозиторий саммари', () => {
       await expect(
         testDb.db.transaction((tx) => repository.remove(member(), tx, projectId, summaryId)),
       ).rejects.toBeInstanceOf(InsufficientLevelError);
+    });
+  });
+
+  describe('ссылка и теги в черновике', () => {
+    let apiPlatformId: string;
+
+    beforeEach(async () => {
+      apiPlatformId = await createPlatform('API', PlatformKind.Server, 1);
+    });
+
+    it('сохраняются вместе со строкой', async () => {
+      const summaryId = await createSummary();
+
+      const detail = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [
+            { title: 'Сделать', url: 'https://tracker.example/1', platformIds: [apiPlatformId] },
+          ],
+        }),
+      );
+
+      expect(detail.tasks[0]?.url).toBe('https://tracker.example/1');
+      expect(detail.tasks[0]?.platformIds).toEqual([apiPlatformId]);
+    });
+
+    it('отсутствие полей оставляет прежние значения', async () => {
+      // Редактор субъекта без выдачи на роадмап чипов не видит и набор не
+      // отправляет: его правка формулировки не вправе стереть чужую
+      // работу (дизайн, 3.3).
+      const summaryId = await createSummary();
+      const saved = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [
+            { title: 'Сделать', url: 'https://tracker.example/1', platformIds: [apiPlatformId] },
+          ],
+        }),
+      );
+
+      const again = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ id: saved.tasks[0]!.id, title: 'Сделать иначе' }],
+        }),
+      );
+
+      expect(again.tasks[0]?.title).toBe('Сделать иначе');
+      expect(again.tasks[0]?.url).toBe('https://tracker.example/1');
+      expect(again.tasks[0]?.platformIds).toEqual([apiPlatformId]);
+    });
+
+    it('снимаются явно', async () => {
+      const summaryId = await createSummary();
+      const saved = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [
+            { title: 'Сделать', url: 'https://tracker.example/1', platformIds: [apiPlatformId] },
+          ],
+        }),
+      );
+
+      const cleared = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ id: saved.tasks[0]!.id, title: 'Сделать', url: null, platformIds: [] }],
+        }),
+      );
+
+      expect(cleared.tasks[0]?.url).toBeNull();
+      expect(cleared.tasks[0]?.platformIds).toEqual([]);
+    });
+
+    it('у новой строки без id сохранять нечего: поля пусты', async () => {
+      const summaryId = await createSummary();
+
+      const detail = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ title: 'Набрал руками' }],
+        }),
+      );
+
+      expect(detail.tasks[0]?.url).toBeNull();
+      expect(detail.tasks[0]?.platformIds).toEqual([]);
+    });
+
+    it('теги переносятся на нужную строку при перестановке', async () => {
+      // Строки черновика удаляются и вставляются заново на каждом
+      // сохранении: сопоставление идёт по `position`, а не по порядку
+      // `RETURNING`, который стандарт не обещает.
+      const summaryId = await createSummary();
+      const saved = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [
+            { title: 'Первая', platformIds: [apiPlatformId] },
+            { title: 'Вторая', platformIds: [] },
+          ],
+        }),
+      );
+
+      const swapped = await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [
+            { id: saved.tasks[1]!.id, title: 'Вторая' },
+            { id: saved.tasks[0]!.id, title: 'Первая' },
+          ],
+        }),
+      );
+
+      expect(swapped.tasks.map((task) => [task.title, task.platformIds])).toEqual([
+        ['Вторая', []],
+        ['Первая', [apiPlatformId]],
+      ]);
+    });
+
+    it('разбивка моделью приходит без ссылки и без тегов', async () => {
+      // Инвариант порта: из вывода модели берётся только формулировка.
+      const summaryId = await createSummary();
+
+      const detail = await testDb.db.transaction((tx) =>
+        repository.replaceWithSuggested(admin(), tx, projectId, summaryId, ['Задача'], STAMP),
+      );
+
+      expect(detail.tasks[0]?.url).toBeNull();
+      expect(detail.tasks[0]?.platformIds).toEqual([]);
+    });
+
+    it('новая разбивка уносит теги прежних строк', async () => {
+      const summaryId = await createSummary();
+      await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ title: 'Прежняя', platformIds: [apiPlatformId] }],
+        }),
+      );
+
+      await testDb.db.transaction((tx) =>
+        repository.replaceWithSuggested(admin(), tx, projectId, summaryId, ['Новая'], STAMP),
+      );
+
+      expect(await testDb.rowsOf(summaryTaskPlatforms)).toHaveLength(0);
+    });
+
+    it('пустая разбивка прежних тегов не трогает', async () => {
+      // Пустая замена прежних строк не трогает вовсе — значит и тегов.
+      const summaryId = await createSummary();
+      await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ title: 'Прежняя', platformIds: [apiPlatformId] }],
+        }),
+      );
+
+      await testDb.db.transaction((tx) =>
+        repository.replaceWithSuggested(admin(), tx, projectId, summaryId, [], STAMP),
+      );
+
+      expect(await testDb.rowsOf(summaryTaskPlatforms)).toHaveLength(1);
+    });
+
+    it('удаление саммари уносит теги перед строками', async () => {
+      const summaryId = await createSummary();
+      await testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, {
+          tasks: [{ title: 'Сделать', platformIds: [apiPlatformId] }],
+        }),
+      );
+
+      await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, summaryId));
+
+      expect(await testDb.rowsOf(summaryTaskPlatforms)).toHaveLength(0);
+      expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(0);
+    });
+  });
+
+  describe('платформы в детали саммари', () => {
+    let apiPlatformId: string;
+
+    beforeEach(async () => {
+      apiPlatformId = await createPlatform('API', PlatformKind.Server, 1);
+      await createPlatform('iOS', PlatformKind.Store, 2);
+    });
+
+    it('отдаются при уровне метаданных роадмапа', async () => {
+      const summaryId = await createSummary();
+      await grant(Section.Chronicle, AccessLevel.Write);
+      await grant(Section.Roadmap, AccessLevel.Metadata);
+
+      const detail = await repository.findById(member(), projectId, summaryId);
+
+      expect(detail.platforms.map((platform) => platform.name)).toEqual(['API', 'iOS']);
+      expect(detail.platforms[0]?.id).toBe(apiPlatformId);
+    });
+
+    it('без выдачи на роадмап список пуст', async () => {
+      // Неотличимо от проекта без платформ — это и есть нераскрытие
+      // (дизайн, 3.2). Уровень спрашивается, а не ловится исключением.
+      const summaryId = await createSummary();
+      await grant(Section.Chronicle, AccessLevel.Write);
+
+      const detail = await repository.findById(member(), projectId, summaryId);
+
+      expect(detail.platforms).toEqual([]);
+    });
+
+    it('выдача на «Инфо» на список не влияет', async () => {
+      // Субъект с роадмапом и без «Инфо» — штатный случай подрядчика.
+      const summaryId = await createSummary();
+      await grant(Section.Chronicle, AccessLevel.Write);
+      await grant(Section.Roadmap, AccessLevel.Write);
+
+      const info = await testDb.db
+        .select()
+        .from(grants)
+        .where(and(eq(grants.subjectId, subjectId), eq(grants.section, Section.Info)));
+
+      expect(info).toEqual([]);
+      expect(await repository.findById(member(), projectId, summaryId)).toMatchObject({
+        platforms: expect.arrayContaining([expect.objectContaining({ name: 'iOS' })]),
+      });
+    });
+
+    it('у проекта без платформ список пуст', async () => {
+      await testDb.db.delete(projectPlatforms);
+      const summaryId = await createSummary();
+
+      expect((await repository.findById(admin(), projectId, summaryId)).platforms).toEqual([]);
     });
   });
 });

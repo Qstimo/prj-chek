@@ -1,6 +1,7 @@
 import {
   AccessLevel,
   ChronicleSource,
+  PlatformKind,
   Section,
   SubjectKind,
   SummaryTaskOrigin,
@@ -14,10 +15,12 @@ import type { RequestSubject } from '../access/access.types';
 import {
   chronicleEntries,
   grants,
+  projectPlatforms,
   projects,
   subjects,
   summaries,
   summaryTaskDrafts,
+  summaryTaskPlatforms,
   users,
 } from '../db/schema';
 import { ChronicleRepository } from './chronicle.repository';
@@ -291,6 +294,39 @@ describe('репозиторий хроники', () => {
 
       expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(0);
       expect(await testDb.rowsOf(summaries)).toHaveLength(0);
+      expect(await testDb.rowsOf(chronicleEntries)).toHaveLength(0);
+    });
+
+    it('удаление записи уносит теги черновика перед его строками', async () => {
+      // На ссылках `restrict`: без уборки запись с размеченным черновиком
+      // стала бы неудаляемой — ровно та же дырка, которую уже закрывали
+      // для самого черновика.
+      const id = await createEntry();
+      const [platform] = await testDb.db
+        .insert(projectPlatforms)
+        .values({ projectId, name: 'API', kind: PlatformKind.Server, position: 1 })
+        .returning();
+      const [summary] = await testDb.db
+        .insert(summaries)
+        .values({ projectId, chronicleEntryId: id, createdBySubjectId: adminSubjectId })
+        .returning();
+      const [draft] = await testDb.db
+        .insert(summaryTaskDrafts)
+        .values({
+          summaryId: summary!.id,
+          title: 'Сделать',
+          position: 1,
+          origin: SummaryTaskOrigin.Model,
+        })
+        .returning();
+      await testDb.db
+        .insert(summaryTaskPlatforms)
+        .values({ draftId: draft!.id, platformId: platform!.id });
+
+      await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, id));
+
+      expect(await testDb.rowsOf(summaryTaskPlatforms)).toHaveLength(0);
+      expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(0);
       expect(await testDb.rowsOf(chronicleEntries)).toHaveLength(0);
     });
 

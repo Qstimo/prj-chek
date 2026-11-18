@@ -207,7 +207,11 @@ export class SummariesService implements OnModuleDestroy {
         entityId: version.id, projectId, metadata: { label: version.label },
       });
       for (const task of tasks) {
-        const checkpoint = await this.roadmap.createCheckpoint(subject, tx, projectId, version.id, { title: task.title });
+        const checkpoint = await this.roadmap.createCheckpoint(subject, tx, projectId, version.id, {
+          title: task.title,
+          url: task.url,
+          platformIds: task.platformIds,
+        });
         await this.audit.record(tx, actorOf(subject), {
           action: AuditAction.CheckpointCreated, entityType: 'checkpoint',
           entityId: checkpoint.id, projectId, metadata: { title: checkpoint.title },

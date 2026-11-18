@@ -7,6 +7,7 @@ import {
   Section,
   type CarriedOutCheckpoint,
   type CheckpointCarryOver,
+  type Platform,
   type PlatformRelease,
   type PlatformReleaseSet,
   type PublicReleaseReport,
@@ -124,6 +125,49 @@ export class RoadmapRepository {
       .from(roadmapVersions)
       .where(eq(roadmapVersions.projectId, projectId))
       .orderBy(asc(roadmapVersions.position));
+  }
+
+  /**
+   * Платформы проекта с их порядком.
+   *
+   * Нужен чипам тегов в редакторе черновика саммари: собирать весь роадмап
+   * с версиями, чекпоинтами и сводкой ради списка имён незачем — тот же
+   * довод, по которому рядом живёт {@link labelsForProject}.
+   *
+   * Уровня «метаданные» достаточно, и это не послабление: сводка релизов,
+   * которую `findForProject` отдаёт под тем же уровнем, уже несёт каждую
+   * платформу проекта целиком, а публичная страница роадмапа — и вовсе без
+   * авторизации. «Инфо» владеет правкой платформ и паспортом, а не знанием
+   * о списке (дизайн, 3.1).
+   *
+   * Порядок — `position`, затем `createdAt`: тот же, в котором платформы
+   * читает сводка. Второй порядок разошёлся бы с первым.
+   */
+  async platformsForProject(
+    subject: RequestSubject,
+    projectId: string,
+    executor: Executor = this.db,
+  ): Promise<Platform[]> {
+    await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Roadmap,
+      AccessLevel.Metadata,
+      executor,
+    );
+
+    const rows = await executor
+      .select()
+      .from(projectPlatforms)
+      .where(eq(projectPlatforms.projectId, projectId))
+      .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt));
+
+    return rows.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      name: row.name,
+      position: row.position,
+    }));
   }
 
   /** Создаёт версию в конце последовательности. */

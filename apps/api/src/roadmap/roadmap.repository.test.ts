@@ -10,7 +10,7 @@ import {
   type RoadmapVersionDetail,
 } from '@cairn/shared';
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessService } from '../access/access.service';
@@ -354,6 +354,75 @@ describe('репозиторий роадмапа', () => {
       await createVersion('v1.1');
 
       expect(await repository.labelsForProject(admin(), otherProjectId)).toEqual([]);
+    });
+  });
+
+  describe('платформы проекта', () => {
+    beforeEach(async () => {
+      await createPlatform('API', PlatformKind.Server, 1);
+      await createPlatform('iOS', PlatformKind.Store, 2);
+    });
+
+    it('отдаёт платформы проекта по порядку', async () => {
+      const platforms = await repository.platformsForProject(admin(), projectId);
+
+      expect(platforms.map((platform) => platform.name)).toEqual(['API', 'iOS']);
+    });
+
+    it('отдаёт вид и позицию, но не проект и не отметки времени', async () => {
+      // Проекция та же, что у сводки релизов: второй состав тех же
+      // данных пришлось бы держать в согласии с первым.
+      const [platform] = await repository.platformsForProject(admin(), projectId);
+
+      expect(platform).toEqual({
+        id: expect.any(String),
+        kind: PlatformKind.Server,
+        name: 'API',
+        position: 1,
+      });
+    });
+
+    it('хватает уровня метаданных', async () => {
+      // Список платформ проекта роадмап отдаёт сам — он же собирает из
+      // него сводку релизов под тем же уровнем (`findForProject`). «Инфо»
+      // здесь не участвует: она владеет правкой платформ, а не знанием о
+      // них (дизайн, 3.1).
+      await grant(AccessLevel.Metadata);
+
+      await expect(repository.platformsForProject(member(), projectId)).resolves.toHaveLength(2);
+    });
+
+    it('без выдачи на роадмап проект не раскрывается', async () => {
+      // Отсутствие доступа — 404, а не 403.
+      await expect(repository.platformsForProject(member(), projectId)).rejects.toBeInstanceOf(
+        SectionNotVisibleError,
+      );
+    });
+
+    it('выдача на «Инфо» не требуется', async () => {
+      // Субъект с роадмапом и без «Инфо» — штатный случай подрядчика: в
+      // роадмапе он уже ставит теги штатной формой чекпоинта.
+      await grant(AccessLevel.Write);
+
+      const info = await testDb.db
+        .select()
+        .from(grants)
+        .where(and(eq(grants.subjectId, subjectId), eq(grants.section, Section.Info)));
+
+      expect(info).toEqual([]);
+      await expect(repository.platformsForProject(member(), projectId)).resolves.toHaveLength(2);
+    });
+
+    it('у проекта без платформ список пуст, а не отказ', async () => {
+      await expect(repository.platformsForProject(admin(), otherProjectId)).resolves.toEqual([]);
+    });
+
+    it('платформ чужого проекта в списке нет', async () => {
+      await createPlatform('Чужая', PlatformKind.Server, 1, otherProjectId);
+
+      const platforms = await repository.platformsForProject(admin(), projectId);
+
+      expect(platforms.map((platform) => platform.name)).toEqual(['API', 'iOS']);
     });
   });
 
