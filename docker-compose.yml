@@ -83,7 +83,67 @@ services:
       CAIRN_TASK_SUGGESTER_TIMEOUT_SECONDS: ${CAIRN_TASK_SUGGESTER_TIMEOUT_SECONDS:-60}
       CAIRN_TASK_SUGGESTER_MAX_CHARS: ${CAIRN_TASK_SUGGESTER_MAX_CHARS:-40000}
       CAIRN_TASK_SUGGESTER_MAX_TASKS: ${CAIRN_TASK_SUGGESTER_MAX_TASKS:-50}
+      # Расшифровка записи созвона. Переменные перечислены все четырнадцать
+      # по той же причине, что у автопроверок и у предложителя: процесс в
+      # контейнере видит только то, что ему передали, и пропущенная здесь
+      # переменная уже стоила проекту дефекта с интервалом проверок.
+      #
+      # Умолчание `off`: на свежей установке наружу не уходит ничего, и
+      # кнопки «Загрузить запись» нет вовсе. Наружу, когда порт включат,
+      # уходит звуковая дорожка созвона целиком — видео не уходит никогда.
+      #
+      # У адреса умолчания здесь нет намеренно, ровно как у предложителя:
+      # подставить внешний адрес значило бы тихо отправить запись наружу у
+      # установки с `local`, у которой адрес не задан. Поэтому адрес живёт
+      # в `.env.example` заполненным значением: приложение умолчание тоже
+      # подставляет, но только когда переменной нет вовсе, а compose всегда
+      # передаёт её — пустой.
+      #
+      # Шесть первых переменных (вид, адрес, ключ, каталог, модель, предел
+      # ожидания) — **запасной источник**: настройка с экрана «Модели»
+      # лежит в базе и перебивает их целиком. Остальные восемь — пределы,
+      # каталог тома, частота тика, битрейт, терпение к `ffmpeg` — остаются
+      # единственным источником: это настройка нашего поведения.
+      CAIRN_TRANSCRIBER: ${CAIRN_TRANSCRIBER:-off}
+      CAIRN_TRANSCRIBER_BASE_URL: ${CAIRN_TRANSCRIBER_BASE_URL:-}
+      CAIRN_TRANSCRIBER_API_KEY: ${CAIRN_TRANSCRIBER_API_KEY:-}
+      CAIRN_TRANSCRIBER_FOLDER_ID: ${CAIRN_TRANSCRIBER_FOLDER_ID:-}
+      CAIRN_TRANSCRIBER_MODEL: ${CAIRN_TRANSCRIBER_MODEL:-general}
+      CAIRN_TRANSCRIBER_TIMEOUT_SECONDS: ${CAIRN_TRANSCRIBER_TIMEOUT_SECONDS:-180}
+      # Два предела, и они про разное: 40 МиБ — что уйдёт службе (её тело
+      # запроса — 60 МБ минус раздувание base64), 2 ГиБ — что примет ручка
+      # приёма записи.
+      CAIRN_TRANSCRIBER_MAX_BYTES: ${CAIRN_TRANSCRIBER_MAX_BYTES:-41943040}
+      CAIRN_TRANSCRIPTION_POLL_SECONDS: ${CAIRN_TRANSCRIPTION_POLL_SECONDS:-20}
+      CAIRN_TRANSCRIPTION_MAX_MINUTES: ${CAIRN_TRANSCRIPTION_MAX_MINUTES:-120}
+      # Путь внутри контейнера. Та же подстановка стоит у точки
+      # монтирования тома ниже: два места с одним умолчанием разошлись бы
+      # на первой же правке, и приложение писало бы мимо тома.
+      CAIRN_RECORDINGS_DIR: ${CAIRN_RECORDINGS_DIR:-/var/lib/cairn/recordings}
+      CAIRN_RECORDING_MAX_BYTES: ${CAIRN_RECORDING_MAX_BYTES:-2147483648}
+      # `auto` ищет `ffmpeg` в PATH при старте; в образе он есть (`apk add`
+      # в ступени `runner`). Без него установка остаётся рабочей, только
+      # уже: принимаются MP3, WAV и OGG, видео получает названный отказ.
+      CAIRN_RECORDING_FFMPEG: ${CAIRN_RECORDING_FFMPEG:-auto}
+      CAIRN_RECORDING_AUDIO_BITRATE: ${CAIRN_RECORDING_AUDIO_BITRATE:-24k}
+      CAIRN_RECORDING_EXTRACT_MINUTES: ${CAIRN_RECORDING_EXTRACT_MINUTES:-30}
       NODE_ENV: production
+    volumes:
+      # Записи созвонов: загруженный файл до укладки текста и звуковая
+      # дорожка, которая хранится, пока живёт саммари. Том, а не база:
+      # полгигабайта на созвон превратили бы ежедневную копию `pg_dump` из
+      # единиц мегабайт в гигабайты.
+      #
+      # ЭТОТ ТОМ НЕ ВХОДИТ В `scripts/backup.sh` — он снимает только базу.
+      # Это следствие того же решения, а не недосмотр: восстановление из
+      # копии даёт саммари, записи которых нет, зато текст на месте — он в
+      # базе. Нужны записи — копируй том отдельно.
+      #
+      # ЗАПАС ДИСКА СЧИТАЕТСЯ ПО ПИКУ, А НЕ ПО ПОКОЮ: в покое здесь лежат
+      # только дорожки (единицы мегабайт на созвон), но идущая расшифровка
+      # держит загруженный файл — до `CAIRN_RECORDING_MAX_BYTES`, по
+      # умолчанию 2 ГиБ.
+      - recordings-data:${CAIRN_RECORDINGS_DIR:-/var/lib/cairn/recordings}
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,3 +237,6 @@ networks:
 volumes:
   postgres-data:
   caddy-data:
+  # Записи созвонов. В резервную копию не входит (см. комментарий у
+  # монтирования в службе `api`).
+  recordings-data:
