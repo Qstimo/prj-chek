@@ -56,6 +56,9 @@ const TEXT_ONLY: SummaryDetail = {
   isTextStale: false,
   suggestedVersionLabel: 'v1.3',
   platforms: [],
+  /** Текст вставили руками: записи созвона у такого саммари нет вовсе. */
+  recording: null,
+  transcription: null,
 };
 
 const WITH_TASKS: SummaryDetail = {

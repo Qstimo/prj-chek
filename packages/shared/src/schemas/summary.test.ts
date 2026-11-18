@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PlatformKind, SummaryTaskOrigin } from '../enums';
+import { PlatformKind, SummaryTaskOrigin, TranscriberKind, TranscriptionState } from '../enums';
 import {
   MAX_SUMMARY_TASKS,
   normalizeSummaryText,
@@ -38,6 +38,31 @@ const DETAIL = {
   isTextStale: false,
   suggestedVersionLabel: null,
   platforms: [],
+  recording: null,
+  transcription: null,
+};
+
+/** Задача расшифровки, принёсшая текст этого саммари. */
+const JOB = {
+  id: ID,
+  projectId: ID,
+  projectName: 'CAIRN',
+  summaryId: ID,
+  occurredOn: null,
+  title: null,
+  state: TranscriptionState.Running,
+  transcriber: TranscriberKind.External,
+  model: 'general',
+  host: 'stt.api.cloud.yandex.net',
+  uploadBytes: 566_231_040,
+  uploadType: 'video/mp4',
+  audioBytes: 11_534_336,
+  audioType: 'audio/ogg',
+  hasRecording: true,
+  failureCode: null,
+  startedAt: '2026-11-17T10:00:00.000Z',
+  sentAt: '2026-11-17T10:04:12.000Z',
+  finishedAt: null,
 };
 
 describe('создание саммари', () => {
@@ -216,6 +241,55 @@ describe('поля чекпоинта в черновике', () => {
     // намеренно неотличимы: отличимость второго и была бы утечкой
     // признака (дизайн, 3.2).
     expect(summaryDetailSchema.parse(DETAIL).platforms).toEqual([]);
+  });
+});
+
+describe('деталь саммари: запись созвона', () => {
+  it('записи может не быть вовсе: текст вставили руками', () => {
+    expect(summaryDetailSchema.parse(DETAIL).recording).toBeNull();
+    expect(summaryDetailSchema.parse(DETAIL).transcription).toBeNull();
+  });
+
+  it('несёт и размер дорожки, и размер загруженного', () => {
+    // Человек загружал видео, а слушает дорожку, и экран обязан сказать
+    // это так, чтобы он не удивился (дизайн, 8.5).
+    const parsed = summaryDetailSchema.parse({
+      ...DETAIL,
+      recording: {
+        bytes: 11_534_336,
+        mediaType: 'audio/ogg',
+        uploadBytes: 566_231_040,
+        uploadType: 'video/mp4',
+        isSourceRemoved: true,
+        uploadedAt: '2026-11-17T10:00:00.000Z',
+      },
+      transcription: JOB,
+    });
+
+    expect(parsed.recording?.bytes).toBe(11_534_336);
+    expect(parsed.recording?.uploadBytes).toBe(566_231_040);
+    expect(parsed.transcription?.state).toBe(TranscriptionState.Running);
+  });
+
+  it('помнит, убран ли исходник', () => {
+    // Исходник убирается при укладке текста (решение владельца 2), и
+    // экран обязан сказать правду в обоих случаях: у саммари из видео —
+    // «исходник убран», у саммари из mp3 — ничего, потому что убирать
+    // было нечего (файл один).
+    const fromMp3 = summaryDetailSchema.parse({
+      ...DETAIL,
+      recording: {
+        bytes: 10_000_000,
+        mediaType: 'audio/mpeg',
+        uploadBytes: 10_000_000,
+        uploadType: 'audio/mpeg',
+        isSourceRemoved: false,
+        uploadedAt: '2026-11-17T10:00:00.000Z',
+      },
+      transcription: null,
+    });
+
+    expect(fromMp3.recording?.isSourceRemoved).toBe(false);
   });
 });
 

@@ -614,6 +614,12 @@ export class SummariesRepository {
         seesRoadmap,
       ),
       platforms: await this.platformsOf(subject, row.projectId, executor, seesRoadmap),
+      // Пока пусто у каждого саммари, и это верный ответ на сегодня:
+      // задачи расшифровки ещё никто не заводит, значит записи созвона
+      // ни у одного саммари нет. Поля заполнит проекция чанка 4 — там же,
+      // где появляется ручка, отдающая дорожку.
+      recording: null,
+      transcription: null,
     };
   }
 
