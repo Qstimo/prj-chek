@@ -15,6 +15,8 @@ import {
   PlatformReleaseState,
   Section,
   SubjectKind,
+  TranscriberKind,
+  TranscriptionState,
 } from './enums';
 
 describe('Section', () => {
@@ -81,6 +83,33 @@ describe('перечни саммари', () => {
     expect(Object.values(SummaryTaskOrigin)).toEqual(['model', 'human']);
   });
 
+});
+
+describe('перечни расшифровки', () => {
+  it('вид службы говорит, куда уходит запись', () => {
+    expect(Object.values(TranscriberKind)).toEqual(['external', 'local']);
+  });
+
+  it('у задачи шесть состояний, и три из них незакрытые', () => {
+    // Все три различия — границы, а не оттенки прогресса, и по ним
+    // принимается решение при перезапуске API (дизайн, 2.4): в `queued`
+    // наружу не ушло ничего и работа не начата, в `extracting` работа
+    // идёт у нас, в `sending` байты в пути.
+    expect(Object.values(TranscriptionState)).toEqual([
+      'queued',
+      'extracting',
+      'sending',
+      'running',
+      'done',
+      'failed',
+    ]);
+  });
+
+  it('четвёртого источника хроники не появилось', () => {
+    // Расшифрованный текст по происхождению не отличается от
+    // вставленного в ту же форму (дизайн, 1.3).
+    expect(Object.values(ChronicleSource)).toEqual(['manual', 'webhook', 'summary']);
+  });
 });
 
 describe('перечни служб модели', () => {
