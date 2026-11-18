@@ -5,6 +5,8 @@ import {
   Section,
   SubjectKind,
   SummaryTaskOrigin,
+  TranscriberKind,
+  TranscriptionState,
   summaryDetailSchema,
   type SummaryCreate,
 } from '@cairn/shared';
@@ -26,6 +28,7 @@ import {
   summaries,
   summaryTaskDrafts,
   summaryTaskPlatforms,
+  transcriptionJobs,
   users,
 } from '../db/schema';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
@@ -141,6 +144,38 @@ describe('репозиторий саммари', () => {
     );
 
     return created.id;
+  }
+
+  /**
+   * Расшифровка над саммари вставкой: репозиторий расшифровок потребовал бы
+   * своих выдач, а здесь это подготовка данных.
+   */
+  async function addJob(
+    summaryId: string,
+    overrides: Partial<typeof transcriptionJobs.$inferInsert> = {},
+  ): Promise<string> {
+    const id = crypto.randomUUID();
+    const [created] = await testDb.db
+      .insert(transcriptionJobs)
+      .values({
+        id,
+        projectId,
+        summaryId,
+        requestedBySubjectId: adminSubjectId,
+        state: TranscriptionState.Done,
+        transcriber: TranscriberKind.External,
+        model: 'general',
+        uploadPath: `${id}.mp4`,
+        uploadBytes: 566_231_040,
+        uploadType: 'video/mp4',
+        audioPath: `${id}.opus`,
+        audioBytes: 11_534_336,
+        audioType: 'audio/ogg',
+        ...overrides,
+      })
+      .returning();
+
+    return created!.id;
   }
 
   /** Версия роадмапа вставкой: `createVersion` потребовал бы своих выдач. */
@@ -507,6 +542,72 @@ describe('репозиторий саммари', () => {
       await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, summaryId));
 
       expect(await testDb.rowsOf(chronicleEntries)).toHaveLength(1);
+    });
+
+    it('удаление саммари уносит его расшифровки', async () => {
+      const summaryId = await createSummary();
+      await addJob(summaryId);
+
+      await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, summaryId));
+
+      expect(await testDb.rowsOf(transcriptionJobs)).toHaveLength(0);
+      expect(await testDb.rowsOf(summaries)).toHaveLength(0);
+    });
+
+    it('удаление саммари отдаёт пути записей вызывающему', async () => {
+      // Файлы удаляются после фиксации: удаление файла не откатывается, и
+      // обратный порядок унёс бы запись у саммари, удаление которого потом
+      // откатилось.
+      const summaryId = await createSummary();
+      const jobId = await addJob(summaryId);
+
+      const removed = await testDb.db.transaction((tx) =>
+        repository.remove(admin(), tx, projectId, summaryId),
+      );
+
+      expect(removed.mediaPaths).toEqual([`${jobId}.mp4`, `${jobId}.opus`]);
+    });
+
+    it('несколько попыток по одним файлам дают два пути, а не четыре', async () => {
+      // Повторная расшифровка не копирует запись: пути у попыток
+      // одинаковы, и удалять дважды нечего.
+      const summaryId = await createSummary();
+      const jobId = await addJob(summaryId);
+      await addJob(summaryId, { uploadPath: `${jobId}.mp4`, audioPath: `${jobId}.opus` });
+
+      const removed = await testDb.db.transaction((tx) =>
+        repository.remove(admin(), tx, projectId, summaryId),
+      );
+
+      expect(removed.mediaPaths).toHaveLength(2);
+    });
+
+    it('без извлечения путь один: загруженное и есть дорожка', async () => {
+      const summaryId = await createSummary();
+      const jobId = await addJob(summaryId, { uploadType: 'audio/mpeg' });
+      await testDb.db
+        .update(transcriptionJobs)
+        .set({ uploadPath: `${jobId}.mp3`, audioPath: `${jobId}.mp3` })
+        .where(eq(transcriptionJobs.id, jobId));
+
+      const removed = await testDb.db.transaction((tx) =>
+        repository.remove(admin(), tx, projectId, summaryId),
+      );
+
+      expect(removed.mediaPaths).toEqual([`${jobId}.mp3`]);
+    });
+
+    it('у саммари с уложенным текстом путь один: исходник уже убран', async () => {
+      // Обычный случай, а не краевой: исходник уносится при переходе в
+      // done (решение владельца 2), и у живого саммари остаётся дорожка.
+      const summaryId = await createSummary();
+      const jobId = await addJob(summaryId, { uploadPath: null });
+
+      const removed = await testDb.db.transaction((tx) =>
+        repository.remove(admin(), tx, projectId, summaryId),
+      );
+
+      expect(removed.mediaPaths).toEqual([`${jobId}.opus`]);
     });
 
     it('уровня чтения хроники для удаления не хватает', async () => {

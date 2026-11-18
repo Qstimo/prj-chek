@@ -21,6 +21,7 @@ import {
   transcriptionJobs,
   type TranscriptionJobRow,
 } from '../../db/schema';
+import { mediaPathsOf } from './media-paths';
 import { RecordingStoreFailure } from './recording-store';
 
 /** Состояния, из которых задача ещё может куда-то перейти. */
@@ -557,22 +558,4 @@ export class TranscriptionRepository {
       finishedAt: row.finishedAt?.toISOString() ?? null,
     }));
   }
-}
-
-/**
- * Уникальные непустые пути файлов задач.
- *
- * Схлопывание обязательно по двум причинам сразу: когда извлечение не
- * понадобилось, обе колонки держат одну и ту же строку, а у задачи,
- * дошедшей до `done`, `upload_path` уже пуст.
- */
-export function mediaPathsOf(rows: Pick<TranscriptionJobRow, 'uploadPath' | 'audioPath'>[]): string[] {
-  const paths = new Set<string>();
-
-  for (const row of rows) {
-    if (row.uploadPath) paths.add(row.uploadPath);
-    if (row.audioPath) paths.add(row.audioPath);
-  }
-
-  return [...paths];
 }

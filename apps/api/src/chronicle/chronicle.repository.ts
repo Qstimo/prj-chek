@@ -20,8 +20,10 @@ import {
   summaries,
   summaryTaskDrafts,
   summaryTaskPlatforms,
+  transcriptionJobs,
   type ChronicleEntry,
 } from '../db/schema';
+import { mediaPathsOf } from '../summaries/transcription/media-paths';
 import { chronicleProjection } from './chronicle.projection';
 
 /**
@@ -113,16 +115,24 @@ export class ChronicleRepository {
     return updated!;
   }
 
-  /** Удаляет запись и возвращает её: журналу нужны заголовок и дата. */
+  /**
+   * Удаляет запись и возвращает её: журналу нужны заголовок и дата.
+   *
+   * Плюс пути файлов созвонов, если за записью стояло саммари с
+   * расшифровками: удалять их здесь нельзя — `unlink` не откатывается, и
+   * обратный порядок унёс бы запись у саммари, удаление которого потом
+   * откатилось.
+   */
   async remove(
     subject: RequestSubject,
     tx: Transaction,
     projectId: string,
     entryId: string,
-  ): Promise<ChronicleEntry> {
+  ): Promise<ChronicleEntry & { mediaPaths: string[] }> {
     await this.access.requireLevel(subject, projectId, Section.Chronicle, AccessLevel.Write, tx);
 
     const entry = await this.requireEntry(tx, projectId, entryId);
+    let mediaPaths: string[] = [];
 
     // Саммари ссылается на запись `restrict`, каскадов в проекте нет:
     // без явной уборки запись с саммари стала бы неудаляемой. Отдельной
@@ -154,12 +164,27 @@ export class ChronicleRepository {
       }
 
       await tx.delete(summaryTaskDrafts).where(inArray(summaryTaskDrafts.summaryId, ids));
+
+      // Задачи расшифровки — дети саммари, и без них удаление упёрлось бы
+      // в целостность. Пути их файлов возвращаются вызывающему: `unlink`
+      // идёт после фиксации транзакции, не внутри (дизайн, 2.5 пункт 4).
+      const jobs = await tx
+        .select({
+          uploadPath: transcriptionJobs.uploadPath,
+          audioPath: transcriptionJobs.audioPath,
+        })
+        .from(transcriptionJobs)
+        .where(inArray(transcriptionJobs.summaryId, ids));
+
+      mediaPaths = mediaPathsOf(jobs);
+
+      await tx.delete(transcriptionJobs).where(inArray(transcriptionJobs.summaryId, ids));
       await tx.delete(summaries).where(inArray(summaries.id, ids));
     }
 
     await tx.delete(chronicleEntries).where(eq(chronicleEntries.id, entryId));
 
-    return entry;
+    return { ...entry, mediaPaths };
   }
 
   /** Находит запись, принадлежащую проекту; чужая выглядит несуществующей. */

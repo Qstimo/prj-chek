@@ -29,10 +29,13 @@ import {
   summaries,
   summaryTaskDrafts,
   summaryTaskPlatforms,
+  transcriptionJobs,
   type SummaryRow,
 } from '../db/schema';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
 import { nextVersionLabel } from './next-version-label';
+import { mediaPathsOf } from './transcription/media-paths';
+import type { RemovedMedia } from './transcription/transcription.repository';
 
 /**
  * Доступ к саммари созвонов и их черновикам задач.
@@ -372,14 +375,42 @@ export class SummariesRepository {
     tx: Transaction,
     projectId: string,
     summaryId: string,
-  ): Promise<SummaryDetail> {
+  ): Promise<SummaryDetail & RemovedMedia> {
     const row = await this.requireForWrite(subject, tx, projectId, summaryId);
     const detail = await this.detailOf(subject, tx, row);
+    const mediaPaths = await this.clearTranscriptions(tx, summaryId);
 
     await this.clearTasks(tx, summaryId);
     await tx.delete(summaries).where(eq(summaries.id, summaryId));
 
-    return detail;
+    return { ...detail, mediaPaths };
+  }
+
+  /**
+   * Уносит задачи расшифровки саммари и отдаёт пути их файлов.
+   *
+   * Ссылка `restrict`, каскадов в проекте нет: без явной уборки саммари с
+   * расшифровкой стало бы неудаляемым. Пути возвращаются вызывающему, а не
+   * удаляются здесь: `unlink` обязан идти **после** фиксации транзакции —
+   * удаление файла не откатывается, и обратный порядок унёс бы запись у
+   * саммари, удаление которого потом откатилось (дизайн, 2.5 пункт 4).
+   *
+   * Отдельной записи в журнал это не получает по той же причине, по
+   * которой её не получает уборка саммари при удалении записи хроники:
+   * человек удалял саммари, и журнал обязан описывать то, что он сделал.
+   */
+  private async clearTranscriptions(tx: Transaction, summaryId: string): Promise<string[]> {
+    const rows = await tx
+      .select({
+        uploadPath: transcriptionJobs.uploadPath,
+        audioPath: transcriptionJobs.audioPath,
+      })
+      .from(transcriptionJobs)
+      .where(eq(transcriptionJobs.summaryId, summaryId));
+
+    await tx.delete(transcriptionJobs).where(eq(transcriptionJobs.summaryId, summaryId));
+
+    return mediaPathsOf(rows);
   }
 
   /**

@@ -14,6 +14,8 @@ import {
   SUMMARY_TEXT_TOO_LONG,
   SubjectKind,
   SummaryTaskOrigin,
+  TranscriberKind,
+  TranscriptionState,
   ModelServicePlacement,
   type ModelServiceUpdate,
   type SummaryCreate,
@@ -42,6 +44,7 @@ import {
   grants,
   subjects,
   summaries,
+  transcriptionJobs,
   users,
 } from '../db/schema';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
@@ -55,6 +58,7 @@ import {
 } from './suggester/task-suggester';
 import { SummariesRepository } from './summaries.repository';
 import { SummariesService } from './summaries.service';
+import { RecordingStore } from './transcription/recording-store';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 
 /** Входные данные создания: текст ровно в 14 знаков — он же в журнале. */
@@ -84,8 +88,36 @@ function deferred(): { promise: Promise<never>; release: () => void } {
   return { promise, release };
 }
 
+/**
+ * Хранилище, которое помнит момент вызова.
+ *
+ * Момент проверяется **чужим соединением**: роль приложения не видит
+ * незафиксированного удаления, поэтому «саммари уже нет для appDb»
+ * означает ровно «транзакция зафиксирована». Сравнение порядка вызовов
+ * было бы договорённостью, а это — наблюдение.
+ */
+class StubStore extends RecordingStore {
+  readonly removed: string[] = [];
+  failOnRemove = false;
+  sawCommitted: boolean | null = null;
+
+  constructor(private readonly countSummaries: () => Promise<number>) {
+    super();
+  }
+
+  override async remove(relativePath: string): Promise<void> {
+    this.removed.push(relativePath);
+    this.sawCommitted = (await this.countSummaries()) === 0;
+
+    if (this.failOnRemove) {
+      throw new Error('том не смонтирован');
+    }
+  }
+}
+
 describe('служба саммари', () => {
   let testDb: TestDatabase;
+  let store: StubStore;
   let service: SummariesService;
   let disabledService: SummariesService;
   let repository: SummariesRepository;
@@ -123,7 +155,8 @@ describe('служба саммари', () => {
       new RoadmapRepository(testDb.db, access),
     );
     audit = new AuditService();
-    service = new SummariesService(testDb.db, repository, audit, stubSource, new RoadmapRepository(testDb.db, access));
+    store = new StubStore(async () => (await testDb.appDb.select({ id: summaries.id }).from(summaries)).length);
+    service = new SummariesService(testDb.db, repository, audit, stubSource, new RoadmapRepository(testDb.db, access), store);
     // Вторая служба на выключенном порте: источник отдаёт выключенный
     // адаптер на каждом вызове — так же, как в боевом коде.
     disabledService = new SummariesService(
@@ -132,6 +165,7 @@ describe('служба саммари', () => {
       audit,
       disabledSource,
       new RoadmapRepository(testDb.db, access),
+      store,
     );
   });
 
@@ -141,6 +175,9 @@ describe('служба саммари', () => {
 
   beforeEach(async () => {
     await testDb.truncate();
+    store.removed.length = 0;
+    store.failOnRemove = false;
+    store.sawCommitted = null;
     vi.restoreAllMocks();
     suggesterStub.suggest.mockReset();
     suggesterStub.suggest.mockResolvedValue({
@@ -191,7 +228,32 @@ describe('служба саммари', () => {
     const roadmap = new RoadmapRepository(db, access);
     const own = new SummariesRepository(db, access, new ChronicleRepository(db, access), roadmap);
 
-    return { repository: own, service: new SummariesService(db, own, audit, stubSource, roadmap) };
+    return {
+      repository: own,
+      service: new SummariesService(db, own, audit, stubSource, roadmap, store),
+    };
+  }
+
+  /** Расшифровка над саммари вставкой: подготовка данных, а не проверка прав. */
+  async function addJob(summaryId: string): Promise<string> {
+    const id = crypto.randomUUID();
+    await testDb.db.insert(transcriptionJobs).values({
+      id,
+      projectId,
+      summaryId,
+      requestedBySubjectId: adminSubjectId,
+      state: TranscriptionState.Done,
+      transcriber: TranscriberKind.External,
+      model: 'general',
+      uploadPath: `${id}.mp4`,
+      uploadBytes: 566_231_040,
+      uploadType: 'video/mp4',
+      audioPath: `${id}.opus`,
+      audioBytes: 11_534_336,
+      audioType: 'audio/ogg',
+    });
+
+    return id;
   }
 
   /** Записи журнала по действию, старые сверху. */
@@ -284,6 +346,7 @@ describe('служба саммари', () => {
           new ModelServiceSettingsService(testDb.db, settingsRepository),
         ),
         new RoadmapRepository(testDb.db, access),
+        store,
       );
 
       // Окружение чистое: иначе ключ из оболочки разработчика включал бы
@@ -1004,6 +1067,49 @@ describe('служба саммари', () => {
 
       expect(record?.metadata).toEqual({ title: 'Созвон по релизу' });
       expect(await testDb.rowsOf(summaries)).toHaveLength(0);
+    });
+
+
+    it('запись созвона убирается после фиксации транзакции, а не внутри', async () => {
+      // Порядок обязателен: сначала commit, потом unlink. Удаление файла
+      // не откатывается, и обратный порядок унёс бы запись у саммари,
+      // удаление которого потом откатилось.
+      const jobId = await addJob(summaryId);
+
+      await service.remove(writer(), projectId, summaryId);
+
+      expect(store.removed).toEqual([`${jobId}.mp4`, `${jobId}.opus`]);
+      expect(store.sawCommitted).toBe(true);
+    });
+
+    it('сбой удаления файла не валит удаление саммари', async () => {
+      // Осиротевший файл виден предупреждением в логе, места занимает
+      // столько же и данных не раскрывает. Откатывать удаление из-за него
+      // значило бы сделать саммари неудаляемым из-за файла.
+      await addJob(summaryId);
+      store.failOnRemove = true;
+
+      await expect(service.remove(writer(), projectId, summaryId)).resolves.toBeUndefined();
+      expect(await testDb.rowsOf(summaries)).toHaveLength(0);
+    });
+
+    it('у саммари без созвона хранилище не зовётся вовсе', async () => {
+      await service.remove(writer(), projectId, summaryId);
+
+      expect(store.removed).toEqual([]);
+    });
+
+    it('уборка расшифровок своей записи в журнал не получает', async () => {
+      // Человек удалял саммари, и журнал обязан описывать то, что он
+      // сделал: вторая запись про файлы рассказывала бы о следствии.
+      await addJob(summaryId);
+
+      await service.remove(writer(), projectId, summaryId);
+
+      expect(await summaryActions()).toEqual([
+        AuditAction.SummaryCreated,
+        AuditAction.SummaryDeleted,
+      ]);
     });
 
     it('список и деталь отдаются службой без своих записей', async () => {

@@ -11,6 +11,7 @@ import { SummariesController } from './summaries.controller';
 import { SummariesOverviewController } from './summaries-overview.controller';
 import { SummariesRepository } from './summaries.repository';
 import { SummariesService } from './summaries.service';
+import { RecordingStore } from './transcription/recording-store';
 
 /**
  * Модуль конструктора задач из саммари созвона.
@@ -29,7 +30,7 @@ import { SummariesService } from './summaries.service';
     ModelServicesModule,
   ],
   controllers: [SummariesController, SummariesOverviewController],
-  providers: [SummariesRepository, SummariesService],
+  providers: [SummariesRepository, SummariesService, RecordingStore],
   // Источник адаптера приходит из `ModelServicesModule`: он строится из
   // одной только службы разрешения настройки, и проверка связи на экране
   // администрирования нуждается в том же источнике. Две регистрации одного
