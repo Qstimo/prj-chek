@@ -93,7 +93,7 @@ describe('черновик задач', () => {
     expect(summaryTaskOriginEnum.enumValues).toEqual(Object.values(SummaryTaskOrigin));
   });
 
-  it('не богаче чекпоинта: своих полей у задачи нет', () => {
+  it('дополнительные поля задачи описывают только черновик', () => {
     // ТЗ 1.4 остаётся в силе, а дизайн 2.1 отменён только в части двух
     // полей, которые у чекпоинта есть. Сторож считает разницу составов,
     // а не перечисляет запреты: перечисление пропустило бы поле, которое
@@ -102,7 +102,7 @@ describe('черновик задач', () => {
       (column) => !columnNames(roadmapCheckpoints).includes(column),
     );
 
-    expect(own.sort()).toEqual(['summary_id', 'origin'].sort());
+    expect(own.sort()).toEqual(['summary_id', 'origin', 'state', 'released_version_id'].sort());
   });
 
   it('ссылка на задачу во внешнем трекере есть и необязательна', () => {
@@ -129,13 +129,14 @@ describe('черновик задач', () => {
     // `(position, summary_id)` чтению черновика одного саммари не
     // помогает, а уникальность позиций внутри саммари **не выражается**
     // намеренно — их целиком перенумеровывает `PUT …/tasks`.
-    expect(columnsOf(summaryTaskDrafts, 'summary_task_drafts_summary_idx')).toEqual([
+    expect(columnsOf(summaryTaskDrafts, 'summary_task_drafts_summary_state_idx')).toEqual([
       ['summary_id', 'asc'],
+      ['state', 'asc'],
       ['position', 'asc'],
     ]);
     expect(
       getTableConfig(summaryTaskDrafts).indexes.find(
-        (candidate) => candidate.config.name === 'summary_task_drafts_summary_idx',
+        (candidate) => candidate.config.name === 'summary_task_drafts_summary_state_idx',
       )?.config.unique,
     ).toBe(false);
   });
@@ -168,4 +169,10 @@ describe('теги платформ у задачи черновика', () => {
       expect(key.getName().length).toBeLessThanOrEqual(63);
     }
   });
+});
+it('задача по умолчанию активна, а удаление версии оставляет её без ссылки', () => {
+  const config = getTableConfig(summaryTaskDrafts);
+  expect(config.columns.find((column) => column.name === 'state')?.default).toBe('active');
+  expect(config.foreignKeys.find((key) => key.reference().columns[0]?.name === 'released_version_id')?.onDelete).toBe('set null');
+  expect(config.checks).toEqual([]);
 });

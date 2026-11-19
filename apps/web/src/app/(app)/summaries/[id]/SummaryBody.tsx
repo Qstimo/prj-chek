@@ -1,6 +1,6 @@
 'use client';
 
-import { Section } from '@cairn/shared';
+import { Section, SummaryTaskState } from '@cairn/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -133,7 +133,10 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
           describeApiError(release.error),
         )}
         onRelease={(input) =>
-          release.mutate(input, {
+          release.mutate({
+            taskIds: summary.tasks.filter((task) => task.state === SummaryTaskState.Active).map((task) => task.id),
+            target: { kind: 'new', version: input },
+          }, {
             onSuccess: (result) =>
               router.push(`/projects/${projectId}/roadmap?version=${result.versionId}`),
           })

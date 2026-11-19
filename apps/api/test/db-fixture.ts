@@ -1,7 +1,8 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { sql } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type { PgTable } from 'drizzle-orm/pg-core';
+import { readMigrationFiles } from 'drizzle-orm/migrator';
+import { PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
@@ -36,7 +37,10 @@ export interface TestDatabase {
  * зелёным, даже если миграцию сломают, забудут зарегистрировать в `_journal.json`
  * или она окажется пропущенной.
  */
-export async function startTestDatabase(): Promise<TestDatabase> {
+export async function startTestDatabase(beforeMigration?: {
+  index: number;
+  seed: (db: TestDatabase['db']) => Promise<void>;
+}): Promise<TestDatabase> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(
     'postgres:17-alpine',
   )
@@ -54,7 +58,18 @@ export async function startTestDatabase(): Promise<TestDatabase> {
   await db.execute(sql`CREATE ROLE cairn_app WITH LOGIN PASSWORD 'test_app_password'`);
   await db.execute(sql`GRANT USAGE ON SCHEMA public TO cairn_app`);
 
-  await migrate(db, { migrationsFolder: './drizzle' });
+  const config = { migrationsFolder: './drizzle' };
+  if (beforeMigration) {
+    const migrations = readMigrationFiles(config);
+    if (!migrations[beforeMigration.index]) {
+      throw new Error(`Миграция с индексом ${beforeMigration.index} отсутствует`);
+    }
+    // Разделяем цепочку, чтобы данные прошли через миграцию с прежней схемы.
+    const migrationDb = drizzle<Record<never, never>>(ownerClient);
+    await new PgDialect().migrate(migrations.slice(0, beforeMigration.index), migrationDb._.session, config);
+    await beforeMigration.seed(db);
+  }
+  await migrate(db, config);
 
   const appClient = postgres(container.getConnectionUri(), {
     max: 1,

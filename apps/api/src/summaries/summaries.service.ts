@@ -2,15 +2,15 @@ import {
   AuditSubjectKind,
   ChronicleSource,
   SUGGESTER_DISABLED,
-  SUMMARY_ALREADY_RELEASED,
+  SUMMARY_TASKS_EMPTY,
   SUMMARY_TEXT_NOT_PLAIN,
   SUMMARY_TEXT_TOO_LONG,
-  SUMMARY_TASKS_EMPTY,
   SummaryTaskOrigin,
   normalizeSummaryText,
   type ProjectMetadata,
   type TaskSuggesterInfo,
-  type RoadmapVersionCreate,
+  type SummaryRelease,
+  type SummaryTaskIds,
   type SummaryReleaseResult,
   type SummaryCreate,
   type SummaryDetail,
@@ -187,27 +187,57 @@ export class SummariesService implements OnModuleDestroy {
     );
   }
 
+  async archiveTasks(subject: RequestSubject, projectId: string, summaryId: string, input: SummaryTaskIds) {
+    return this.changeTasks(subject, projectId, summaryId, input, 'archive', AuditAction.SummaryTasksArchived);
+  }
+
+  async restoreTasks(subject: RequestSubject, projectId: string, summaryId: string, input: SummaryTaskIds) {
+    return this.changeTasks(subject, projectId, summaryId, input, 'restore', AuditAction.SummaryTasksRestored);
+  }
+
+  async removeTasks(subject: RequestSubject, projectId: string, summaryId: string, input: SummaryTaskIds) {
+    return this.changeTasks(subject, projectId, summaryId, input, 'removeTasks', AuditAction.SummaryTasksDeleted);
+  }
+
+  private async changeTasks(
+    subject: RequestSubject,
+    projectId: string,
+    summaryId: string,
+    { taskIds }: SummaryTaskIds,
+    method: 'archive' | 'restore' | 'removeTasks',
+    action: AuditAction,
+  ): Promise<SummaryDetail> {
+    return this.db.transaction(async (tx) => {
+      const detail = await this.repository[method](subject, tx, projectId, summaryId, taskIds);
+      await this.audit.record(tx, actorOf(subject), {
+        action, entityType: 'summary', entityId: summaryId, projectId,
+        metadata: { tasks: new Set(taskIds).size },
+      });
+      return detail;
+    });
+  }
+
   /** Формирует версию и чекпоинты атомарно: половина релиза не сохраняется. */
   async release(
     subject: RequestSubject,
     projectId: string,
     summaryId: string,
-    input: RoadmapVersionCreate,
+    { taskIds, target }: SummaryRelease,
   ): Promise<SummaryReleaseResult> {
     return this.db.transaction(async (tx) => {
-      const summary = await this.repository.lockForRelease(subject, tx, projectId, summaryId);
-      if (summary.releasedVersionId !== null) {
-        throw new ConflictException({ code: SUMMARY_ALREADY_RELEASED, message: 'Релиз уже сформирован.' });
-      }
-      const tasks = await this.repository.tasksOf(tx, summaryId);
+      const tasks = await this.repository.tasksForRelease(subject, tx, projectId, summaryId, taskIds);
       if (tasks.length === 0) {
-        throw new ConflictException({ code: SUMMARY_TASKS_EMPTY, message: 'Добавьте задачи в черновик.' });
+        throw new ConflictException({ code: SUMMARY_TASKS_EMPTY, message: 'Выберите задачи для релиза.' });
       }
-      const version = await this.roadmap.createVersion(subject, tx, projectId, input);
-      await this.audit.record(tx, actorOf(subject), {
-        action: AuditAction.RoadmapVersionCreated, entityType: 'roadmap_version',
-        entityId: version.id, projectId, metadata: { label: version.label },
-      });
+      const version = target.kind === 'new'
+        ? await this.roadmap.createVersion(subject, tx, projectId, target.version)
+        : await this.roadmap.releaseTarget(subject, tx, projectId, target.versionId);
+      if (target.kind === 'new') {
+        await this.audit.record(tx, actorOf(subject), {
+          action: AuditAction.RoadmapVersionCreated, entityType: 'roadmap_version',
+          entityId: version.id, projectId, metadata: { label: version.label },
+        });
+      }
       for (const task of tasks) {
         const checkpoint = await this.roadmap.createCheckpoint(subject, tx, projectId, version.id, {
           title: task.title,
@@ -219,10 +249,18 @@ export class SummariesService implements OnModuleDestroy {
           entityId: checkpoint.id, projectId, metadata: { title: checkpoint.title },
         });
       }
-      await this.repository.markReleased(tx, summaryId, version.id);
+      await this.repository.markReleased(
+        subject, tx, projectId, summaryId, version.id, tasks.map((task) => task.id),
+      );
       await this.audit.record(tx, actorOf(subject), {
         action: AuditAction.SummaryReleased, entityType: 'summary', entityId: summaryId, projectId,
-        metadata: { label: version.label, tasks: tasks.length, fromModel: tasks.filter(task => task.origin === SummaryTaskOrigin.Model).length },
+        metadata: {
+          versionId: version.id,
+          label: version.label,
+          tasks: tasks.length,
+          fromModel: tasks.filter((task) => task.origin === SummaryTaskOrigin.Model).length,
+          target: target.kind,
+        },
       });
       return { versionId: version.id, label: version.label, checkpointCount: tasks.length };
     });
@@ -291,15 +329,6 @@ export class SummariesService implements OnModuleDestroy {
     const source = await this.db.transaction((tx) =>
       this.repository.sourceTextOf(subject, tx, projectId, summaryId),
     );
-
-    if (source.isReleased) {
-      // Проверка здесь, а не только в замене черновика: узнать о ней
-      // после того, как текст ушёл наружу и был оплачен, поздно.
-      throw new ConflictException({
-        code: SUMMARY_ALREADY_RELEASED,
-        message: 'Релиз по этому саммари уже сформирован: задачи правятся в роадмапе.',
-      });
-    }
 
     // «Не настроено» прежде «длинно» — порядок таблицы дизайна 5.4:
     // предел у выключенного порта свой, и отказ по длине послал бы

@@ -2,7 +2,8 @@ import {
   AccessLevel,
   ChronicleSource,
   Section,
-  SUMMARY_ALREADY_RELEASED,
+  SUMMARY_TASK_NOT_ACTIVE,
+  SummaryTaskState,
   SummaryTaskOrigin,
   type Platform,
   type ProjectMetadata,
@@ -13,7 +14,7 @@ import {
   type SummaryTasksReplace,
 } from '@cairn/shared';
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, max, eq, inArray } from 'drizzle-orm';
 
 import { SectionNotVisibleError } from '../access/access.errors';
 import { AccessService, meets } from '../access/access.service';
@@ -107,7 +108,6 @@ export class SummariesRepository {
       rows.map((row) => row.summary.id),
     );
     const labels = await this.releasedLabels(
-      subject,
       projectId,
       rows.map((row) => row.summary.releasedVersionId),
       executor,
@@ -120,7 +120,7 @@ export class SummariesRepository {
       projectName: row.projectName,
       occurredOn: row.occurredOn,
       title: row.title,
-      taskCount: counts.get(row.summary.id) ?? 0,
+      ...countsOf(counts.get(row.summary.id)),
       isReleased: row.summary.releasedVersionId !== null,
       ...releasedOf(row.summary.releasedVersionId, labels),
       createdAt: row.summary.createdAt.toISOString(),
@@ -183,9 +183,7 @@ export class SummariesRepository {
    * моделью» снималось бы первым же сохранением; строка без `id` набрана
    * человеком.
    *
-   * После сформированного релиза отказ `409`: чекпоинты уже живут в
-   * роадмапе и правятся там, а правка черновика задним числом развела бы
-   * две правды о том, что уехало.
+   * Архив и уехавшие задачи сохраняются, даже если редактор их не прислал.
    */
   async replaceTasks(
     subject: RequestSubject,
@@ -195,11 +193,7 @@ export class SummariesRepository {
     input: SummaryTasksReplace,
   ): Promise<SummaryDetail> {
     await this.requireForWrite(subject, tx, projectId, summaryId);
-    const row = await this.lockSummary(tx, projectId, summaryId);
-
-    if (row.releasedVersionId !== null) {
-      throw new ConflictException(SUMMARY_ALREADY_RELEASED);
-    }
+    await this.lockSummary(tx, projectId, summaryId);
 
     const existing = await this.tasksOf(tx, summaryId);
     const kept = new Map(existing.map((task) => [task.id, task]));
@@ -219,6 +213,7 @@ export class SummariesRepository {
       }
 
       const previous = task.id === undefined ? undefined : kept.get(task.id)!;
+      if (previous && previous.state !== SummaryTaskState.Active) throw taskNotActive();
       const platformIds = task.platformIds ?? previous?.platformIds ?? [];
       const position = index + 1;
 
@@ -239,7 +234,7 @@ export class SummariesRepository {
       };
     });
 
-    await this.clearTasks(tx, summaryId);
+    await this.clearTasks(tx, summaryId, SummaryTaskState.Active);
 
     if (values.length > 0) {
       const inserted = await tx
@@ -282,7 +277,7 @@ export class SummariesRepository {
     executor: Executor,
     projectId: string,
     summaryId: string,
-  ): Promise<{ text: string; textUpdatedAt: Date; isReleased: boolean }> {
+  ): Promise<{ text: string; textUpdatedAt: Date }> {
     const row = await this.requireForWrite(subject, executor, projectId, summaryId);
 
     const [entry] = await executor
@@ -299,7 +294,6 @@ export class SummariesRepository {
     return {
       text: entry.content,
       textUpdatedAt: entry.updatedAt,
-      isReleased: row.releasedVersionId !== null,
     };
   }
 
@@ -329,14 +323,10 @@ export class SummariesRepository {
     stamp: { name: string; model: string; textUpdatedAt: Date; dropped: number },
   ): Promise<SummaryDetail> {
     await this.requireForWrite(subject, tx, projectId, summaryId);
-    const row = await this.lockSummary(tx, projectId, summaryId);
-
-    if (row.releasedVersionId !== null) {
-      throw new ConflictException(SUMMARY_ALREADY_RELEASED);
-    }
+    await this.lockSummary(tx, projectId, summaryId);
 
     if (titles.length > 0) {
-      await this.clearTasks(tx, summaryId);
+      await this.clearTasks(tx, summaryId, SummaryTaskState.Active);
       // Ни ссылки, ни тегов: из вывода модели берётся только
       // формулировка, и назвать платформу ей нечем (дизайн, 1.1).
       await tx.insert(summaryTaskDrafts).values(
@@ -381,7 +371,8 @@ export class SummariesRepository {
     projectId: string,
     summaryId: string,
   ): Promise<SummaryDetail & RemovedMedia> {
-    const row = await this.requireForWrite(subject, tx, projectId, summaryId);
+    await this.requireWrite(subject, projectId, tx);
+    const row = await this.lockSummary(tx, projectId, summaryId);
     const detail = await this.detailOf(subject, tx, row);
     const mediaPaths = await this.clearTranscriptions(tx, summaryId);
 
@@ -418,22 +409,81 @@ export class SummariesRepository {
     return mediaPathsOf(rows);
   }
 
-  /**
-   * Блокирует строку саммари, чтобы повторное нажатие увидело отметку первого.
-   * Уровень роадмапа требует его репозиторий; здесь проверяется только видимость,
-   * иначе низкий уровень хроники раскрыл бы секцию при отсутствии второй выдачи.
-   */
-  async lockForRelease(subject: RequestSubject, tx: Transaction, projectId: string, summaryId: string): Promise<SummaryRow> {
+  async archive(subject: RequestSubject, tx: Transaction, projectId: string, summaryId: string, ids: string[]) {
+    return this.changeTasks(subject, tx, projectId, summaryId, ids, 'archive');
+  }
+
+  async restore(subject: RequestSubject, tx: Transaction, projectId: string, summaryId: string, ids: string[]) {
+    return this.changeTasks(subject, tx, projectId, summaryId, ids, 'restore');
+  }
+
+  async removeTasks(subject: RequestSubject, tx: Transaction, projectId: string, summaryId: string, ids: string[]) {
+    return this.changeTasks(subject, tx, projectId, summaryId, ids, 'remove');
+  }
+
+  private async changeTasks(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    ids: string[],
+    action: 'archive' | 'restore' | 'remove',
+  ): Promise<SummaryDetail> {
+    await this.requireWrite(subject, projectId, tx);
+    const summary = await this.lockSummary(tx, projectId, summaryId);
+    const tasks = await this.selectedTasks(tx, summaryId, ids);
+    const allowed = action === 'archive' ? SummaryTaskState.Active : SummaryTaskState.Archived;
+    if (tasks.some((task) => action === 'remove'
+      ? task.state === SummaryTaskState.Released
+      : task.state !== allowed)) throw taskNotActive();
+
+    const selectedIds = tasks.map((task) => task.id);
+    if (action === 'remove') {
+      await this.deleteTasks(tx, selectedIds);
+    } else if (action === 'archive') {
+      await tx.update(summaryTaskDrafts).set({ state: SummaryTaskState.Archived })
+        .where(inArray(summaryTaskDrafts.id, selectedIds));
+    } else {
+      // После замены черновика прежняя позиция могла достаться другой задаче.
+      const [last] = await tx.select({ position: max(summaryTaskDrafts.position) })
+        .from(summaryTaskDrafts)
+        .where(and(eq(summaryTaskDrafts.summaryId, summaryId), eq(summaryTaskDrafts.state, SummaryTaskState.Active)));
+      let position = last?.position ?? 0;
+      for (const task of tasks) {
+        await tx.update(summaryTaskDrafts).set({ state: SummaryTaskState.Active, position: ++position })
+          .where(eq(summaryTaskDrafts.id, task.id));
+      }
+    }
+
+    return this.detailOf(subject, tx, summary);
+  }
+
+  /** Проверяет обе выдачи до чтения выбранных задач. */
+  async tasksForRelease(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    ids: string[],
+  ): Promise<SummaryTask[]> {
     const roadmapLevel = await this.access.resolveLevel(subject, projectId, Section.Roadmap, tx);
     if (roadmapLevel === null || roadmapLevel === undefined) throw new SectionNotVisibleError();
     await this.requireWrite(subject, projectId, tx);
-    return this.lockSummary(tx, projectId, summaryId);
+    await this.lockSummary(tx, projectId, summaryId);
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    const tasks = await this.selectedTasks(tx, summaryId, ids);
+    if (tasks.some((task) => task.state !== SummaryTaskState.Active)) throw taskNotActive();
+    return tasks;
   }
 
-  /**
-   * Один замок для релиза и обеих замен: проверять отметку до него нельзя,
-   * поскольку ожидавшая транзакция могла прочитать ещё не выпущенную строку.
-   */
+  private async selectedTasks(tx: Transaction, summaryId: string, ids: string[]): Promise<SummaryTask[]> {
+    const requested = new Set(ids);
+    const tasks = (await this.tasksOf(tx, summaryId)).filter((task) => requested.has(task.id));
+    if (tasks.length !== requested.size) throw new SectionNotVisibleError();
+    return tasks;
+  }
+
+  /** Общий замок удерживает набор задач до конца изменения или релиза. */
   private async lockSummary(
     tx: Transaction,
     projectId: string,
@@ -447,7 +497,19 @@ export class SummariesRepository {
   }
 
   /** Сохраняет получателя тем же исполнителем, которым создана версия. */
-  async markReleased(tx: Transaction, summaryId: string, versionId: string): Promise<void> {
+  async markReleased(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    versionId: string,
+    taskIds: string[],
+  ): Promise<void> {
+    await this.requireForWrite(subject, tx, projectId, summaryId);
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await tx.update(summaryTaskDrafts)
+      .set({ state: SummaryTaskState.Released, releasedVersionId: versionId })
+      .where(and(eq(summaryTaskDrafts.summaryId, summaryId), inArray(summaryTaskDrafts.id, taskIds)));
     await tx.update(summaries).set({ releasedVersionId: versionId, updatedAt: new Date() })
       .where(eq(summaries.id, summaryId));
   }
@@ -455,17 +517,15 @@ export class SummariesRepository {
   /**
    * Задачи черновика по порядку позиций.
    *
-   * Субъекта не принимает намеренно: единственный путь сюда — через
-   * {@link requireForWrite}, который право уже потребовал тем же
-   * исполнителем. Второй проверкой здесь был бы лишний запрос на каждую
-   * сборку детали.
+   * Вызывается после проверки доступа к саммари тем же исполнителем,
+   * поэтому сборке детали не нужен повторный запрос прав.
    */
-  async tasksOf(executor: Executor, summaryId: string): Promise<SummaryTask[]> {
+  private async tasksOf(executor: Executor, summaryId: string): Promise<SummaryTask[]> {
     const rows = await executor
       .select()
       .from(summaryTaskDrafts)
       .where(eq(summaryTaskDrafts.summaryId, summaryId))
-      .orderBy(asc(summaryTaskDrafts.position));
+      .orderBy(asc(summaryTaskDrafts.position), asc(summaryTaskDrafts.createdAt), asc(summaryTaskDrafts.id));
 
     const tags = await this.tagsOf(
       executor,
@@ -477,6 +537,9 @@ export class SummariesRepository {
       title: row.title,
       position: row.position,
       origin: row.origin,
+      state: row.state,
+      releasedVersionId: row.releasedVersionId,
+      releasedVersionLabel: null,
       url: row.url,
       platformIds: tags.get(row.id) ?? [],
     }));
@@ -513,29 +576,17 @@ export class SummariesRepository {
     return tags;
   }
 
-  /**
-   * Уносит черновик саммари целиком: сначала теги, потом строки.
-   *
-   * Один помощник на три замены и удаление: на ссылках `restrict`, и
-   * забытый порядок в одном из четырёх мест упёрся бы в целостность — то
-   * есть сломал бы не теги, а само удаление.
-   */
-  private async clearTasks(tx: Transaction, summaryId: string): Promise<void> {
-    const ids = await tx
-      .select({ id: summaryTaskDrafts.id })
-      .from(summaryTaskDrafts)
-      .where(eq(summaryTaskDrafts.summaryId, summaryId));
+  private async clearTasks(tx: Transaction, summaryId: string, state?: SummaryTaskState): Promise<void> {
+    const rows = await tx.select({ id: summaryTaskDrafts.id }).from(summaryTaskDrafts)
+      .where(and(eq(summaryTaskDrafts.summaryId, summaryId), state && eq(summaryTaskDrafts.state, state)));
+    await this.deleteTasks(tx, rows.map((row) => row.id));
+  }
 
-    if (ids.length > 0) {
-      await tx.delete(summaryTaskPlatforms).where(
-        inArray(
-          summaryTaskPlatforms.draftId,
-          ids.map((row) => row.id),
-        ),
-      );
-    }
-
-    await tx.delete(summaryTaskDrafts).where(eq(summaryTaskDrafts.summaryId, summaryId));
+  /** На связях тегов стоит restrict, поэтому первым уходит их набор. */
+  private async deleteTasks(tx: Transaction, ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await tx.delete(summaryTaskPlatforms).where(inArray(summaryTaskPlatforms.draftId, ids));
+    await tx.delete(summaryTaskDrafts).where(inArray(summaryTaskDrafts.id, ids));
   }
 
   /**
@@ -617,9 +668,8 @@ export class SummariesRepository {
     // каждое сохранение черновика (дизайн, 6.3).
     const seesRoadmap = await this.seesRoadmap(subject, row.projectId, executor);
     const labels = await this.releasedLabels(
-      subject,
       row.projectId,
-      [row.releasedVersionId],
+      [row.releasedVersionId, ...tasks.map((task) => task.releasedVersionId)],
       executor,
       seesRoadmap,
     );
@@ -630,13 +680,16 @@ export class SummariesRepository {
       projectName: project?.name ?? '',
       occurredOn: entry.occurredOn,
       title: entry.title,
-      taskCount: tasks.length,
+      ...countsOf(tasks.reduce<Partial<Record<SummaryTaskState, number>>>((counts, task) => {
+        counts[task.state] = (counts[task.state] ?? 0) + 1;
+        return counts;
+      }, {})),
       isReleased: row.releasedVersionId !== null,
       ...releasedOf(row.releasedVersionId, labels),
       createdAt: row.createdAt.toISOString(),
       chronicleEntryId: row.chronicleEntryId,
       text: entry.content,
-      tasks,
+      tasks: tasks.map((task) => ({ ...task, ...releasedOf(task.releasedVersionId, labels) })),
       suggester: stampOf(row),
       // Грубо намеренно: `updated_at` двигает любая правка записи, включая
       // правку одного заголовка. Точность стоила бы копии текста в базе —
@@ -688,18 +741,22 @@ export class SummariesRepository {
   private async taskCounts(
     executor: Executor,
     summaryIds: string[],
-  ): Promise<Map<string, number>> {
+  ): Promise<Map<string, Partial<Record<SummaryTaskState, number>>>> {
     if (summaryIds.length === 0) {
       return new Map();
     }
 
     const rows = await executor
-      .select({ summaryId: summaryTaskDrafts.summaryId, total: count() })
+      .select({ summaryId: summaryTaskDrafts.summaryId, state: summaryTaskDrafts.state, total: count() })
       .from(summaryTaskDrafts)
       .where(inArray(summaryTaskDrafts.summaryId, summaryIds))
-      .groupBy(summaryTaskDrafts.summaryId);
+      .groupBy(summaryTaskDrafts.summaryId, summaryTaskDrafts.state);
 
-    return new Map(rows.map((row) => [row.summaryId, Number(row.total)]));
+    const counts = new Map<string, Partial<Record<SummaryTaskState, number>>>();
+    for (const row of rows) {
+      counts.set(row.summaryId, { ...counts.get(row.summaryId), [row.state]: row.total });
+    }
+    return counts;
   }
 
   /**
@@ -713,7 +770,6 @@ export class SummariesRepository {
    * добавляло бы свой запрос прав (дизайн, 6.3).
    */
   private async releasedLabels(
-    subject: RequestSubject,
     projectId: string,
     versionIds: (string | null)[],
     executor: Executor,
@@ -732,7 +788,7 @@ export class SummariesRepository {
     const rows = await executor
       .select({ id: roadmapVersions.id, label: roadmapVersions.label })
       .from(roadmapVersions)
-      .where(inArray(roadmapVersions.id, ids));
+      .where(and(eq(roadmapVersions.projectId, projectId), inArray(roadmapVersions.id, ids)));
 
     return new Map(rows.map((row) => [row.id, row.label]));
   }
@@ -766,6 +822,21 @@ export class SummariesRepository {
 
     return meets(level ?? undefined, AccessLevel.Metadata);
   }
+}
+
+function countsOf(counts: Partial<Record<SummaryTaskState, number>> = {}) {
+  return {
+    taskCount: counts[SummaryTaskState.Active] ?? 0,
+    archivedCount: counts[SummaryTaskState.Archived] ?? 0,
+    releasedCount: counts[SummaryTaskState.Released] ?? 0,
+  };
+}
+
+function taskNotActive(): ConflictException {
+  return new ConflictException({
+    code: SUMMARY_TASK_NOT_ACTIVE,
+    message: 'Состояние задачи не допускает выбранного действия.',
+  });
 }
 
 /**

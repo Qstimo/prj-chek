@@ -13,6 +13,8 @@ const TEXT_ONLY: SummaryListItem = {
   occurredOn: '2026-11-16',
   title: 'Созвон по релизу',
   taskCount: 0,
+  archivedCount: 0,
+  releasedCount: 0,
   isReleased: false,
   releasedVersionLabel: null,
   releasedVersionId: null,
@@ -24,6 +26,8 @@ const WITH_TASKS: SummaryListItem = {
   id: '33333333-3333-3333-3333-333333333333',
   title: 'Планирование',
   taskCount: 12,
+  archivedCount: 0,
+  releasedCount: 0,
 };
 
 const VERSION_ID = '55555555-5555-5555-5555-555555555555';
@@ -33,6 +37,8 @@ const RELEASED: SummaryListItem = {
   id: '44444444-4444-4444-4444-444444444444',
   title: 'Итоги',
   taskCount: 4,
+  archivedCount: 0,
+  releasedCount: 0,
   isReleased: true,
   releasedVersionLabel: 'v1.4',
   releasedVersionId: VERSION_ID,

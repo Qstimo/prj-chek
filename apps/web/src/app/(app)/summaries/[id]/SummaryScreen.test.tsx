@@ -5,6 +5,7 @@ import {
   SUGGESTER_UNAVAILABLE,
   Section,
   SummaryTaskOrigin,
+  SummaryTaskState,
   ModelServicePlacement,
   TranscriberKind,
   TranscriptionState,
@@ -43,6 +44,8 @@ const LIST_ITEM = {
   occurredOn: '2026-11-16',
   title: 'Созвон по релизу',
   taskCount: 0,
+  archivedCount: 0,
+  releasedCount: 0,
   isReleased: false,
   releasedVersionLabel: null,
   createdAt: '2026-11-16T10:00:00.000Z',
@@ -66,8 +69,10 @@ const TEXT_ONLY: SummaryDetail = {
 const WITH_TASKS: SummaryDetail = {
   ...TEXT_ONLY,
   taskCount: 1,
+  archivedCount: 0,
+  releasedCount: 0,
   tasks: [
-    { id: TASK_ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model, url: null, platformIds: [] },
+    { id: TASK_ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model, state: SummaryTaskState.Active, releasedVersionId: null, releasedVersionLabel: null, url: null, platformIds: [] },
   ],
   suggester: { name: 'external', model: 'gpt-4o-mini', at: '2026-11-16T10:00:00.000Z', dropped: 0 },
 };
@@ -409,6 +414,9 @@ describe('экран саммари', () => {
             title: '<b>жирно</b>',
             position: 1,
             origin: SummaryTaskOrigin.Model,
+            state: SummaryTaskState.Active,
+            releasedVersionId: null,
+            releasedVersionLabel: null,
             url: null,
             platformIds: [],
           },
@@ -440,7 +448,7 @@ describe('экран саммари', () => {
     expect(screen.getByText(/публичную выдачу/)).toBeInTheDocument();
   });
 
-  it('релиз отправляет три поля и ни одного больше', async () => {
+  it('релиз отправляет задачи и три поля новой версии', async () => {
     const release = mutation();
     vi.mocked(hooks.useMutationReleaseSummary).mockReturnValue(release);
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
@@ -451,9 +459,15 @@ describe('экран саммари', () => {
     const mutate = (release as unknown as { mutate: ReturnType<typeof vi.fn> }).mutate;
 
     expect(mutate.mock.calls[0]?.[0]).toEqual({
-      label: 'v1.3',
-      state: RoadmapVersionState.Planned,
-      plannedDate: expect.any(String),
+      taskIds: [TASK_ID],
+      target: {
+        kind: 'new',
+        version: {
+          label: 'v1.3',
+          state: RoadmapVersionState.Planned,
+          plannedDate: expect.any(String),
+        },
+      },
     });
   });
 

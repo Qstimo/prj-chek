@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-import { ModelServicePlacement, SummaryTaskOrigin } from '../enums';
+import { ModelServicePlacement, SummaryTaskOrigin, SummaryTaskState } from '../enums';
 import { requiredDaySchema } from './day-date';
 import { platformIdsSchema, platformSchema } from './platform';
 import { HAS_NUL, isNulFree } from './plain-text';
-import { checkpointUrlSchema } from './roadmap';
+import { checkpointUrlSchema, roadmapVersionCreateSchema } from './roadmap';
 import { transcriptionJobSchema } from './transcription';
 
 /** Разбивка не настроена: ни адреса, ни ключа. */
@@ -13,8 +13,8 @@ export const SUGGESTER_DISABLED = 'suggester_disabled';
 export const SUMMARY_TEXT_TOO_LONG = 'summary_text_too_long';
 /** Предложитель не ответил или ответил негодным. */
 export const SUGGESTER_UNAVAILABLE = 'suggester_unavailable';
-/** Релиз по этому саммари уже сформирован. */
-export const SUMMARY_ALREADY_RELEASED = 'summary_already_released';
+/** Состояние задачи не допускает выбранного действия. */
+export const SUMMARY_TASK_NOT_ACTIVE = 'summary_task_not_active';
 /** Черновик пуст: формировать релиз не из чего. */
 export const SUMMARY_TASKS_EMPTY = 'summary_tasks_empty';
 /** В тексте управляющие символы: его прислали в непригодном виде. */
@@ -65,6 +65,9 @@ export const summaryTaskSchema = z.object({
   title: z.string(),
   position: z.number().int().positive(),
   origin: z.nativeEnum(SummaryTaskOrigin),
+  state: z.nativeEnum(SummaryTaskState),
+  releasedVersionId: z.string().uuid().nullable(),
+  releasedVersionLabel: z.string().nullable(),
   /**
    * Ссылка на задачу во внешнем трекере.
    *
@@ -100,6 +103,8 @@ export const summaryListItemSchema = z.object({
   occurredOn: requiredDaySchema,
   title: z.string(),
   taskCount: z.number().int().nonnegative(),
+  archivedCount: z.number().int().nonnegative(),
+  releasedCount: z.number().int().nonnegative(),
   /** Релиз сформирован. Видно всегда: это состояние потока, а не роадмапа. */
   isReleased: z.boolean(),
   /**
@@ -243,6 +248,21 @@ export const summaryTasksReplaceSchema = z
       .max(MAX_SUMMARY_TASKS),
   })
   .strict();
+
+/** Набор отмеченных задач для одного действия. */
+export const summaryTaskIdsSchema = z.object({
+  taskIds: z.array(z.string().uuid()).min(1).max(MAX_SUMMARY_TASKS),
+}).strict();
+
+export const summaryReleaseSchema = summaryTaskIdsSchema.extend({
+  target: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('new'), version: roadmapVersionCreateSchema }).strict(),
+    z.object({ kind: z.literal('existing'), versionId: z.string().uuid() }).strict(),
+  ]),
+});
+
+export type SummaryTaskIds = z.infer<typeof summaryTaskIdsSchema>;
+export type SummaryRelease = z.infer<typeof summaryReleaseSchema>;
 
 /** Результат формирования релиза: куда уехали задачи. */
 export const summaryReleaseResultSchema = z.object({
