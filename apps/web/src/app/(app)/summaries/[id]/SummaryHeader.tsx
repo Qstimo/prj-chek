@@ -15,10 +15,20 @@ import type { IHeaderProps } from './types';
  * `top-[4.25rem]` — высота полосы навигации (`p-4` плюс лого `h-9`):
  * шапка встаёт ровно под ней, а не за ней. `-mx-6 px-6` закрывает отбивку
  * страницы, иначе содержимое проезжало бы в щель по краям.
+ *
+ * `z-20` — середина стопки: под навигацией (`z-30`), но над полосой
+ * действий редактора задач (`z-10`), которая прилипает ниже этой шапки.
+ *
+ * Ссылка наружу нужна затем, что высоту этой шапки нельзя сосчитать
+ * заранее: заголовок переносится, а бирок может не быть вовсе. Её
+ * измеряет `SummaryBody` и раздаёт нижним слоям.
  */
-export function SummaryHeader({ projectName, occurredOn, title, badges }: IHeaderProps) {
+export function SummaryHeader({ projectName, occurredOn, title, badges, ref }: IHeaderProps) {
   return (
-    <header className="sticky top-[4.25rem] z-10 -mx-6 border-b border-border bg-background px-6 py-3">
+    <header
+      ref={ref}
+      className="sticky top-[4.25rem] z-20 -mx-6 border-b border-border bg-background px-6 py-3"
+    >
       <p className="text-sm text-muted-foreground">
         {projectName} · {formatDate(occurredOn)}
       </p>

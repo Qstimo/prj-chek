@@ -3,7 +3,7 @@
 import { AccessLevel, Section } from '@cairn/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 
 import { BROWSER_API_URL, describeApiError, summaryFailureOf } from '@/api';
 import {
@@ -84,6 +84,26 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   // «панель открыта»: в ручку уедет ровно то, что было отмечено в момент
   // нажатия, а не то, что окажется отмеченным к отправке формы.
   const [releasing, setReleasing] = useState<string[]>();
+  // Высота прилипшей шапки: её нельзя сосчитать заранее — заголовок
+  // переносится, а бирок может не быть вовсе. Полоса действий редактора
+  // прилипает под шапкой на эту высоту, иначе встаёт за ней.
+  const [header, setHeader] = useState<HTMLElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!header) {
+      return;
+    }
+
+    // Наблюдатель, а не одно измерение: высота меняется и от ширины
+    // окна (заголовок переносится), и от появления бирок.
+    const observer = new ResizeObserver(() => setHeaderHeight(header.offsetHeight));
+
+    observer.observe(header);
+    setHeaderHeight(header.offsetHeight);
+
+    return () => observer.disconnect();
+  }, [header]);
 
   useUnsavedWarning(hasUnsavedTasks);
 
@@ -107,8 +127,14 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   const actionError = describeApiError(archive.error ?? restore.error ?? remove.error);
 
   return (
-    <div className="space-y-6">
+    // Измеренная высота раздаётся вниз переменной: прилипшие слои ниже
+    // встают под шапкой, не зная, из чего она сложилась.
+    <div
+      className="space-y-6"
+      style={{ '--summary-header-h': `${headerHeight}px` } as React.CSSProperties}
+    >
       <SummaryHeader
+        ref={setHeader}
         projectName={summary.projectName}
         occurredOn={summary.occurredOn}
         title={summary.title}

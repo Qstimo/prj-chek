@@ -17,7 +17,10 @@ export function AppNav({ subject, onLogout }: IProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
-    <nav className="sticky top-0 z-10 border-b border-border bg-surface backdrop-blur-md">
+    /* `z-30` — верх стопки: полоса навигации не закрывается ничем. Пока
+       все прилипшие слои стояли на одном `z-10`, порядок решал обход
+       разметки, и полоса действий редактора задач накрывала навигацию. */
+    <nav className="sticky top-0 z-30 border-b border-border bg-surface backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-3 p-4 sm:gap-x-6">
         <Link
           href="/"

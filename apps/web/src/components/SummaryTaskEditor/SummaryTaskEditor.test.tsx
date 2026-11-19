@@ -252,6 +252,20 @@ describe('отметки и полоса действий', () => {
     return screen.getAllByRole('checkbox', { name: 'Отметить задачу' }) as HTMLInputElement[];
   }
 
+  it('полоса действий прилипает под шапками, а не на их место', () => {
+    // Стояло `top-0`: полоса прилипала ровно на место навигации и
+    // накрывала её собой вместе с заголовком саммари. Высота шапки
+    // саммари приходит переменной — заранее её не сосчитать.
+    render(
+      <SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} actions={actions()} />,
+    );
+
+    const bar = screen.getByRole('button', { name: 'Отметить все' }).closest('div')?.parentElement;
+
+    expect(bar?.className).toMatch(/top-\[calc\(4\.25rem\+var\(--summary-header-h,0px\)\)\]/);
+    expect(bar?.className).not.toMatch(/top-0/);
+  });
+
   it('без действий над выбором отметок нет вовсе', () => {
     // Отметка существует ради следующего действия: без действий она
     // предлагала бы выбрать и ничего с выбранным не сделать.

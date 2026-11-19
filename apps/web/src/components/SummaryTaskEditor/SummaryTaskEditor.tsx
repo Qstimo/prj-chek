@@ -191,8 +191,17 @@ export function SummaryTaskEditor({
     <div className="space-y-3">
       {/* Полоса прилипает к верху колонки: список задач длиннее экрана, а
           действие над выбором нажимают, стоя у той строки, которую
-          отметили последней. */}
-      <div className="sticky top-0 z-10 space-y-2 bg-background py-2">
+          отметили последней.
+
+          Встаёт под навигацией (`4.25rem`) и под шапкой саммари, высоту
+          которой измеряет `SummaryBody` и кладёт в `--summary-header-h`.
+          Пока здесь стояло `top-0`, полоса прилипала ровно на место
+          навигации и накрывала её собой — вместе с заголовком саммари.
+          Запасной ноль — для редактора без такой шапки.
+
+          `z-10` — низ стопки: шапки (`z-30` и `z-20`) закрывают полосу,
+          а не она их. */}
+      <div className="sticky top-[calc(4.25rem+var(--summary-header-h,0px))] z-10 space-y-2 bg-background py-2">
         <div className="flex flex-wrap items-center gap-3">
           {actions !== undefined && (
             <>
