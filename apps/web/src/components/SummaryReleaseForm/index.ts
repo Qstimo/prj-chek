@@ -1,2 +1,2 @@
 export { SummaryReleaseForm } from './SummaryReleaseForm';
-export type { IProps } from './types';
+export type { IProps, IReleaseTargetVersion } from './types';

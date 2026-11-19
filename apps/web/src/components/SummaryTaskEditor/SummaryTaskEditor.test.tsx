@@ -157,16 +157,6 @@ describe('редактор черновика задач', () => {
     expect(screen.getAllByText(/предложено моделью/)).toHaveLength(1);
   });
 
-  it('после сформированного релиза редактор только для чтения', () => {
-    // Чекпоинты живут в роадмапе и правятся там.
-    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]}
-        onSave={vi.fn()} isReleased />);
-
-    expect(screen.getByLabelText(TITLE)).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Удалить' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Добавить задачу/ })).not.toBeInTheDocument();
-  });
-
   it('пустая формулировка сохраняться не даёт', async () => {
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]}
         onSave={vi.fn()} />);
@@ -248,6 +238,195 @@ describe('редактор черновика задач', () => {
     await userEvent.type(screen.getByLabelText(TITLE), ' ещё');
 
     expect(screen.getByText(/не сохранены/)).toBeInTheDocument();
+  });
+});
+
+describe('отметки и полоса действий', () => {
+  /** Набор обработчиков действий над выбором со свежими шпионами. */
+  function actions() {
+    return { onRelease: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn() };
+  }
+
+  /** Отметки карточек в том порядке, в котором они показаны. */
+  function marks(): HTMLInputElement[] {
+    return screen.getAllByRole('checkbox', { name: 'Отметить задачу' }) as HTMLInputElement[];
+  }
+
+  it('без действий над выбором отметок нет вовсе', () => {
+    // Отметка существует ради следующего действия: без действий она
+    // предлагала бы выбрать и ничего с выбранным не сделать.
+    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} />);
+
+    expect(screen.queryByRole('checkbox', { name: 'Отметить задачу' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Отметить все' })).not.toBeInTheDocument();
+  });
+
+  it('«Отметить все» отмечает каждую карточку', async () => {
+    render(
+      <SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[]} onSave={vi.fn()} actions={actions()} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+
+    expect(marks().every((mark) => mark.checked)).toBe(true);
+  });
+
+  it('полоса называет число отмеченных', async () => {
+    render(
+      <SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[]} onSave={vi.fn()} actions={actions()} />,
+    );
+
+    await userEvent.click(marks()[0]!);
+
+    expect(screen.getByText('Отмечено: 1')).toBeInTheDocument();
+  });
+
+  it('пустой выбор выключает три действия над выбором', () => {
+    // «Сохранить» к выбору не относится и своей причиной выключена
+    // отдельно: она про черновик целиком.
+    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} actions={actions()} />);
+
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (0)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'В архив (0)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Удалить (0)' })).toBeDisabled();
+  });
+
+  it('отметка включает три действия и называет число в подписях', async () => {
+    render(
+      <SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[]} onSave={vi.fn()} actions={actions()} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (2)' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'В архив (2)' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Удалить (2)' })).toBeEnabled();
+  });
+
+  it('«В архив» отдаёт отмеченные и подтверждения не спрашивает', async () => {
+    // Архив обратим одной кнопкой, и диалог на обратимое действие учит
+    // нажимать «да» не читая (дизайн, 4.3).
+    const handlers = actions();
+    render(
+      <SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[]} onSave={vi.fn()} actions={handlers} />,
+    );
+
+    await userEvent.click(marks()[1]!);
+    await userEvent.click(screen.getByRole('button', { name: 'В архив (1)' }));
+
+    expect(handlers.onArchive).toHaveBeenCalledWith([TASK_B.id]);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('«Сформировать релиз» отдаёт отмеченные', async () => {
+    const handlers = actions();
+    render(
+      <SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[]} onSave={vi.fn()} actions={handlers} />,
+    );
+
+    await userEvent.click(marks()[0]!);
+    await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз (1)' }));
+
+    expect(handlers.onRelease).toHaveBeenCalledWith([TASK_A.id]);
+  });
+
+  it('удаление спрашивает подтверждение и называет число', async () => {
+    // Потеря содержимого: число названо до нажатия, а не после.
+    const handlers = actions();
+    render(
+      <SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[]} onSave={vi.fn()} actions={handlers} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Удалить (2)' }));
+
+    expect(handlers.onDelete).not.toHaveBeenCalled();
+    expect(screen.getByText(/2 задачи/)).toBeInTheDocument();
+  });
+
+  it('подтверждённое удаление отдаёт отмеченные', async () => {
+    const handlers = actions();
+    render(
+      <SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[]} onSave={vi.fn()} actions={handlers} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Удалить (2)' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Да, удалить' }));
+
+    expect(handlers.onDelete).toHaveBeenCalledWith([TASK_A.id, TASK_B.id]);
+  });
+
+  it('отменённое удаление не отдаёт ничего', async () => {
+    const handlers = actions();
+    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} actions={handlers} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Удалить (1)' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+
+    expect(handlers.onDelete).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('несохранённые правки выключают все три действия и названы', async () => {
+    // Ручки работают с тем, что в базе: унести в архив строку,
+    // формулировку которой человек только что правил в памяти, значило бы
+    // потерять правку молча (дизайн, 4.3).
+    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} actions={actions()} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+    await userEvent.type(screen.getByLabelText(TITLE), ' ещё');
+
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (1)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'В архив (1)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Удалить (1)' })).toBeDisabled();
+    expect(screen.getByText(/Сначала сохраните правки/)).toBeInTheDocument();
+  });
+
+  it('без права на роадмап выключен только релиз', async () => {
+    // Архив и удаление — та же «Хроника ≥ запись», что правка черновика:
+    // отсутствие выдачи на роадмап их не касается (дизайн, 3.3).
+    render(
+      <SummaryTaskEditor
+        tasks={[TASK_A]}
+        platforms={[]}
+        onSave={vi.fn()}
+        actions={{ ...actions(), releaseBlockedNote: 'Нет права на «Роадмап» этого проекта.' }}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (1)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'В архив (1)' })).toBeEnabled();
+    expect(screen.getByText(/Нет права на «Роадмап»/)).toBeInTheDocument();
+  });
+
+  it('отметки сбрасываются, когда приходит другой набор', async () => {
+    // Показывать отметку поверх свежего ответа значило бы предлагать
+    // действие над строкой, которой уже нет (дизайн, 4.3).
+    const { rerender } = render(
+      <SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[]} onSave={vi.fn()} actions={actions()} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+    rerender(
+      <SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} actions={actions()} />,
+    );
+
+    expect(marks()[0]!.checked).toBe(false);
+    expect(screen.getByText('Отмечено: 0')).toBeInTheDocument();
+  });
+
+  it('несохранённая новая строка не отмечается', async () => {
+    // У неё нет `id`: ручкам действий её назвать нечем, пока она не
+    // сохранена.
+    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} actions={actions()} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Добавить задачу/ }));
+
+    expect(marks()[1]).toBeDisabled();
   });
 });
 
@@ -381,11 +560,15 @@ describe('ссылка и теги в карточке', () => {
     });
   });
 
-  it('после релиза поля только читаются', () => {
-    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={vi.fn()} isReleased />);
+  it('редактор правится и после сформированного релиза', () => {
+    // Релиз больше не замораживает редактор: замораживаются уехавшие
+    // задачи, и своим состоянием, а не флажком саммари (дизайн, 2.5).
+    // Уехавшие сюда не попадают вовсе — у них свой список только для
+    // чтения, поэтому признака «релиз сформирован» у редактора нет.
+    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={vi.fn()} />);
 
-    expect(screen.getByLabelText('Ссылка на задачу')).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: 'API' })).toBeDisabled();
+    expect(screen.getByLabelText('Ссылка на задачу')).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: 'API' })).toBeEnabled();
   });
 
   it('тег, которого нет в списке платформ, не рисуется и не отправляется', async () => {

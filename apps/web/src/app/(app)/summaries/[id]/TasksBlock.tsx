@@ -1,21 +1,29 @@
 'use client';
 
+import { SummaryTaskState } from '@cairn/shared';
 import { useState } from 'react';
 
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FormError } from '@/components/FormError';
-import { SummaryTaskEditor } from '@/components/SummaryTaskEditor';
+import { EDITOR_TEXTS, SummaryTaskEditor, deleteQuestionOf } from '@/components/SummaryTaskEditor';
 
 import { SUMMARY_TEXTS, droppedNoteOf, stampNoteOf, suggesterNoticeOf } from '../constants';
+import { ArchivedTasks } from './ArchivedTasks';
+import { ReleasedTasks } from './ReleasedTasks';
 import type { ITasksProps } from './types';
 
 /**
- * Шаг «Задачи»: разбивка текста и правка черновика.
+ * Правая колонка: разбивка, черновик активных задач, архив и уехавшие.
  *
  * Подпись о том, куда уходит текст, стоит **над** кнопкой и постоянно —
  * не всплывает и не скрывается (дизайн, раздел 5.7). Повторная разбивка
  * непустого черновика спрашивает подтверждение: заменять правленный
  * руками список молча нельзя.
+ *
+ * Три списка, а не один: редактор правит только активные задачи — ровно
+ * те, которые видит `PUT …/tasks` (дизайн, 3.4). Сформированный релиз
+ * ничего здесь не замораживает: саммари с релизом формирует следующий из
+ * того, что осталось (дизайн, 2.4 и 2.5).
  */
 export function TasksBlock({
   summary,
@@ -27,11 +35,23 @@ export function TasksBlock({
   onDirtyChange,
   isSaving,
   saveError,
+  onRelease,
+  onArchive,
+  onRestore,
+  onDelete,
+  releaseBlockedNote,
+  isActing,
+  actionError,
 }: ITasksProps) {
   const [isConfirming, setIsConfirming] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string[]>();
+
+  const active = summary.tasks.filter((task) => task.state === SummaryTaskState.Active);
+  const archived = summary.tasks.filter((task) => task.state === SummaryTaskState.Archived);
+  const released = summary.tasks.filter((task) => task.state === SummaryTaskState.Released);
 
   function requestSuggest(): void {
-    if (summary.tasks.length > 0) {
+    if (active.length > 0) {
       setIsConfirming(true);
 
       return;
@@ -44,47 +64,43 @@ export function TasksBlock({
     <section className="space-y-3">
       <h2 className="text-lg font-medium">{SUMMARY_TEXTS.tasksHeading}</h2>
 
-      {!summary.isReleased && (
-        <>
-          {/* Постоянная подпись: говорит правду до нажатия и заменяет
-              диалог подтверждения на каждый вызов. */}
-          <p className="rounded-md border border-border bg-surface p-3 text-sm">
-            {suggesterNoticeOf(suggester)}
+      {/* Постоянная подпись: говорит правду до нажатия и заменяет
+          диалог подтверждения на каждый вызов. */}
+      <p className="rounded-md border border-border bg-surface p-3 text-sm">
+        {suggesterNoticeOf(suggester)}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={requestSuggest}
+          disabled={!suggester.isEnabled || isSuggesting}
+          className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+        >
+          {active.length > 0 ? SUMMARY_TEXTS.suggestAgain : SUMMARY_TEXTS.suggest}
+        </button>
+
+        {isSuggesting && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {SUMMARY_TEXTS.suggesting}
           </p>
+        )}
+      </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={requestSuggest}
-              disabled={!suggester.isEnabled || isSuggesting}
-              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
-            >
-              {summary.tasks.length > 0 ? SUMMARY_TEXTS.suggestAgain : SUMMARY_TEXTS.suggest}
-            </button>
+      <FormError message={suggestError} />
 
-            {isSuggesting && (
-              <p role="status" className="text-sm text-muted-foreground">
-                {SUMMARY_TEXTS.suggesting}
-              </p>
-            )}
-          </div>
-
-          <FormError message={suggestError} />
-
-          {isConfirming && (
-            <ConfirmDialog
-              label={SUMMARY_TEXTS.replaceLabel}
-              confirmLabel={SUMMARY_TEXTS.replaceConfirm}
-              onConfirm={() => {
-                setIsConfirming(false);
-                onSuggest();
-              }}
-              onCancel={() => setIsConfirming(false)}
-            >
-              {SUMMARY_TEXTS.replaceQuestion}
-            </ConfirmDialog>
-          )}
-        </>
+      {isConfirming && (
+        <ConfirmDialog
+          label={SUMMARY_TEXTS.replaceLabel}
+          confirmLabel={SUMMARY_TEXTS.replaceConfirm}
+          onConfirm={() => {
+            setIsConfirming(false);
+            onSuggest();
+          }}
+          onCancel={() => setIsConfirming(false)}
+        >
+          {SUMMARY_TEXTS.replaceQuestion}
+        </ConfirmDialog>
       )}
 
       {summary.suggester && (
@@ -108,17 +124,51 @@ export function TasksBlock({
         </p>
       )}
 
+      <FormError message={actionError} />
+
       {/* Платформы едут деталью саммари: ни нового запроса, ни нового
           хука — список уже загружен, и гейт у него один и тот же. */}
       <SummaryTaskEditor
-        tasks={summary.tasks}
+        tasks={active}
         platforms={summary.platforms}
         onSave={onSave}
         onDirtyChange={onDirtyChange}
-        isReleased={summary.isReleased}
         isSaving={isSaving}
         error={saveError}
+        actions={{
+          onRelease,
+          onArchive,
+          onDelete,
+          releaseBlockedNote,
+          isBusy: isActing,
+        }}
       />
+
+      <ArchivedTasks
+        tasks={archived}
+        onRestore={onRestore}
+        onDelete={setPendingDelete}
+        isBusy={isActing}
+      />
+
+      {/* Подтверждение удаления из архива живёт здесь, а не в самом
+          списке: фраза о потере одна на оба пути, и второй её источник
+          разошёлся бы с первым. */}
+      {pendingDelete !== undefined && (
+        <ConfirmDialog
+          label={EDITOR_TEXTS.deleteLabel}
+          confirmLabel={EDITOR_TEXTS.deleteConfirm}
+          onConfirm={() => {
+            onDelete(pendingDelete);
+            setPendingDelete(undefined);
+          }}
+          onCancel={() => setPendingDelete(undefined)}
+        >
+          {deleteQuestionOf(pendingDelete.length)}
+        </ConfirmDialog>
+      )}
+
+      <ReleasedTasks tasks={released} projectId={summary.projectId} />
     </section>
   );
 }

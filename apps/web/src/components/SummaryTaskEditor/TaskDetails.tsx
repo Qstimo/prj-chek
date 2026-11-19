@@ -23,7 +23,6 @@ import type { IDetailsProps } from './types';
 export function TaskDetails({
   task,
   platforms,
-  isReadOnly,
   onUrlChange,
   onPlatformsChange,
   urlError,
@@ -36,7 +35,6 @@ export function TaskDetails({
           aria-label={EDITOR_TEXTS.urlLabel}
           placeholder={EDITOR_TEXTS.urlLabel}
           value={task.url}
-          disabled={isReadOnly}
           onChange={(event) => onUrlChange(event.target.value)}
           className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
         />
@@ -49,7 +47,6 @@ export function TaskDetails({
         value={task.platformIds}
         onChange={onPlatformsChange}
         idPrefix={task.key}
-        isDisabled={isReadOnly}
       />
     </div>
   );

@@ -13,7 +13,7 @@ import {
   type TaskSuggesterInfo,
 } from '@cairn/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -66,14 +66,44 @@ const TEXT_ONLY: SummaryDetail = {
   transcription: null,
 };
 
+/** Активная задача черновика: такой её отдаёт деталь после разбивки. */
+const ACTIVE_TASK = {
+  id: TASK_ID,
+  title: 'Сделать',
+  position: 1,
+  origin: SummaryTaskOrigin.Model,
+  state: SummaryTaskState.Active,
+  releasedVersionId: null,
+  releasedVersionLabel: null,
+  url: null,
+  platformIds: [],
+};
+
+const ARCHIVED_TASK = {
+  ...ACTIVE_TASK,
+  id: '88888888-8888-8888-8888-888888888888',
+  title: 'Отложить до февраля',
+  position: 2,
+  state: SummaryTaskState.Archived,
+};
+
+/** Уехавшая задача: версия у неё своя, а не саммари (дизайн, 3.6). */
+const RELEASED_TASK = {
+  ...ACTIVE_TASK,
+  id: '99999999-9999-9999-9999-999999999999',
+  title: 'Уже уехало',
+  position: 3,
+  state: SummaryTaskState.Released,
+  releasedVersionId: VERSION_ID,
+  releasedVersionLabel: 'v1.4',
+};
+
 const WITH_TASKS: SummaryDetail = {
   ...TEXT_ONLY,
   taskCount: 1,
   archivedCount: 0,
   releasedCount: 0,
-  tasks: [
-    { id: TASK_ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model, state: SummaryTaskState.Active, releasedVersionId: null, releasedVersionLabel: null, url: null, platformIds: [] },
-  ],
+  tasks: [ACTIVE_TASK],
   suggester: { name: 'external', model: 'gpt-4o-mini', at: '2026-11-16T10:00:00.000Z', dropped: 0 },
 };
 
@@ -186,13 +216,22 @@ function renderScreen(detail: SummaryDetail, suggester: TaskSuggesterInfo) {
   return render(<SummaryScreen summaryId={SUMMARY_ID} />, { wrapper });
 }
 
+/** Отметить все активные задачи: действия над выбором иначе выключены. */
+async function selectAll(): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: 'Отметить все' }));
+}
+
 beforeEach(() => {
   vi.mocked(hooks.useQuerySections).mockReturnValue(
     query({ [Section.Chronicle]: AccessLevel.Write, [Section.Roadmap]: AccessLevel.Write }),
   );
   vi.mocked(hooks.useQueryPublicLink).mockReturnValue(query(null));
+  vi.mocked(hooks.useQueryRoadmap).mockReturnValue(query({ stage: { current: null, total: 0 }, versions: [], summary: [] }));
   vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationSaveSummaryTasks).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationArchiveSummaryTasks).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationRestoreSummaryTasks).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationRemoveSummaryTasks).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationReleaseSummary).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationUpdateChronicleEntry).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationRetryTranscription).mockReturnValue(mutation());
@@ -353,26 +392,29 @@ describe('экран саммари', () => {
     expect(screen.queryByText(/Отброшено предложений/)).not.toBeInTheDocument();
   });
 
-  it('устаревший текст предупреждает, но релиз не блокирует', () => {
+  it('устаревший текст предупреждает, но релиз не блокирует', async () => {
     // Судит человек: он видит и текст, и задачи.
     renderScreen({ ...WITH_TASKS, isTextStale: true }, LOCAL_SUGGESTER);
 
+    await selectAll();
+
     expect(screen.getByText(/задачи могли устареть/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Сформировать релиз/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (1)' })).toBeEnabled();
   });
 
-  it('без права на роадмап кнопка релиза выключена с объяснением', () => {
+  it('без права на роадмап кнопка релиза выключена с объяснением', async () => {
     vi.mocked(hooks.useQuerySections).mockReturnValue(
       query({ [Section.Chronicle]: AccessLevel.Write }),
     );
 
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+    await selectAll();
 
-    expect(screen.getByRole('button', { name: /Сформировать релиз/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (1)' })).toBeDisabled();
     expect(screen.getByText(/Нет права на «Роадмап»/)).toBeInTheDocument();
   });
 
-  it('уровень роадмапа ниже записи называется своей причиной', () => {
+  it('уровень роадмапа ниже записи называется своей причиной', async () => {
     // Роадмап он видит, и «нет права» прочиталось бы как ошибка системы:
     // ручка ответит ему `403`, а не `404` (дизайн, раздел 1.4).
     vi.mocked(hooks.useQuerySections).mockReturnValue(
@@ -380,8 +422,9 @@ describe('экран саммари', () => {
     );
 
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+    await selectAll();
 
-    expect(screen.getByRole('button', { name: /Сформировать релиз/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (1)' })).toBeDisabled();
     expect(screen.getByText(/ниже записи/)).toBeInTheDocument();
     expect(screen.queryByText(/Нет права на «Роадмап»/)).not.toBeInTheDocument();
   });
@@ -389,18 +432,18 @@ describe('экран саммари', () => {
   it('пустой черновик релиз формировать не даёт', () => {
     renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
 
-    expect(screen.getByRole('button', { name: /Сформировать релиз/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (0)' })).toBeDisabled();
   });
 
-  it('после релиза шаги 2 и 3 исчезают, остаётся ссылка на версию', () => {
+  it('сформированный релиз не замораживает ни разбивку, ни остальные задачи', async () => {
+    // Прежнее «релиз замораживает редактор» отменено: саммари с релизом
+    // формирует следующий из того, что осталось (дизайн, 2.5 и 2.4).
     renderScreen(RELEASED_DETAIL, LOCAL_SUGGESTER);
 
-    expect(screen.queryByRole('button', { name: /Создать задачи/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Сформировать релиз/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /v1\.4/ })).toHaveAttribute(
-      'href',
-      `/projects/${PROJECT_ID}/roadmap?version=${VERSION_ID}`,
-    );
+    await selectAll();
+
+    expect(screen.getByRole('button', { name: /Создать задачи/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Сформировать релиз (1)' })).toBeEnabled();
   });
 
   it('формулировки выводятся текстом, а не разметкой', () => {
@@ -433,7 +476,8 @@ describe('экран саммари', () => {
   it('форма релиза предзаполнена подсказкой обозначения', async () => {
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
-    await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз (1)' }));
 
     expect(screen.getByLabelText(/Обозначение/)).toHaveValue('v1.3');
     expect(screen.queryByLabelText(/Дата релиза/)).not.toBeInTheDocument();
@@ -444,17 +488,19 @@ describe('экран саммари', () => {
 
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
-    await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз (1)' }));
 
     expect(screen.getByText(/публичную выдачу/)).toBeInTheDocument();
   });
 
-  it('релиз отправляет задачи и три поля новой версии', async () => {
+  it('релиз отправляет отмеченные задачи и три поля новой версии', async () => {
     const release = mutation();
     vi.mocked(hooks.useMutationReleaseSummary).mockReturnValue(release);
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
-    await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз (1)' }));
     await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз' }));
 
     const mutate = (release as unknown as { mutate: ReturnType<typeof vi.fn> }).mutate;
@@ -474,15 +520,14 @@ describe('экран саммари', () => {
 
   it('несохранённые правки черновика релиз не пропускают', async () => {
     // Сервер читает черновик из базы: релиз с правкой, оставшейся в
-    // памяти, уехал бы со старой формулировкой. Исправить это было бы
-    // уже нечем — после релиза `PUT …/tasks` отвечает `409`, а редактор
-    // становится только для чтения.
+    // памяти, уехал бы со старой формулировкой.
     const release = mutation();
     vi.mocked(hooks.useMutationReleaseSummary).mockReturnValue(release);
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
+    await selectAll();
     await userEvent.type(screen.getByLabelText('Формулировка задачи'), ' быстрее');
-    await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз (1)' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(
@@ -496,10 +541,81 @@ describe('экран саммари', () => {
     // факт непустого черновика.
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
-    await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз (1)' }));
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.queryByText(/Сначала сохраните правки/)).not.toBeInTheDocument();
+  });
+
+  it('список версий для цели релиза берётся запросом роадмапа', async () => {
+    // Второго места для списка версий не появляется: деталь саммари его
+    // не отдаёт, а роадмап субъекту с правом на релиз и так открыт
+    // (дизайн, 4.5).
+    vi.mocked(hooks.useQueryRoadmap).mockReturnValue(
+      query({
+        stage: { current: 1, total: 1 },
+        versions: [
+          {
+            id: VERSION_ID,
+            label: 'v1.2',
+            state: RoadmapVersionState.Planned,
+            plannedDate: null,
+            releasedDate: null,
+            position: 1,
+            progress: { done: 0, total: 0 },
+            unfinished: 0,
+            hasUnfinishedOnRelease: false,
+          },
+        ],
+        summary: [],
+      }),
+    );
+
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз (1)' }));
+    await userEvent.selectOptions(screen.getByLabelText('Цель релиза'), 'existing');
+
+    expect(screen.getByRole('option', { name: 'v1.2' })).toBeInTheDocument();
+  });
+
+  it('без выдачи на роадмап версии не запрашиваются', () => {
+    // Запрос ответил бы `404`: право на релиз и право читать версии — одно
+    // и то же, и спрашивать их тому, кому релиз закрыт, незачем.
+    vi.mocked(hooks.useQuerySections).mockReturnValue(
+      query({ [Section.Chronicle]: AccessLevel.Write }),
+    );
+
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    expect(vi.mocked(hooks.useQueryRoadmap)).toHaveBeenCalledWith(PROJECT_ID, false);
+  });
+
+  it('отмеченные задачи уходят в архив одним действием', async () => {
+    const archive = mutation();
+    vi.mocked(hooks.useMutationArchiveSummaryTasks).mockReturnValue(archive);
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'В архив (1)' }));
+
+    expect(mutateOf(archive)).toHaveBeenCalledWith({ taskIds: [TASK_ID] });
+  });
+
+  it('удаление отмеченных уходит только после подтверждения', async () => {
+    const remove = mutation();
+    vi.mocked(hooks.useMutationRemoveSummaryTasks).mockReturnValue(remove);
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Удалить (1)' }));
+
+    expect(mutateOf(remove)).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Да, удалить' }));
+
+    expect(mutateOf(remove)).toHaveBeenCalledWith({ taskIds: [TASK_ID] });
   });
 
   it('уход со страницы с несохранёнными правками предупреждает', async () => {
@@ -637,5 +753,123 @@ describe('экран саммари', () => {
     render(<SummaryScreen summaryId={SUMMARY_ID} />, { wrapper });
 
     expect(screen.getByText(/не найдено/)).toBeInTheDocument();
+  });
+});
+
+describe('архив и уехавшие задачи саммари', () => {
+  /** Деталь с задачей в каждом из трёх состояний. */
+  const ALL_STATES: SummaryDetail = {
+    ...WITH_TASKS,
+    archivedCount: 1,
+    releasedCount: 1,
+    isReleased: true,
+    releasedVersionLabel: 'v1.4',
+    releasedVersionId: VERSION_ID,
+    tasks: [ACTIVE_TASK, ARCHIVED_TASK, RELEASED_TASK],
+  };
+
+  it('архив свёрнут, называет число и строк не показывает', () => {
+    renderScreen(ALL_STATES, LOCAL_SUGGESTER);
+
+    expect(screen.getByRole('button', { name: 'Архив (1)' })).toBeInTheDocument();
+    expect(screen.queryByText(ARCHIVED_TASK.title)).not.toBeInTheDocument();
+  });
+
+  it('раскрытый архив даёт на строку возврат и удаление, без отметки', async () => {
+    // Отметка означает «над этим — следующее действие»; в архиве
+    // действий два, и оба однострочные (дизайн, 4.4).
+    renderScreen(ALL_STATES, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Архив (1)' }));
+
+    expect(screen.getByText(ARCHIVED_TASK.title)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Вернуть в список' })).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox', { name: 'Отметить задачу' })).toHaveLength(1);
+  });
+
+  it('«Вернуть в список» отдаёт ручке возврата только свою задачу', async () => {
+    // Действие однострочное: соседние строки архива остаются на месте.
+    const other = { ...ARCHIVED_TASK, id: TASK_ID, title: 'Второе отложенное', position: 4 };
+    const restore = mutation();
+    vi.mocked(hooks.useMutationRestoreSummaryTasks).mockReturnValue(restore);
+    renderScreen({ ...ALL_STATES, tasks: [ARCHIVED_TASK, other] }, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Архив (2)' }));
+    await userEvent.click(screen.getAllByRole('button', { name: 'Вернуть в список' })[1]!);
+
+    expect(mutateOf(restore)).toHaveBeenCalledWith({ taskIds: [other.id] });
+  });
+
+  it('удаление из архива тоже спрашивает подтверждение', async () => {
+    // Потеря содержимого остаётся потерей, из какого списка её ни
+    // запусти.
+    const remove = mutation();
+    vi.mocked(hooks.useMutationRemoveSummaryTasks).mockReturnValue(remove);
+    renderScreen(ALL_STATES, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Архив (1)' }));
+    // Названо иначе, чем «Удалить» у карточки: та уносит строку из
+    // черновика в памяти, эта — из базы и без возврата.
+    await userEvent.click(screen.getByRole('button', { name: 'Удалить из архива' }));
+
+    expect(mutateOf(remove)).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Да, удалить' }));
+
+    expect(mutateOf(remove)).toHaveBeenCalledWith({ taskIds: [ARCHIVED_TASK.id] });
+  });
+
+  it('в редакторе остаются только активные задачи', () => {
+    // Архив и уехавшие правятся не здесь: `PUT …/tasks` их не видит
+    // вовсе (дизайн, 3.4).
+    renderScreen(ALL_STATES, LOCAL_SUGGESTER);
+
+    expect(screen.getByDisplayValue(ACTIVE_TASK.title)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(ARCHIVED_TASK.title)).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(RELEASED_TASK.title)).not.toBeInTheDocument();
+  });
+
+  it('уехавшие только читаются и ведут на свою версию', async () => {
+    renderScreen(ALL_STATES, LOCAL_SUGGESTER);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Уехали в релиз (1)' }));
+
+    expect(screen.getByText(RELEASED_TASK.title)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'v1.4' })).toHaveAttribute(
+      'href',
+      `/projects/${PROJECT_ID}/roadmap?version=${VERSION_ID}`,
+    );
+  });
+
+  it('без обозначения версии ссылки нет, и это штатный случай', async () => {
+    // Обозначение — данные роадмапа: без выдачи на него его не выходит, а
+    // сама задача видна (дизайн, 4.4 и 3.8).
+    renderScreen(
+      {
+        ...ALL_STATES,
+        tasks: [{ ...RELEASED_TASK, releasedVersionId: null, releasedVersionLabel: null }],
+      },
+      LOCAL_SUGGESTER,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Уехали в релиз (1)' }));
+
+    expect(screen.getByText(RELEASED_TASK.title)).toBeInTheDocument();
+    // Ни одной ссылки в списке, а не «ни одной с обозначением»: ссылка
+    // без обозначения была бы безымянной дорогой в `404`. Вместо неё
+    // сказано, что версия скрыта, — молчание читалось бы как «не уехала».
+    const list = screen.getByRole('list', { name: 'Задачи, уехавшие в релиз' });
+
+    expect(within(list).queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.getByText('Версия скрыта')).toBeInTheDocument();
+  });
+
+  it('пустые списки не рисуются вовсе', () => {
+    // «Архив (0)» рассказывал бы про отсутствующее: отсутствие списка и
+    // означает, что в нём ничего нет.
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    expect(screen.queryByRole('button', { name: /^Архив/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Уехали в релиз/ })).not.toBeInTheDocument();
   });
 });

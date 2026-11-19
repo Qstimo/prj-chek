@@ -50,8 +50,51 @@ describe('история саммари', () => {
     render(<SummaryList items={[TEXT_ONLY, WITH_TASKS, RELEASED]} />);
 
     expect(screen.getByText('Текст')).toBeInTheDocument();
-    expect(screen.getByText('Задачи: 12')).toBeInTheDocument();
+    expect(screen.getByText('В работе')).toBeInTheDocument();
     expect(screen.getByText('Ушло в v1.4')).toBeInTheDocument();
+  });
+
+  it('строка называет три числа задач', () => {
+    // Одного числа задач больше не хватает: после архива и выборочного
+    // релиза «задач: 3» не говорит, где эти задачи.
+    render(
+      <SummaryList items={[{ ...WITH_TASKS, taskCount: 3, archivedCount: 2, releasedCount: 5 }]} />,
+    );
+
+    expect(screen.getByText('3 в работе · 2 в архиве · 5 в релизе')).toBeInTheDocument();
+  });
+
+  it('нули не показываются', () => {
+    // «0 в архиве» рассказывал бы про отсутствующее и занимал бы место,
+    // которое нужно числам, что есть.
+    render(<SummaryList items={[{ ...WITH_TASKS, taskCount: 3 }]} />);
+
+    expect(screen.getByText('3 в работе')).toBeInTheDocument();
+    expect(screen.queryByText(/в архиве/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/в релизе/)).not.toBeInTheDocument();
+  });
+
+  it('саммари, где всё отложено, не называется «Текст»', () => {
+    // Активных задач нет, но задачи есть: «Текст» означал бы, что
+    // разбивки не было вовсе.
+    render(<SummaryList items={[{ ...WITH_TASKS, taskCount: 0, archivedCount: 4 }]} />);
+
+    expect(screen.getByText('В работе')).toBeInTheDocument();
+    expect(screen.queryByText('Текст')).not.toBeInTheDocument();
+  });
+
+  it('у саммари без задач числа не названы вовсе', () => {
+    render(<SummaryList items={[TEXT_ONLY]} />);
+
+    expect(screen.queryByText(/в работе/)).not.toBeInTheDocument();
+  });
+
+  it('число задач не называется дважды', () => {
+    // Состояние отвечает на «на какой стадии», числа — на «сколько и
+    // где»: одно число в двух клетках разошлось бы при первой правке.
+    render(<SummaryList items={[{ ...WITH_TASKS, taskCount: 12 }]} />);
+
+    expect(screen.queryByText(/Задачи: 12/)).not.toBeInTheDocument();
   });
 
   it('скрытое обозначение версии не читается как «не сформирован»', () => {
