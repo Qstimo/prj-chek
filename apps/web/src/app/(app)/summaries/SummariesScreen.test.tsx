@@ -33,6 +33,8 @@ const ITEM = {
   occurredOn: '2026-11-16',
   title: 'Созвон по релизу',
   taskCount: 0,
+  archivedCount: 0,
+  releasedCount: 0,
   isReleased: false,
   releasedVersionLabel: null,
   createdAt: '2026-11-16T10:00:00.000Z',

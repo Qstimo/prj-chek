@@ -3,6 +3,7 @@ import {
   MAX_SUMMARY_TASK_TITLE,
   PlatformKind,
   SummaryTaskOrigin,
+  SummaryTaskState,
   type Platform,
   type SummaryTask,
 } from '@cairn/shared';
@@ -17,6 +18,9 @@ const TASK_A: SummaryTask = {
   title: 'раз',
   position: 1,
   origin: SummaryTaskOrigin.Human,
+  state: SummaryTaskState.Active,
+  releasedVersionId: null,
+  releasedVersionLabel: null,
   url: null,
   platformIds: [],
 };
@@ -26,6 +30,9 @@ const TASK_B: SummaryTask = {
   title: 'два',
   position: 2,
   origin: SummaryTaskOrigin.Human,
+  state: SummaryTaskState.Active,
+  releasedVersionId: null,
+  releasedVersionLabel: null,
   url: null,
   platformIds: [],
 };

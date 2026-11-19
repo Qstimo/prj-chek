@@ -2,7 +2,7 @@ import {
   AccessLevel,
   SUGGESTER_DISABLED,
   SUGGESTER_UNAVAILABLE,
-  SUMMARY_ALREADY_RELEASED,
+  SUMMARY_TASK_NOT_ACTIVE,
   SUMMARY_TASKS_EMPTY,
   SUMMARY_TEXT_NOT_PLAIN,
   SUMMARY_TEXT_TOO_LONG,
@@ -68,7 +68,7 @@ export const SUMMARY_TEXTS = {
 export const FAILURE_MESSAGES: Record<string, string> = {
   [SUGGESTER_DISABLED]: 'Разбивка не настроена: обратитесь к администратору.',
   [SUGGESTER_UNAVAILABLE]: 'Разбивка не ответила. Попробуйте ещё раз.',
-  [SUMMARY_ALREADY_RELEASED]: 'Релиз по этому саммари уже сформирован: задачи правятся в роадмапе.',
+  [SUMMARY_TASK_NOT_ACTIVE]: 'Состояние задачи не допускает выбранного действия.',
   [SUMMARY_TASKS_EMPTY]: 'Добавьте задачи в черновик: формировать релиз не из чего.',
   [SUMMARY_TEXT_NOT_PLAIN]: 'В тексте управляющие символы: его прислали в непригодном виде.',
 };
