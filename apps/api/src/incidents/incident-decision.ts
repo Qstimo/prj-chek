@@ -6,6 +6,14 @@ export enum IncidentAction {
   Open = 'open',
   /** Закрыть открытый: адрес ответил. */
   Resolve = 'resolve',
+  /**
+   * Дописать ход открытого: адрес не отвечает по-прежнему.
+   *
+   * Не событие: уведомление уходит на открытии и закрытии, а это запись
+   * наблюдения. Без неё причина замерзала на моменте открытия и выдавала
+   * себя за причину всего падения.
+   */
+  Touch = 'touch',
   /** Ничего не делать. */
   None = 'none',
 }
@@ -33,9 +41,9 @@ export interface AddressVerdict {
 /**
  * Решает судьбу инцидента адреса (дизайн уведомлений, раздел 5).
  *
- * Пауза и архив гасят только открытие, но не закрытие: их могли
- * поставить поверх уже начавшегося падения, и «отвечает снова» в этом
- * случае — правда. Обратное правило оставило бы инцидент открытым
+ * Пауза и архив гасят только открытие — ни закрытия, ни записи хода: их
+ * могли поставить поверх уже начавшегося падения, и «отвечает снова» в
+ * этом случае — правда. Обратное правило оставило бы инцидент открытым
  * навсегда.
  */
 export function decideIncident(verdict: AddressVerdict): IncidentAction {
@@ -44,7 +52,13 @@ export function decideIncident(verdict: AddressVerdict): IncidentAction {
   }
 
   if (verdict.health === HealthState.Down) {
-    if (verdict.isPaused || verdict.isArchived || verdict.hasOpenIncident) {
+    // Открытый инцидент проверяется прежде паузы и архива: дописать ход
+    // уже начавшегося падения они не мешают — как не мешают его закрыть.
+    if (verdict.hasOpenIncident) {
+      return IncidentAction.Touch;
+    }
+
+    if (verdict.isPaused || verdict.isArchived) {
       return IncidentAction.None;
     }
 

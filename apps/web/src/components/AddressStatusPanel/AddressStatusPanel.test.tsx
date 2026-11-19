@@ -51,6 +51,9 @@ const HISTORY: AddressIncidentHistory = {
       startedAt: '2026-09-16T10:00:00.000Z',
       resolvedAt: '2026-09-16T10:40:00.000Z',
       cause: 'HTTP 500',
+      lastCause: 'DNS не отвечает (EAI_AGAIN)',
+      lastDownAt: '2026-09-16T10:38:00.000Z',
+      checks: 3,
     },
   ],
   offset: 0,
@@ -145,8 +148,68 @@ describe('панель разбора адреса', () => {
       <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
     );
 
-    expect(screen.getByText(/40 минут/)).toBeInTheDocument();
+    expect(screen.getByText(/40 мин/)).toBeInTheDocument();
     expect(screen.getByText(/HTTP 500/)).toBeInTheDocument();
+  });
+
+  it('называет точное время начала и конца падения', () => {
+    // Один день без времени не давал сопоставить падение ни с деплоем,
+    // ни с письмом: «17.11.2026 — 43 минуты» отвечает на вопрос «сколько»,
+    // но не на вопрос «когда».
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/16\.09\.2026, 13:00 → 13:40/)).toBeInTheDocument();
+  });
+
+  it('называет причину конца падения рядом с причиной начала', () => {
+    // Причина замораживалась на открытии: «HTTP 404» стоял в истории
+    // шесть суток, хотя адрес давно отвечал другим.
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/HTTP 500 → DNS не отвечает \(EAI_AGAIN\)/)).toBeInTheDocument();
+  });
+
+  it('говорит, сколько проверок застали адрес упавшим', () => {
+    // Одно подтверждение за шесть суток означает, что прогон не доходил,
+    // а не что падение наблюдали.
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/подтверждено 3 проверками/)).toBeInTheDocument();
+  });
+
+  it('границу возвращения называет вилкой, а не мгновением', () => {
+    // Момент закрытия — время проверки, а не события: адрес поднялся
+    // где-то между последней упавшей проверкой и ответившей.
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/ответил между 13:38 и 13:40/)).toBeInTheDocument();
+  });
+
+  it('у старого падения без подробностей вилки и второй причины нет', () => {
+    // Строки, заведённые до появления подробностей, остаются в истории, и
+    // выдумывать им границу по началу падения нельзя.
+    vi.mocked(hooks.useQueryAddressIncidents).mockReturnValue(
+      query({
+        ...HISTORY,
+        incidents: [{ ...HISTORY.incidents[0]!, lastCause: null, lastDownAt: null, checks: 1 }],
+      }),
+    );
+
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/HTTP 500/)).toBeInTheDocument();
+    expect(screen.queryByText(/→ DNS/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ответил между/)).not.toBeInTheDocument();
   });
 
   it('пустая история сказана словами', () => {

@@ -1,6 +1,27 @@
+import type { Incident } from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 
-import { downtimeTextOf, fallCountTextOf, uptimeTextOf } from './utils';
+import {
+  checksTextOf,
+  downtimeTextOf,
+  exactDurationTextOf,
+  fallCountTextOf,
+  incidentRangeTextOf,
+  recoveryTextOf,
+  uptimeTextOf,
+} from './utils';
+
+/** Падение с 11:20 до 12:03 по московскому поясу, он же пояс тестов. */
+const INCIDENT: Incident = {
+  id: '00000000-0000-0000-0000-00000000000a',
+  domainId: '00000000-0000-0000-0000-000000000002',
+  startedAt: '2026-11-17T08:20:00.000Z',
+  resolvedAt: '2026-11-17T09:03:00.000Z',
+  cause: 'HTTP 404',
+  lastCause: 'DNS не отвечает (EAI_AGAIN)',
+  lastDownAt: '2026-11-17T09:01:00.000Z',
+  checks: 3,
+};
 
 describe('счёт падений', () => {
   it('называет окно рядом с числом', () => {
@@ -32,6 +53,79 @@ describe('время простоя', () => {
 
   it('ровный час не дописывает ноль минут', () => {
     expect(downtimeTextOf(3600)).toBe('1 ч');
+  });
+});
+
+describe('отрезок падения', () => {
+  it('называет время начала и конца, а не один день', () => {
+    // «17.11.2026 — 43 минуты» не отвечает на вопрос «когда именно»: из
+    // такой строки нельзя сопоставить падение ни с деплоем, ни с письмом.
+    expect(incidentRangeTextOf(INCIDENT)).toBe('17.11.2026, 11:20 → 12:03');
+  });
+
+  it('падение через полночь называет дату конца целиком', () => {
+    // Без даты конец выглядел бы тем же днём, и трёхсуточное падение
+    // читалось бы как сорокаминутное.
+    expect(
+      incidentRangeTextOf({ ...INCIDENT, resolvedAt: '2026-11-19T09:03:00.000Z' }),
+    ).toBe('17.11.2026, 11:20 → 19.11.2026, 12:03');
+  });
+
+  it('открытое падение конца не выдумывает', () => {
+    expect(incidentRangeTextOf({ ...INCIDENT, resolvedAt: null })).toBe(
+      '17.11.2026, 11:20 → не закрыто',
+    );
+  });
+});
+
+describe('точная длительность', () => {
+  it('не округляет часы, съедая минуты', () => {
+    // Прежний счёт давал «159 часов» там, где было шесть суток с лишним:
+    // старшая единица скрывала, сколько на самом деле лежало.
+    expect(
+      exactDurationTextOf({ ...INCIDENT, resolvedAt: '2026-11-24T00:32:00.000Z' }),
+    ).toBe('6 д 16 ч 12 мин');
+  });
+
+  it('сорок три минуты остаются сорока тремя минутами', () => {
+    expect(exactDurationTextOf(INCIDENT)).toBe('43 мин');
+  });
+
+  it('короткое падение считается секундами, а не «меньше минуты»', () => {
+    // Мигнувший на полминуты адрес и лежавший минуту — разные события.
+    expect(
+      exactDurationTextOf({ ...INCIDENT, resolvedAt: '2026-11-17T08:20:28.000Z' }),
+    ).toBe('28 с');
+  });
+
+  it('открытое падение длительности не имеет', () => {
+    expect(exactDurationTextOf({ ...INCIDENT, resolvedAt: null })).toBe('');
+  });
+});
+
+describe('граница возвращения', () => {
+  it('называет вилку между последней упавшей и ответившей проверкой', () => {
+    // Прогон идёт раз в четверть часа: «ответил в 12:03» — это время
+    // проверки, а не события. Честно назвать можно только вилку.
+    expect(recoveryTextOf(INCIDENT)).toBe('ответил между 12:01 и 12:03');
+  });
+
+  it('без последней упавшей проверки вилки нет', () => {
+    // Старые строки её не помнят, и выдумывать границу по началу падения
+    // значило бы назвать измерением то, чего не измеряли.
+    expect(recoveryTextOf({ ...INCIDENT, lastDownAt: null })).toBeNull();
+  });
+
+  it('у открытого падения возвращения ещё не было', () => {
+    expect(recoveryTextOf({ ...INCIDENT, resolvedAt: null })).toBeNull();
+  });
+});
+
+describe('счёт подтверждений', () => {
+  it('склоняет проверки', () => {
+    expect(checksTextOf(1)).toBe('подтверждено 1 проверкой');
+    expect(checksTextOf(3)).toBe('подтверждено 3 проверками');
+    expect(checksTextOf(27)).toBe('подтверждено 27 проверками');
   });
 });
 

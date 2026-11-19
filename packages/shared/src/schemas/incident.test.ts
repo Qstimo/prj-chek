@@ -11,14 +11,19 @@ import {
 } from './incident';
 
 describe('схема инцидента', () => {
+  const INCIDENT = {
+    id: '00000000-0000-0000-0000-000000000001',
+    domainId: '00000000-0000-0000-0000-000000000002',
+    startedAt: '2026-10-20T10:00:00.000Z',
+    resolvedAt: null,
+    cause: 'HTTP 500',
+    lastCause: 'HTTP 500',
+    lastDownAt: '2026-10-20T10:30:00.000Z',
+    checks: 3,
+  };
+
   it('принимает открытый инцидент', () => {
-    const parsed = incidentSchema.parse({
-      id: '00000000-0000-0000-0000-000000000001',
-      domainId: '00000000-0000-0000-0000-000000000002',
-      startedAt: '2026-10-20T10:00:00.000Z',
-      resolvedAt: null,
-      cause: 'HTTP 500',
-    });
+    const parsed = incidentSchema.parse(INCIDENT);
 
     expect(parsed.resolvedAt).toBeNull();
   });
@@ -27,24 +32,52 @@ describe('схема инцидента', () => {
     // Причина — данные проверки: её может не быть, а инцидент есть.
     expect(() =>
       incidentSchema.parse({
-        id: '00000000-0000-0000-0000-000000000001',
-        domainId: '00000000-0000-0000-0000-000000000002',
-        startedAt: '2026-10-20T10:00:00.000Z',
+        ...INCIDENT,
         resolvedAt: '2026-10-20T10:40:00.000Z',
         cause: null,
+        lastCause: null,
       }),
     ).not.toThrow();
   });
 
   it('отвергает инцидент без момента начала', () => {
-    expect(() =>
-      incidentSchema.parse({
-        id: '00000000-0000-0000-0000-000000000001',
-        domainId: '00000000-0000-0000-0000-000000000002',
-        resolvedAt: null,
-        cause: null,
-      }),
-    ).toThrow();
+    const { startedAt: _, ...withoutStart } = INCIDENT;
+
+    expect(() => incidentSchema.parse(withoutStart)).toThrow();
+  });
+
+  it('помнит последнюю причину отдельно от первой', () => {
+    // Причина замораживалась на моменте открытия, и «HTTP 404» стоял в
+    // истории шесть суток, хотя адрес давно отвечал другим. Первая
+    // причина отвечает «с чего началось», последняя — «чем кончилось».
+    const parsed = incidentSchema.parse({
+      ...INCIDENT,
+      cause: 'HTTP 404',
+      lastCause: 'DNS не отвечает (EAI_AGAIN)',
+    });
+
+    expect(parsed.cause).toBe('HTTP 404');
+    expect(parsed.lastCause).toBe('DNS не отвечает (EAI_AGAIN)');
+  });
+
+  it('старый инцидент без подробностей принимается', () => {
+    // Строки, заведённые до появления подробностей, остаются в истории:
+    // их подтверждением считается открывшая проверка, а последняя
+    // причина неизвестна — и это пустота, а не «такой же, как первая».
+    const parsed = incidentSchema.parse({
+      ...INCIDENT,
+      lastCause: null,
+      lastDownAt: null,
+      checks: 1,
+    });
+
+    expect(parsed.lastDownAt).toBeNull();
+  });
+
+  it('отвергает инцидент без единой подтвердившей проверки', () => {
+    // Инцидент заводит проверка: ноль подтверждений означал бы падение,
+    // которого никто не видел.
+    expect(() => incidentSchema.parse({ ...INCIDENT, checks: 0 })).toThrow();
   });
 
   it('у адреса открытый инцидент отделён от закрытых', () => {

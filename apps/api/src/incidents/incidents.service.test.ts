@@ -92,6 +92,57 @@ describe('сведение инцидентов', () => {
     expect(await service.reconcile([downState()])).toEqual([]);
   });
 
+  it('повторный прогон считает подтверждения падения', async () => {
+    // Одно подтверждение за шесть суток означало бы, что прогон не
+    // доходил, а не что падение наблюдали. Отличить одно от другого
+    // можно только счётом.
+    await service.reconcile([downState()]);
+    await service.reconcile([downState()]);
+    await service.reconcile([downState()]);
+
+    const [incident] = await testDb.rowsOf(addressIncidents);
+
+    expect(incident?.checks).toBe(3);
+    expect(incident?.lastDownAt).toBeInstanceOf(Date);
+  });
+
+  it('последняя причина обновляется, первая остаётся', async () => {
+    // Падение длится часами, и причина за это время меняется: «HTTP 404»
+    // на открытии и «DNS не отвечает» в конце — разные поломки. Одна
+    // колонка замораживала первую и выдавала её за причину всего падения.
+    await service.reconcile([{ ...downState(), healthError: 'HTTP 404' }]);
+    await service.reconcile([{ ...downState(), healthError: 'DNS не отвечает (EAI_AGAIN)' }]);
+
+    const [incident] = await testDb.rowsOf(addressIncidents);
+
+    expect(incident?.cause).toBe('HTTP 404');
+    expect(incident?.lastCause).toBe('DNS не отвечает (EAI_AGAIN)');
+  });
+
+  it('открытый инцидент сразу знает свою последнюю проверку', async () => {
+    // Иначе первый же прогон давал бы инцидент с пустым «последний раз не
+    // отвечал», и граница возвращения считалась бы от начала падения.
+    await service.reconcile([downState()]);
+
+    const [incident] = await testDb.rowsOf(addressIncidents);
+
+    expect(incident?.checks).toBe(1);
+    expect(incident?.lastCause).toBe('HTTP 500');
+    expect(incident?.lastDownAt).toBeInstanceOf(Date);
+  });
+
+  it('приостановленный проект дописывает ход уже открытого падения', async () => {
+    // Пауза гасит открытие, но не запись наблюдения: инцидент уже есть, и
+    // пуш от этой записи не уходит.
+    await service.reconcile([downState()]);
+    const events = await service.reconcile([{ ...downState(), isPaused: true }]);
+
+    const [incident] = await testDb.rowsOf(addressIncidents);
+
+    expect(events).toEqual([]);
+    expect(incident?.checks).toBe(2);
+  });
+
   it('ответивший адрес даёт событие закрытия с длительностью', async () => {
     await service.reconcile([downState()]);
 

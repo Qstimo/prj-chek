@@ -1,5 +1,5 @@
 {
-  "id": "ced392f7-f2ae-4508-9b2b-a0cf73b0da33",
+  "id": "612a5647-add4-4ad6-ab4c-b3b48f803fe8",
   "prevId": "b78902ea-61ed-4817-9f99-f6e76e531f69",
   "version": "7",
   "dialect": "postgresql",
@@ -1002,6 +1002,25 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "last_cause": {
+          "name": "last_cause",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_down_at": {
+          "name": "last_down_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checks": {
+          "name": "checks",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         }
       },
       "indexes": {
@@ -3123,244 +3142,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.transcription_jobs": {
-      "name": "transcription_jobs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "summary_id": {
-          "name": "summary_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "requested_by_subject_id": {
-          "name": "requested_by_subject_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "transcription_state",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "transcriber": {
-          "name": "transcriber",
-          "type": "transcriber_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "host": {
-          "name": "host",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "upload_path": {
-          "name": "upload_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "upload_bytes": {
-          "name": "upload_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "upload_type": {
-          "name": "upload_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "audio_path": {
-          "name": "audio_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "audio_bytes": {
-          "name": "audio_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "audio_type": {
-          "name": "audio_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "occurred_on": {
-          "name": "occurred_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "external_id": {
-          "name": "external_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "failure_code": {
-          "name": "failure_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "finished_at": {
-          "name": "finished_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "transcription_jobs_active": {
-          "name": "transcription_jobs_active",
-          "columns": [
-            {
-              "expression": "summary_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"transcription_jobs\".\"state\" in ('queued','extracting','sending','running')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "transcription_jobs_queue": {
-          "name": "transcription_jobs_queue",
-          "columns": [
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"transcription_jobs\".\"state\" in ('queued','extracting','sending','running')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "transcription_jobs_project_started": {
-          "name": "transcription_jobs_project_started",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "transcription_jobs_project_id_projects_id_fk": {
-          "name": "transcription_jobs_project_id_projects_id_fk",
-          "tableFrom": "transcription_jobs",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "transcription_jobs_summary_id_summaries_id_fk": {
-          "name": "transcription_jobs_summary_id_summaries_id_fk",
-          "tableFrom": "transcription_jobs",
-          "tableTo": "summaries",
-          "columnsFrom": [
-            "summary_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "transcription_jobs_requested_by_subject_id_subjects_id_fk": {
-          "name": "transcription_jobs_requested_by_subject_id_subjects_id_fk",
-          "tableFrom": "transcription_jobs",
-          "tableTo": "subjects",
-          "columnsFrom": [
-            "requested_by_subject_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.users": {
       "name": "users",
       "schema": "",
@@ -3801,26 +3582,6 @@
       "values": [
         "model",
         "human"
-      ]
-    },
-    "public.transcriber_kind": {
-      "name": "transcriber_kind",
-      "schema": "public",
-      "values": [
-        "external",
-        "local"
-      ]
-    },
-    "public.transcription_state": {
-      "name": "transcription_state",
-      "schema": "public",
-      "values": [
-        "queued",
-        "extracting",
-        "sending",
-        "running",
-        "done",
-        "failed"
       ]
     }
   },

@@ -59,14 +59,52 @@ export class IncidentsRepository {
     private readonly access: AccessService,
   ) {}
 
-  /** Открывает инцидент адреса. Второй открытый запретит индекс базы. */
-  async open(domainId: string, cause: string | null): Promise<AddressIncidentRow> {
+  /**
+   * Открывает инцидент адреса. Второй открытый запретит индекс базы.
+   *
+   * Последняя причина заполняется первой: открывающая проверка — это уже
+   * наблюдение, и пустое «последний раз не отвечал» на свежем инциденте
+   * заставляло бы считать границу возвращения от начала падения.
+   */
+  async open(
+    domainId: string,
+    cause: string | null,
+    at: Date = new Date(),
+  ): Promise<AddressIncidentRow> {
     const [incident] = await this.db
       .insert(addressIncidents)
-      .values({ domainId, cause })
+      .values({ domainId, cause, lastCause: cause, lastDownAt: at, checks: 1 })
       .returning();
 
     return incident!;
+  }
+
+  /**
+   * Дописывает ход открытого падения: причина, время и счёт проверок.
+   *
+   * Не событие и не вторая строка: пуш уходит на открытии и закрытии, а
+   * это запись наблюдения. Счёт увеличивается в базе выражением, а не
+   * чтением и записью: два прогона, разошедшиеся во времени на
+   * миллисекунды, иначе записали бы одно и то же число.
+   *
+   * @returns строку, если открытый инцидент нашёлся.
+   */
+  async touch(
+    domainId: string,
+    cause: string | null,
+    at: Date = new Date(),
+  ): Promise<AddressIncidentRow | null> {
+    const [incident] = await this.db
+      .update(addressIncidents)
+      .set({
+        lastCause: cause,
+        lastDownAt: at,
+        checks: sql`${addressIncidents.checks} + 1`,
+      })
+      .where(and(eq(addressIncidents.domainId, domainId), isNull(addressIncidents.resolvedAt)))
+      .returning();
+
+    return incident ?? null;
   }
 
   /** Закрывает открытый инцидент адреса; пусто — закрывать было нечего. */
@@ -304,5 +342,8 @@ function viewOf(row: AddressIncidentRow): Incident {
     startedAt: row.startedAt.toISOString(),
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
     cause: row.cause,
+    lastCause: row.lastCause,
+    lastDownAt: row.lastDownAt?.toISOString() ?? null,
+    checks: row.checks,
   };
 }

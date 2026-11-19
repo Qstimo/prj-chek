@@ -194,6 +194,24 @@ describe('StatusByEnvironment', () => {
     expect(screen.queryByText(/hetzner/i)).not.toBeInTheDocument();
   });
 
+  it('окружение с одним адресом занимает одну колонку', () => {
+    // Сетка стояла внутри окружения, а у окружения один адрес — и вся
+    // правая половина экрана пустовала, сколько бы окружений ни было.
+    render(<StatusByEnvironment environments={[prod]} addresses={[address()]} />);
+
+    expect(screen.getByRole('region', { name: 'Прод' }).className).not.toMatch(/col-span-2/);
+  });
+
+  it('окружение с несколькими адресами занимает ширину целиком', () => {
+    // Иначе два адреса сжимались бы в половину экрана, когда рядом с
+    // ними всё равно никто не встанет.
+    const second = address({ domainId: '44444444-4444-4444-4444-444444444444', name: 'api.example.com' });
+
+    render(<StatusByEnvironment environments={[prod]} addresses={[address(), second]} />);
+
+    expect(screen.getByRole('region', { name: 'Прод' }).className).toMatch(/lg:col-span-2/);
+  });
+
   it('окружение без адресов говорит, что проверять нечего', () => {
     render(<StatusByEnvironment environments={[prod]} addresses={[]} />);
 

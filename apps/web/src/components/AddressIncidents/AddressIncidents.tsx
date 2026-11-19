@@ -1,5 +1,10 @@
 import type { IProps } from './types';
-import { dayTextOf, downSinceTextOf, durationTextOf, fallCountTextOf } from './utils';
+import {
+  downSinceTextOf,
+  exactDurationTextOf,
+  fallCountTextOf,
+  incidentRangeTextOf,
+} from './utils';
 
 /**
  * История падений адреса: с каких пор лежит и сколько раз падал.
@@ -34,7 +39,8 @@ export function AddressIncidents({ incidents }: IProps) {
           <ul className="space-y-0.5 pl-4">
             {incidents.past.map((incident) => (
               <li key={incident.id}>
-                {dayTextOf(incident.startedAt)} — {durationTextOf(incident)}
+                <span className="tabular-nums">{incidentRangeTextOf(incident)}</span> ·{' '}
+                {exactDurationTextOf(incident)}
                 {incident.cause ? ` (${incident.cause})` : ''}
               </li>
             ))}

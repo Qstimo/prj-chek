@@ -197,6 +197,55 @@ describe('репозиторий инцидентов', () => {
     await expect(repository.open(domainId, 'два')).resolves.toBeDefined();
   });
 
+  it('дописывает ход падения: причина, время и счёт', async () => {
+    await repository.open(domainId, 'HTTP 404', new Date('2026-10-20T10:00:00Z'));
+
+    const touched = await repository.touch(
+      domainId,
+      'DNS не отвечает (EAI_AGAIN)',
+      new Date('2026-10-20T10:15:00Z'),
+    );
+
+    // Первая причина остаётся: «с чего началось» и «чем кончилось» —
+    // разные вопросы, и одна колонка отвечала только на первый.
+    expect(touched?.cause).toBe('HTTP 404');
+    expect(touched?.lastCause).toBe('DNS не отвечает (EAI_AGAIN)');
+    expect(touched?.lastDownAt).toEqual(new Date('2026-10-20T10:15:00Z'));
+    expect(touched?.checks).toBe(2);
+  });
+
+  it('дописывать нечего — отдаёт пусто, а не падает', async () => {
+    expect(await repository.touch(domainId, 'таймаут')).toBeNull();
+  });
+
+  it('закрытое падение ход больше не дописывает', async () => {
+    // Иначе прогон после подъёма адреса правил бы уже закрытую строку.
+    await repository.open(domainId, 'раз');
+    await repository.resolve(domainId, new Date('2026-10-20T11:00:00Z'));
+
+    expect(await repository.touch(domainId, 'два')).toBeNull();
+  });
+
+  it('счёт подтверждений считает база, а не процесс', async () => {
+    // Два прогона, разошедшиеся на миллисекунды, при чтении и записи
+    // числа записали бы одно и то же.
+    await repository.open(domainId, 'таймаут');
+    await Promise.all([
+      repository.touch(domainId, 'таймаут'),
+      repository.touch(domainId, 'таймаут'),
+    ]);
+
+    expect((await repository.openByDomain()).get(domainId)?.checks).toBe(3);
+  });
+
+  it('открытый инцидент сразу знает свою последнюю проверку', async () => {
+    const incident = await repository.open(domainId, 'HTTP 500', new Date('2026-10-20T10:00:00Z'));
+
+    expect(incident.lastCause).toBe('HTTP 500');
+    expect(incident.lastDownAt).toEqual(new Date('2026-10-20T10:00:00Z'));
+    expect(incident.checks).toBe(1);
+  });
+
   it('открытые инциденты отдаются картой по адресу', async () => {
     await repository.open(domainId, 'таймаут');
 
