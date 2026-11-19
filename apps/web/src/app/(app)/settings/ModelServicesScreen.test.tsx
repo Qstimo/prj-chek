@@ -30,8 +30,6 @@ const SETTINGS: ModelServiceSettings = {
   isEnabled: true,
   isOperational: true,
   blockedBy: null,
-  envVarNames: ['CAIRN_TASK_SUGGESTER_API_KEY'],
-  hasEnvironmentSettings: false,
   updatedAt: '2026-11-17T10:00:00.000Z',
   updatedByLabel: 'админ@cairn.local',
 };
