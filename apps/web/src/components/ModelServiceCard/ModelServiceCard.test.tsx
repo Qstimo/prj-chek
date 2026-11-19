@@ -28,8 +28,6 @@ const fromDatabase: ModelServiceSettings = {
   isEnabled: true,
   isOperational: true,
   blockedBy: null,
-  envVarNames: ['CAIRN_TASK_SUGGESTER_API_KEY'],
-  hasEnvironmentSettings: false,
   updatedAt: '2026-11-17T10:00:00.000Z',
   updatedByLabel: 'админ@cairn.local',
 };
@@ -38,7 +36,6 @@ const fromDatabase: ModelServiceSettings = {
 const fromEnvironment: ModelServiceSettings = {
   ...fromDatabase,
   source: ModelServiceSource.Environment,
-  hasEnvironmentSettings: true,
   updatedAt: null,
   updatedByLabel: null,
 };
@@ -67,25 +64,14 @@ describe('ModelServiceCard', () => {
     expect(screen.getByText('Не настроено')).toBeInTheDocument();
   });
 
-  it('предупреждает, что переменные окружения не действуют, и называет их', () => {
-    // Без этой строки администратор, вписавший ключ в `.env` и
-    // перезапустивший API, не имеет никакого способа узнать, почему
-    // ничего не изменилось (дизайн, 2.2).
-    render(
-      <ModelServiceCard
-        settings={{ ...fromDatabase, hasEnvironmentSettings: true }}
-        {...handlers}
-      />,
-    );
+  it('об именах переменных окружения не говорит вовсе — отвечает бирка источника', () => {
+    // Полоса из семи имён отвечала повторно на тот же вопрос и занимала
+    // больше места, чем весь паспорт узла (дизайн 2026-11-19, 2.1).
+    render(<ModelServiceCard settings={fromDatabase} {...handlers} />);
 
-    expect(screen.getByText(/не действуют/)).toBeInTheDocument();
-    expect(screen.getByText(/CAIRN_TASK_SUGGESTER_API_KEY/)).toBeInTheDocument();
-  });
-
-  it('о «не действуют» не говорит, когда настройка и есть из окружения', () => {
-    render(<ModelServiceCard settings={fromEnvironment} {...handlers} />);
-
+    expect(screen.getByText('Задано в интерфейсе')).toBeInTheDocument();
     expect(screen.queryByText(/не действуют/)).toBeNull();
+    expect(screen.queryByText(/CAIRN_TASK_SUGGESTER/)).toBeNull();
   });
 
   it('различает «выключено вами» и «нет ключа»', () => {

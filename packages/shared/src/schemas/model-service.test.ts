@@ -130,6 +130,17 @@ describe('modelServiceSettingsSchema', () => {
     expect(keys).toContain('hasSecret');
     expect(keys.filter((key) => /secret/i.test(key))).toEqual(['hasSecret']);
   });
+
+  it('имён переменных окружения в проекции нет: их не показывает никто', () => {
+    // Бирка источника отвечает на тот же вопрос, а поле в ответе, которое
+    // никто не показывает, со следующей правкой начнут показывать по
+    // ошибке (дизайн 2026-11-19, 5.3).
+    const keys = Object.keys(modelServiceSettingsSchema.shape);
+
+    expect(keys).toContain('source');
+    expect(keys).not.toContain('envVarNames');
+    expect(keys).not.toContain('hasEnvironmentSettings');
+  });
 });
 
 describe('modelProbeResultSchema', () => {

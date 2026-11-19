@@ -5,12 +5,15 @@ import { useState } from 'react';
 
 import { Drawer } from '@/components/Drawer';
 
-import { ADMIN_LINKS, COMMON_LINKS } from './constants';
+import { ADMIN_LINKS, COMMON_LINKS, SETTINGS_LINK } from './constants';
 import type { IProps } from './types';
 
 /** Верхняя навигация. Разделы администрирования видны только суперадмину. */
 export function AppNav({ subject, onLogout }: IProps) {
   const links = subject.isSuperadmin ? [...COMMON_LINKS, ...ADMIN_LINKS] : COMMON_LINKS;
+  // В меню «Настройки» идут вместе с разделами: правого угла, в котором
+  // им место в полосе, на телефоне нет вовсе.
+  const menuLinks = subject.isSuperadmin ? [...links, SETTINGS_LINK] : links;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
@@ -26,7 +29,7 @@ export function AppNav({ subject, onLogout }: IProps) {
         </Link>
 
         {/* На телефоне разделы и выход живут в меню, поэтому полоса здесь
-            скрыта целиком, а не переносится второй строкой: пять разделов
+            скрыта целиком, а не переносится второй строкой: разделы
             занимали её больше, чем сам экран. */}
         <ul className="hidden flex-wrap gap-4 sm:flex">
           {links.map((link) => (
@@ -39,6 +42,13 @@ export function AppNav({ subject, onLogout }: IProps) {
         </ul>
 
         <div className="ml-auto flex shrink-0 items-center gap-3">
+          {/* Настройки открывают, когда что-то не работает, а не чтобы
+              работать, — поэтому они здесь, а не пунктом слева. */}
+          {subject.isSuperadmin && (
+            <Link href={SETTINGS_LINK.href} className="hidden text-sm hover:underline sm:inline">
+              {SETTINGS_LINK.label}
+            </Link>
+          )}
           <span className="hidden text-sm text-muted-foreground sm:inline">{subject.label}</span>
           <button
             type="button"
@@ -77,7 +87,7 @@ export function AppNav({ subject, onLogout }: IProps) {
       */}
       <Drawer isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} title="Меню">
         <ul className="space-y-1">
-          {links.map((link) => (
+          {menuLinks.map((link) => (
             <li key={link.href}>
               <Link
                 href={link.href}

@@ -1,11 +1,12 @@
-import { ModelServicesScreen } from './ModelServicesScreen';
+import { redirect } from 'next/navigation';
 
-/** Страница настройки служб модели. Закрыта правом суперадмина на API. */
+/**
+ * Прежний адрес экрана служб модели.
+ *
+ * Страница остаётся переадресацией, а не убирается: у владельца адрес в
+ * закладках и в README (дизайн, 2.2). **Ручки API путь не меняют** —
+ * `/model-services` у API не экран, и переносить его незачем.
+ */
 export default function ModelServicesPage() {
-  return (
-    <main className="mx-auto max-w-5xl space-y-6 p-6">
-      <h1 className="text-2xl font-semibold">Службы модели</h1>
-      <ModelServicesScreen />
-    </main>
-  );
+  redirect('/settings');
 }

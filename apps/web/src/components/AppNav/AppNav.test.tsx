@@ -40,20 +40,30 @@ describe('AppNav', () => {
     expect(screen.queryByRole('link', { name: 'Журнал' })).not.toBeInTheDocument();
   });
 
-  it('суперадмин видит пункт «Модели»', () => {
+  it('суперадмин видит «Настройки», а пункта «Модели» нет ни у кого', () => {
+    // Пункты слева — разделы, куда ходят работать; настройки открывают,
+    // когда что-то не работает, поэтому они справа, а «Модели» уходят
+    // вовсе (дизайн, 5.2).
     render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
 
-    expect(screen.getByRole('link', { name: 'Модели' })).toHaveAttribute(
-      'href',
-      '/model-services',
-    );
+    expect(screen.getByRole('link', { name: 'Настройки' })).toHaveAttribute('href', '/settings');
+    expect(screen.queryByRole('link', { name: 'Модели' })).not.toBeInTheDocument();
   });
 
-  it('обычный пользователь пункта «Модели» не видит', () => {
-    // Это настройка установки, и не-суперадмину экран отвечает 403.
+  it('обычный пользователь «Настроек» не видит', () => {
+    // Это настройка установки, и не-суперадмину ручки отвечают 403.
     render(<AppNav subject={subject} onLogout={vi.fn()} />);
 
+    expect(screen.queryByRole('link', { name: 'Настройки' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Модели' })).not.toBeInTheDocument();
+  });
+
+  it('в полосе «Настройки» не задваиваются пунктами слева', () => {
+    // Ссылка живёт рядом с именем субъекта, а не шестым пунктом раздела:
+    // два места для одного адреса разошлись бы первой же правкой.
+    render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
+
+    expect(screen.getAllByRole('link', { name: 'Настройки' })).toHaveLength(1);
   });
 
   it('показывает разделы администрирования суперадмину', () => {
@@ -104,6 +114,17 @@ describe('AppNav', () => {
       expect(menu.getByRole('link', { name: 'Журнал' })).toBeInTheDocument();
       expect(menu.getByRole('button', { name: 'Выйти' })).toBeInTheDocument();
       expect(menu.getByText('user@cairn.local')).toBeInTheDocument();
+    });
+
+    it('«Настройки» стоят в меню там же, где остальные разделы', async () => {
+      // На телефоне правого угла, в котором им место в полосе, нет
+      // вовсе — меню здесь единственный список (дизайн, 5.2).
+      render(<AppNav subject={{ ...subject, isSuperadmin: true }} onLogout={vi.fn()} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Меню' }));
+      const menu = within(screen.getByRole('dialog', { name: 'Меню' }));
+
+      expect(menu.getByRole('link', { name: 'Настройки' })).toHaveAttribute('href', '/settings');
     });
 
     it('выход из меню вызывает выход', async () => {
