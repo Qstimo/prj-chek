@@ -246,21 +246,17 @@ describe('экран саммари', () => {
     expect(screen.getByText(/ссылки и теги/i)).toBeInTheDocument();
   });
 
-  it('чипы платформ приходят из детали саммари', async () => {
+  it('чипы платформ приходят из детали саммари', () => {
     // Один запрос и один гейт: платформы едут тем же ответом, что
     // обозначение версии-получателя (дизайн, 3.2).
     renderScreen({ ...WITH_TASKS, platforms: [API] }, LOCAL_SUGGESTER);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
-
     expect(screen.getByRole('checkbox', { name: 'API' })).toBeInTheDocument();
   });
 
-  it('без платформ в детали чипов на экране нет', async () => {
+  it('без платформ в детали чипов на экране нет', () => {
     // Неотличимо от проекта без платформ — это и есть нераскрытие.
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
 
     expect(screen.queryByRole('group', { name: 'Платформы' })).not.toBeInTheDocument();
   });
@@ -466,7 +462,7 @@ describe('экран саммари', () => {
     vi.mocked(hooks.useMutationReleaseSummary).mockReturnValue(release);
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
-    await userEvent.type(screen.getByRole('textbox'), ' быстрее');
+    await userEvent.type(screen.getByLabelText('Формулировка задачи'), ' быстрее');
     await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -492,7 +488,7 @@ describe('экран саммари', () => {
     // перехватить: предупреждает браузер по `preventDefault`.
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
-    await userEvent.type(screen.getByRole('textbox'), ' быстрее');
+    await userEvent.type(screen.getByLabelText('Формулировка задачи'), ' быстрее');
     const leaving = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(leaving);
 

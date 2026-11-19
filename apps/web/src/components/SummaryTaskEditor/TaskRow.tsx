@@ -8,9 +8,16 @@ import { EDITOR_TEXTS } from './constants';
 import type { IRowProps } from './types';
 
 /**
- * Одна строка черновика: формулировка, порядок, удаление, раскрытие.
+ * Карточка задачи: формулировка, порядок, удаление, ссылка и теги.
  *
- * Формулировка живёт в `input` и выводится значением поля, а не
+ * Карточка, а не строка таблицы: формулировка многострочная, а рядом с
+ * ней набор чипов — такая строка строкой быть перестаёт, и поперечная
+ * прокрутка на главном экране работы была бы худшим из решений
+ * (дизайн, 4.3). Раскрытия нет: поля видны всегда, и это и есть «сразу
+ * всё видно» — прежние «Подробнее» и «Показать у всех» существовали
+ * только затем, чтобы достать поля из-под стрелки.
+ *
+ * Формулировка живёт в поле ввода и выводится значением, а не
  * разметкой: вывод модели недоверен, и ни Markdown-рендера, ни
  * `dangerouslySetInnerHTML` здесь быть не должно (дизайн, раздел 5.6).
  *
@@ -18,11 +25,6 @@ import type { IRowProps } from './types';
  * карта отказов не знает, и человек увидел бы общее сообщение сервера
  * вместо объяснения. Обрезание моделью (`MAX_TASK_TITLE` в разборе
  * ответа) этого не заменяет — руками дописать длиннее можно.
- *
- * Ссылка и теги показываются только раскрытой строкой, но **свёрнутая не
- * скрывает заполненного**: рядом с формулировкой видны имена отмеченных
- * платформ и пометка о наличии ссылки. Поле, которого не видно и о
- * котором ничего не сказано, человек считает пустым.
  */
 export function TaskRow({
   task,
@@ -31,8 +33,6 @@ export function TaskRow({
   isReadOnly,
   shouldFocus,
   platforms,
-  isOpen,
-  onToggle,
   onChange,
   onUrlChange,
   onPlatformsChange,
@@ -40,8 +40,7 @@ export function TaskRow({
   onMove,
   onRemove,
 }: IRowProps) {
-  const field = useRef<HTMLInputElement>(null);
-  const tagged = platforms.filter((platform) => task.platformIds.includes(platform.id));
+  const field = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (shouldFocus) {
@@ -50,82 +49,62 @@ export function TaskRow({
   }, [shouldFocus]);
 
   return (
-    <li className="flex flex-wrap items-center gap-2">
-      <input
-        ref={field}
-        aria-label={EDITOR_TEXTS.titleLabel}
-        value={task.title}
-        maxLength={MAX_SUMMARY_TASK_TITLE}
-        disabled={isReadOnly}
-        onChange={(event) => onChange(event.target.value)}
-        className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-2"
-      />
+    <li className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-start gap-2">
+        {/* Многострочное: задача созвона в одну строку не укладывается, а
+            поле, которое её обрезает, заставляет править текст вслепую. */}
+        <textarea
+          ref={field}
+          aria-label={EDITOR_TEXTS.titleLabel}
+          value={task.title}
+          rows={2}
+          maxLength={MAX_SUMMARY_TASK_TITLE}
+          disabled={isReadOnly}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-w-0 flex-1 resize-y rounded-md border border-border bg-surface px-3 py-2"
+        />
+
+        {!isReadOnly && (
+          <div className="flex shrink-0 gap-1">
+            <button
+              type="button"
+              onClick={() => onMove(-1)}
+              disabled={isFirst}
+              className="rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50"
+            >
+              {EDITOR_TEXTS.up}
+            </button>
+            <button
+              type="button"
+              onClick={() => onMove(1)}
+              disabled={isLast}
+              className="rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50"
+            >
+              {EDITOR_TEXTS.down}
+            </button>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded-md border border-border px-2 py-1 text-xs"
+            >
+              {EDITOR_TEXTS.remove}
+            </button>
+          </div>
+        )}
+      </div>
 
       {task.isFromModel && (
-        <span className="shrink-0 text-xs text-muted-foreground">{EDITOR_TEXTS.modelMark}</span>
+        <p className="text-xs text-muted-foreground">{EDITOR_TEXTS.modelMark}</p>
       )}
 
-      {!isOpen && task.url.trim().length > 0 && (
-        <span className="shrink-0 text-xs text-muted-foreground">{EDITOR_TEXTS.urlMark}</span>
-      )}
-
-      {!isOpen &&
-        tagged.map((platform) => (
-          <span
-            key={platform.id}
-            className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs"
-          >
-            {platform.name}
-          </span>
-        ))}
-
-      <button
-        type="button"
-        aria-expanded={isOpen}
-        onClick={onToggle}
-        className="shrink-0 rounded-md border border-border px-2 py-1 text-xs"
-      >
-        {isOpen ? EDITOR_TEXTS.collapse : EDITOR_TEXTS.expand}
-      </button>
-
-      {!isReadOnly && (
-        <div className="flex shrink-0 gap-1">
-          <button
-            type="button"
-            onClick={() => onMove(-1)}
-            disabled={isFirst}
-            className="rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50"
-          >
-            {EDITOR_TEXTS.up}
-          </button>
-          <button
-            type="button"
-            onClick={() => onMove(1)}
-            disabled={isLast}
-            className="rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50"
-          >
-            {EDITOR_TEXTS.down}
-          </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="rounded-md border border-border px-2 py-1 text-xs"
-          >
-            {EDITOR_TEXTS.remove}
-          </button>
-        </div>
-      )}
-
-      {isOpen && (
-        <TaskDetails
-          task={task}
-          platforms={platforms}
-          isReadOnly={isReadOnly}
-          onUrlChange={onUrlChange}
-          onPlatformsChange={onPlatformsChange}
-          urlError={urlError}
-        />
-      )}
+      <TaskDetails
+        task={task}
+        platforms={platforms}
+        isReadOnly={isReadOnly}
+        onUrlChange={onUrlChange}
+        onPlatformsChange={onPlatformsChange}
+        urlError={urlError}
+      />
     </li>
   );
 }
