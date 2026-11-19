@@ -40,6 +40,7 @@ import {
 } from './suggester/task-suggester';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
 import { SummariesRepository } from './summaries.repository';
+import { RecordingStore } from './transcription/recording-store';
 
 /**
  * Саммари созвонов: транзакции, журнал и вызов порта.
@@ -69,6 +70,7 @@ export class SummariesService implements OnModuleDestroy {
     private readonly audit: AuditService,
     @Inject(TASK_SUGGESTER_SOURCE) private readonly suggesters: TaskSuggesterSource,
     private readonly roadmap: RoadmapRepository,
+    private readonly recordings: RecordingStore,
   ) {}
 
   /** История по всем проектам, куда можно писать хронику. */
@@ -226,9 +228,17 @@ export class SummariesService implements OnModuleDestroy {
     });
   }
 
-  /** Удаляет саммари с черновиком. Запись хроники остаётся. */
+  /**
+   * Удаляет саммари с черновиком. Запись хроники остаётся.
+   *
+   * Записи созвонов убираются с тома **после** фиксации транзакции
+   * (дизайн, 2.5 пункт 4): `unlink` не откатывается, и обратный порядок
+   * унёс бы файл у саммари, удаление которого потом откатилось. Своей
+   * записи в журнал уборка не получает — человек удалял саммари, и журнал
+   * обязан описывать то, что он сделал.
+   */
   async remove(subject: RequestSubject, projectId: string, summaryId: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    const { mediaPaths } = await this.db.transaction(async (tx) => {
       const removed = await this.repository.remove(subject, tx, projectId, summaryId);
 
       await this.audit.record(tx, actorOf(subject), {
@@ -238,7 +248,11 @@ export class SummariesService implements OnModuleDestroy {
         projectId,
         metadata: { title: removed.title },
       });
+
+      return removed;
     });
+
+    await this.recordings.removeAll(mediaPaths);
   }
 
   /**

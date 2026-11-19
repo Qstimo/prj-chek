@@ -1,3 +1,4 @@
+export { limitOf, megabytesOf } from './format-bytes';
 export { formatDate } from './format-date';
 export { parseAddress, rootHintOf } from './parse-address';
 export type { IAddressParse } from './parse-address';

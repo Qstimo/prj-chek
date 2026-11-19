@@ -14,6 +14,7 @@ import { AuditAction, type AuditActor } from '../audit/audit.types';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import type { ChronicleEntry } from '../db/schema';
+import { RecordingStore } from '../summaries/transcription/recording-store';
 import { ChronicleRepository } from './chronicle.repository';
 
 /**
@@ -29,6 +30,7 @@ export class ChronicleService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly repository: ChronicleRepository,
     private readonly audit: AuditService,
+    private readonly recordings: RecordingStore,
   ) {}
 
   /** Лента проекта в проекции по уровню доступа. */
@@ -92,9 +94,18 @@ export class ChronicleService {
     });
   }
 
-  /** Удаляет запись. Заголовок и дата сохраняются в журнале. */
+  /**
+   * Удаляет запись. Заголовок и дата сохраняются в журнале.
+   *
+   * Записи созвонов саммари, уехавшего вместе с записью, убираются с тома
+   * **после** фиксации транзакции (дизайн, 2.5 пункт 4): `unlink` не
+   * откатывается, и обратный порядок унёс бы файл у саммари, удаление
+   * которого потом откатилось. Своей записи в журнал уборка не получает —
+   * человек удалял запись хроники, и журнал обязан описывать то, что он
+   * сделал.
+   */
   async remove(subject: RequestSubject, projectId: string, entryId: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    const { mediaPaths } = await this.db.transaction(async (tx) => {
       const removed = await this.repository.remove(subject, tx, projectId, entryId);
 
       await this.audit.record(tx, actorOf(subject), {
@@ -104,7 +115,11 @@ export class ChronicleService {
         projectId,
         metadata: { title: removed.title, occurredOn: removed.occurredOn },
       });
+
+      return removed;
     });
+
+    await this.recordings.removeAll(mediaPaths);
   }
 }
 

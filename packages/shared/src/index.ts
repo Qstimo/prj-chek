@@ -20,6 +20,8 @@ export * from './schemas/server';
 export * from './schemas/status';
 export * from './schemas/summary';
 export * from './schemas/tag';
+export * from './schemas/recording-type';
 export * from './schemas/totp';
+export * from './schemas/transcription';
 export * from './schemas/user';
 export * from './schemas/variable';

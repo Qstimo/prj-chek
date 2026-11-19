@@ -47,6 +47,36 @@ export enum AuditAction {
   SummaryTasksSuggestionFailed = 'summary.tasks_suggestion_failed',
   SummaryReleased = 'summary.released',
   SummaryDeleted = 'summary.deleted',
+  /** Запись созвона дотекла на том: задача расшифровки заведена. */
+  SummaryRecordingUploaded = 'summary.recording_uploaded',
+  /**
+   * Пишется **до** первого байта наружу, в своей короткой транзакции.
+   *
+   * То же осознанное отступление от правила «журнал в одной транзакции с
+   * действием», что у разбивки текста, и здесь оно весит больше: **в
+   * записи созвона есть всё сказанное**, включая то, чего в саммари нет.
+   * Нет записи — нет и передачи.
+   *
+   * В метаданных размер и тип **дорожки**: наружу уходит она, а не
+   * загруженный файл. Размер загруженного там же, но отвечает на другой
+   * вопрос — «из чего это сделано» (дизайн расшифровки, 9.1).
+   */
+  SummaryTranscriptionRequested = 'summary.transcription_requested',
+  SummaryTranscriptionFailed = 'summary.transcription_failed',
+  /**
+   * **Каждый** переход в `done`: текст уложен.
+   *
+   * Пишется и у первой расшифровки, хотя её саммари уже журналируется
+   * парой `chronicle_entry.created` + `summary.created`. Причина не в
+   * полноте описания, а в том, что первый успех делает кое-что ещё: **он
+   * уничтожает загруженный человеком файл**. Удаление данных, которые
+   * человек нам дал, обязано быть в неизменяемом журнале — иначе на вопрос
+   * «куда девался мой файл на полгигабайта» отвечать нечем, кроме
+   * исходного кода.
+   */
+  SummaryTranscribed = 'summary.transcribed',
+  /** Удалена задача расшифровки, не ставшая саммари. */
+  SummaryTranscriptionDeleted = 'summary.transcription_deleted',
   IntakeAddressCreated = 'intake_address.created',
   IntakeAddressRevoked = 'intake_address.revoked',
   VariableCreated = 'variable.created',

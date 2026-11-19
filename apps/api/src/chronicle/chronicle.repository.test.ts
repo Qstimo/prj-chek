@@ -5,6 +5,8 @@ import {
   Section,
   SubjectKind,
   SummaryTaskOrigin,
+  TranscriberKind,
+  TranscriptionState,
 } from '@cairn/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -21,6 +23,7 @@ import {
   summaries,
   summaryTaskDrafts,
   summaryTaskPlatforms,
+  transcriptionJobs,
   users,
 } from '../db/schema';
 import { ChronicleRepository } from './chronicle.repository';
@@ -263,6 +266,33 @@ describe('репозиторий хроники', () => {
     });
   });
 
+  /** Запись с саммари и расшифровкой над ним: два файла на томе. */
+  async function entryWithTranscription(): Promise<{ entryId: string; jobId: string }> {
+    const entryId = await createEntry();
+    const [summary] = await testDb.db
+      .insert(summaries)
+      .values({ projectId, chronicleEntryId: entryId, createdBySubjectId: adminSubjectId })
+      .returning();
+    const jobId = crypto.randomUUID();
+    await testDb.db.insert(transcriptionJobs).values({
+      id: jobId,
+      projectId,
+      summaryId: summary!.id,
+      requestedBySubjectId: adminSubjectId,
+      state: TranscriptionState.Done,
+      transcriber: TranscriberKind.External,
+      model: 'general',
+      uploadPath: `${jobId}.mp4`,
+      uploadBytes: 566_231_040,
+      uploadType: 'video/mp4',
+      audioPath: `${jobId}.opus`,
+      audioBytes: 11_534_336,
+      audioType: 'audio/ogg',
+    });
+
+    return { entryId, jobId };
+  }
+
   describe('удаление', () => {
     it('удаляет запись и возвращает её', async () => {
       const id = await createEntry();
@@ -328,6 +358,38 @@ describe('репозиторий хроники', () => {
       expect(await testDb.rowsOf(summaryTaskPlatforms)).toHaveLength(0);
       expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(0);
       expect(await testDb.rowsOf(chronicleEntries)).toHaveLength(0);
+    });
+
+    it('удаление записи уносит расшифровки её саммари', async () => {
+      // Они дети саммари, и без них удаление упёрлось бы в целостность.
+      const { entryId } = await entryWithTranscription();
+
+      await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, entryId));
+
+      expect(await testDb.rowsOf(transcriptionJobs)).toHaveLength(0);
+      expect(await testDb.rowsOf(summaries)).toHaveLength(0);
+    });
+
+    it('удаление записи отдаёт пути файлов созвонов', async () => {
+      const { entryId, jobId } = await entryWithTranscription();
+
+      const removed = await testDb.db.transaction((tx) =>
+        repository.remove(admin(), tx, projectId, entryId),
+      );
+
+      expect(removed.mediaPaths).toEqual([`${jobId}.mp4`, `${jobId}.opus`]);
+    });
+
+    it('у записи без саммари путей файлов нет вовсе', async () => {
+      // Сторож вырождения: пустой список обязан быть пустым списком, а не
+      // «чем-нибудь», иначе служба звала бы unlink по выдуманному пути.
+      const id = await createEntry();
+
+      const removed = await testDb.db.transaction((tx) =>
+        repository.remove(admin(), tx, projectId, id),
+      );
+
+      expect(removed.mediaPaths).toEqual([]);
     });
 
     it('удаление записи без саммари работает как раньше', async () => {

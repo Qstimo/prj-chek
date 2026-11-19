@@ -80,6 +80,7 @@ export async function startTestDatabase(): Promise<TestDatabase> {
                        roadmap_report_public_links, roadmap_public_links,
                        roadmap_checkpoints, roadmap_versions,
                        variable_versions, variables,
+                       transcription_jobs,
                        summary_task_platforms, summary_task_drafts, summaries,
                        doc_pages, chronicle_entries, environment_domains, domains, environments,
                        project_tags, tags,

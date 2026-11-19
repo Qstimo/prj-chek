@@ -6,33 +6,49 @@ import { useState, type FormEvent } from 'react';
 import { today } from '@/utils';
 
 import { FormActions } from '../FormActions';
-import { Select } from '../Select';
-import { TextField } from '../TextField';
-import { TextFileField } from './TextFileField';
-import { FIELD_LABELS, FORM_TEXTS } from './constants';
+import { PassportFields } from './PassportFields';
+import { SourceFields } from './SourceFields';
+import { FORM_TEXTS, SummarySource, isRecordingMode } from './constants';
+import type { IReadRecording } from './readRecording';
 import type { IProps, ISummaryFormValues } from './types';
 
 /**
- * Создание саммари: проект, дата, заголовок, текст и загрузка файла.
+ * Создание саммари: паспорт, текст — тремя способами, одно действие.
  *
- * Проект сохранённого саммари неизменяем, поэтому спрашивается здесь и
- * больше нигде: перенос в другой проект сломал бы и происхождение записи
- * хроники, и проверку прав, которая уже состоялась (дизайн, раздел 7.2).
+ * Третий способ — **запись созвона**, и он добавляет к форме ровно одну
+ * развилку отправки: вместо `POST …/summaries` с готовым текстом уходит
+ * `POST …/transcriptions` с паспортом и сырыми байтами, а саммари родится
+ * позже, из расшифровки (дизайн расшифровки, 8.2). Без пропса `recording`
+ * формы записи нет вовсе, и форма работает ровно как в первой итерации.
+ *
+ * Пока запись отправляется, отправить нельзя ничего: кнопка выключена, а
+ * процент идёт рядом с выбором файла.
  */
-export function SummaryForm({ projects, onSubmit, error, isSubmitting = false }: IProps) {
+export function SummaryForm({
+  projects,
+  onSubmit,
+  recording,
+  error,
+  isSubmitting = false,
+}: IProps) {
   const [values, setValues] = useState<ISummaryFormValues>({
     projectId: projects[0]?.id ?? '',
     occurredOn: today(),
     title: '',
     text: '',
+    source: SummarySource.Text,
   });
   const [textError, setTextError] = useState<string>();
+  const [picked, setPicked] = useState<IReadRecording>();
 
+  const isRecording = isRecordingMode(values.source, recording);
+  const isUploading = recording?.percent !== undefined;
   const canSubmit =
     values.projectId.length > 0 &&
     values.title.trim().length > 0 &&
-    values.text.trim().length > 0 &&
-    !isSubmitting;
+    (isRecording ? picked !== undefined : values.text.trim().length > 0) &&
+    !isSubmitting &&
+    !isUploading;
 
   function change<K extends keyof ISummaryFormValues>(key: K, value: ISummaryFormValues[K]): void {
     setValues((current) => ({ ...current, [key]: value }));
@@ -42,6 +58,16 @@ export function SummaryForm({ projects, onSubmit, error, isSubmitting = false }:
     event.preventDefault();
 
     if (!canSubmit) {
+      return;
+    }
+
+    if (isRecording && picked !== undefined && recording !== undefined) {
+      recording.onSubmit(
+        values.projectId,
+        { occurredOn: values.occurredOn, title: values.title.trim() },
+        picked,
+      );
+
       return;
     }
 
@@ -67,52 +93,21 @@ export function SummaryForm({ projects, onSubmit, error, isSubmitting = false }:
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-1">
-        <label htmlFor="projectId" className="block text-sm font-medium">
-          {FIELD_LABELS.projectId}
-        </label>
-        <Select
-          id="projectId"
-          value={values.projectId}
-          onChange={(projectId) => change('projectId', projectId)}
-        >
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </Select>
-      </div>
+      <PassportFields projects={projects} values={values} onChange={change} />
 
-      <TextField
-        id="occurredOn"
-        label={FIELD_LABELS.occurredOn}
-        type="date"
-        value={values.occurredOn}
-        onChange={(occurredOn) => change('occurredOn', occurredOn)}
+      <SourceFields
+        source={values.source}
+        text={values.text}
+        {...(recording === undefined ? {} : { recording })}
+        onSource={(source) => change('source', source)}
+        onText={(text) => change('text', text)}
+        onPick={setPicked}
       />
-
-      <TextField
-        id="title"
-        label={FIELD_LABELS.title}
-        value={values.title}
-        onChange={(title) => change('title', title)}
-      />
-
-      <TextField
-        id="text"
-        label={FIELD_LABELS.text}
-        value={values.text}
-        onChange={(text) => change('text', text)}
-        multiline
-      />
-
-      <TextFileField hasText={values.text.length > 0} onText={(text) => change('text', text)} />
 
       <FormActions
-        submitLabel={FORM_TEXTS.submit}
+        submitLabel={isRecording ? FORM_TEXTS.submitRecording : FORM_TEXTS.submit}
         canSubmit={canSubmit}
-        isSubmitting={isSubmitting}
+        isSubmitting={isSubmitting || isUploading}
         error={textError ?? error}
       />
     </form>

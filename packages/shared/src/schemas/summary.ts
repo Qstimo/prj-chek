@@ -5,6 +5,7 @@ import { requiredDaySchema } from './day-date';
 import { platformIdsSchema, platformSchema } from './platform';
 import { HAS_NUL, isNulFree } from './plain-text';
 import { checkpointUrlSchema } from './roadmap';
+import { transcriptionJobSchema } from './transcription';
 
 /** Разбивка не настроена: ни адреса, ни ключа. */
 export const SUGGESTER_DISABLED = 'suggester_disabled';
@@ -156,6 +157,41 @@ export const summaryDetailSchema = summaryListItemSchema.extend({
    * «Инфо» здесь не участвует (дизайн, 3.1).
    */
   platforms: z.array(platformSchema),
+  /**
+   * Запись созвона, если она есть.
+   *
+   * Берётся у задачи расшифровки, принёсшей запись: своих колонок у
+   * `summaries` под это не появилось (дизайн расшифровки, 2.2). `null`
+   * означает «записи не было вовсе» — текст вставили в форму руками.
+   */
+  recording: z
+    .object({
+      /** Размер и тип **дорожки**: её человек и слушает (дизайн, 8.5). */
+      bytes: z.number().int().positive(),
+      mediaType: z.string(),
+      /** Что было загружено: видео на полгигабайта или сразу аудио. */
+      uploadBytes: z.number().int().positive(),
+      uploadType: z.string(),
+      /**
+       * Исходник убран после укладки текста (решение владельца 2).
+       *
+       * Нужно экрану, чтобы сказать правду в обоих случаях: у саммари из
+       * видео — «исходник убран», у саммари из `mp3` — ничего, потому что
+       * убирать было нечего (файл один). Вычисляется как «`upload_path`
+       * пуст, а `audio_path` нет»; гадать по типу содержимого нельзя —
+       * загруженный `mp3` мог и перекодироваться, если был крупным.
+       */
+      isSourceRemoved: z.boolean(),
+      uploadedAt: z.string(),
+    })
+    .nullable(),
+  /**
+   * Последняя расшифровка этого саммари: её состояние видно на экране.
+   *
+   * Берётся оттуда же, откуда `recording`, и по той же причине: таблицы
+   * первой итерации про расшифровку ничего не знают.
+   */
+  transcription: transcriptionJobSchema.nullable(),
 });
 
 /**

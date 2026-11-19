@@ -1,0 +1,717 @@
+import {
+  AccessLevel,
+  RECORDING_MISSING,
+  Section,
+  TRANSCRIPTION_ALREADY_RUNNING,
+  TranscriberKind,
+  TranscriptionState,
+  type TranscriptionJob,
+} from '@cairn/shared';
+import { Inject, Injectable } from '@nestjs/common';
+import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+
+import { SectionNotVisibleError } from '../../access/access.errors';
+import { AccessService } from '../../access/access.service';
+import type { RequestSubject } from '../../access/access.types';
+import { DATABASE } from '../../db/db.module';
+import type { Database, Executor, Transaction } from '../../db/db.types';
+import {
+  projects,
+  subjects,
+  summaries,
+  transcriptionJobs,
+  users,
+  type TranscriptionJobRow,
+} from '../../db/schema';
+import { mediaPathsOf } from './media-paths';
+import { RecordingStoreFailure } from './recording-store';
+
+/** Состояния, из которых задача ещё может куда-то перейти. */
+const UNCLOSED_STATES = [
+  TranscriptionState.Queued,
+  TranscriptionState.Extracting,
+  TranscriptionState.Sending,
+  TranscriptionState.Running,
+];
+
+/** Что видно в очереди на экране: незакрытое и неудавшееся, без `done`. */
+const QUEUE_STATES = [...UNCLOSED_STATES, TranscriptionState.Failed];
+
+/** Чем расшифровка настроена на момент создания задачи. */
+export interface TranscriptionService {
+  transcriber: TranscriberKind;
+  model: string;
+}
+
+/** Первая расшифровка: паспорт будущего саммари и принятый файл. */
+export interface TranscriptionCreate extends TranscriptionService {
+  /**
+   * Идентификатор задачи задаётся извне, а не базой.
+   *
+   * Потому что файл на томе назван им **до** вставки строки: тело запроса
+   * течёт в `incoming/`, а потом переезжает в `<id задачи>.<расширение>`
+   * (дизайн, 5.2). Дать базе выбрать ключ значило бы либо переименовывать
+   * файл после вставки, либо вставлять строку до того, как файл дотёк.
+   */
+  id: string;
+  occurredOn: string;
+  title: string;
+  uploadPath: string;
+  uploadBytes: number;
+  uploadType: string;
+  /**
+   * Дорожка, если извлечение не понадобилось вовсе.
+   *
+   * `null` — обычный случай: дорожки ещё нет, её сделает прогон. Непустое
+   * значение приходит от `prepareDecision`, ответившего `Pass`, и тогда это
+   * **тот же путь**, что `uploadPath`, — не копия файла. Отсюда правило
+   * уборки: равенство путей означает «убирать нечего» (дизайн, 2.1).
+   */
+  audio?: { path: string; bytes: number; type: string } | null;
+}
+
+/** Что уйдёт на уборку с диска после фиксации транзакции. */
+export interface RemovedMedia {
+  /**
+   * Уникальные непустые пути файлов задачи.
+   *
+   * Схлопнуты в множество: когда извлечения не было, обе колонки держат
+   * одну и ту же строку, а у дошедшей до `done` задачи `upload_path` пуст
+   * — и остаётся один путь, дорожка.
+   */
+  mediaPaths: string[];
+}
+
+/**
+ * Задачи расшифровки с проверкой права.
+ *
+ * Субъект идёт первым аргументом у всех ручек, **кроме** `pending` и
+ * переходов состояний: их зовёт фоновый прогон, у которого субъекта на
+ * этом шаге нет. Это не забытая проверка: прогон собирает `RequestSubject`
+ * по `requested_by_subject_id` задачи и зовёт им **репозитории записи** —
+ * хронику и саммари, — а переходы состояния своей задачи правом не
+ * охраняются, потому что строку он уже получил из `pending`, где её
+ * видимость и решилась (дизайн, 6.4).
+ *
+ * Право на загрузку — то же, что на создание саммари: `Chronicle ≥ write`
+ * (дизайн, 1.1). Новой единицы выдачи доступа не появилось.
+ */
+@Injectable()
+export class TranscriptionRepository {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly access: AccessService,
+  ) {}
+
+  /** Заводит задачу первой расшифровки: саммари ещё нет. */
+  async create(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    input: TranscriptionCreate,
+  ): Promise<TranscriptionJob> {
+    await this.requireWrite(subject, projectId, tx);
+
+    const [created] = await tx
+      .insert(transcriptionJobs)
+      .values({
+        id: input.id,
+        projectId,
+        requestedBySubjectId: subject.id,
+        transcriber: input.transcriber,
+        model: input.model,
+        occurredOn: input.occurredOn,
+        title: input.title,
+        uploadPath: input.uploadPath,
+        uploadBytes: input.uploadBytes,
+        uploadType: input.uploadType,
+        audioPath: input.audio?.path ?? null,
+        audioBytes: input.audio?.bytes ?? null,
+        audioType: input.audio?.type ?? null,
+      })
+      .returning();
+
+    return this.projectionOf(tx, created!);
+  }
+
+  /**
+   * Заводит повторную расшифровку по существующему саммари.
+   *
+   * Файлы **не копируются**: новая строка несёт те же пути, что последняя
+   * задача этого саммари. Подсчёта ссылок нет — удаление идёт по саммари
+   * целиком (дизайн, 3.3).
+   *
+   * Два разных вида пустоты различаются, и спутать их значит сломать
+   * повтор навсегда: пустой `upload_path` — **обычное** состояние саммари
+   * после укладки текста, а пустой `audio_path` — отказ, потому что
+   * расшифровывать нечего.
+   *
+   * Паспорт не принимается и не копируется: у саммари он уже есть, и это
+   * паспорт его записи хроники. Второй копии не бывает.
+   */
+  async createForSummary(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    service: TranscriptionService,
+  ): Promise<TranscriptionJob> {
+    await this.requireWrite(subject, projectId, tx);
+
+    const [summary] = await tx
+      .select({ id: summaries.id })
+      .from(summaries)
+      .where(and(eq(summaries.id, summaryId), eq(summaries.projectId, projectId)))
+      .limit(1);
+
+    if (!summary) {
+      throw new SectionNotVisibleError();
+    }
+
+    const source = await latestOf(tx, summaryId);
+
+    if (!source?.audioPath) {
+      // Накрывает и «текст вставили руками» (задач нет вовсе), и «дорожку
+      // убрали»: в обоих случаях расшифровывать нечего.
+      throw new RecordingStoreFailure(RECORDING_MISSING, 'Дорожки этого саммари на томе нет');
+    }
+
+    if (UNCLOSED_STATES.includes(source.state)) {
+      // Уникум в базе сказал бы то же самое, но отказом целостности:
+      // названный код нужен интерфейсу, а не только журналу.
+      throw new RecordingStoreFailure(
+        TRANSCRIPTION_ALREADY_RUNNING,
+        'По этому саммари расшифровка уже идёт',
+      );
+    }
+
+    const [created] = await tx
+      .insert(transcriptionJobs)
+      .values({
+        projectId,
+        summaryId,
+        requestedBySubjectId: subject.id,
+        transcriber: service.transcriber,
+        model: service.model,
+        uploadPath: source.uploadPath,
+        uploadBytes: source.uploadBytes,
+        uploadType: source.uploadType,
+        audioPath: source.audioPath,
+        audioBytes: source.audioBytes,
+        audioType: source.audioType,
+      })
+      .returning();
+
+    return this.projectionOf(tx, created!);
+  }
+
+  /**
+   * Задача проекта из адреса.
+   *
+   * Чужая задача выглядит несуществующей — выборка по `(id, project_id)`,
+   * как `requireEntry` в хронике: `403` сообщил бы, что объект существует.
+   */
+  async findById(
+    subject: RequestSubject,
+    projectId: string,
+    jobId: string,
+    executor: Executor = this.db,
+  ): Promise<TranscriptionJob> {
+    const row = await this.requireRow(subject, executor, projectId, jobId);
+
+    return this.projectionOf(executor, row);
+  }
+
+  /**
+   * Субъект, который попросил расшифровку, — для фонового прогона.
+   *
+   * Собирается тем же запросом, которым это делает `SessionGuard`
+   * (`subjects left join users`): прогон не действует «от системы», он
+   * работает правом человека, и второй путь записи «без проверки» был бы
+   * дыркой в модели прав (дизайн, 6.4).
+   *
+   * Отличие от guard'а одно и важное: `isRevoked` **читается**, а не
+   * ставится в `false`. Guard отозванного субъекта просто не пускает, а
+   * здесь он уже внутри — и отзыв обязан дойти до проверки права, иначе
+   * текст лёг бы в проект от лица, которого больше нет.
+   *
+   * `null` означает «субъекта не стало совсем»: строка задачи ссылается на
+   * `subjects` с `restrict`, так что это невозможно, пока задача жива, —
+   * проверка охраняет инвариант, а не ожидаемый случай.
+   */
+  async requesterOf(
+    subjectId: string,
+    executor: Executor = this.db,
+  ): Promise<RequestSubject | null> {
+    const [found] = await executor
+      .select({ subject: subjects, user: users })
+      .from(subjects)
+      .leftJoin(users, eq(users.subjectId, subjects.id))
+      .where(eq(subjects.id, subjectId))
+      .limit(1);
+
+    if (!found) {
+      return null;
+    }
+
+    return {
+      id: found.subject.id,
+      kind: found.subject.kind as unknown as RequestSubject['kind'],
+      label: found.subject.label,
+      isSuperadmin: found.user?.isSuperadmin ?? false,
+      isRevoked: found.subject.revokedAt !== null,
+    };
+  }
+
+  /**
+   * Очередь проекта: незакрытые и неудавшиеся, без `done`.
+   *
+   * Успешная расшифровка видна саммари в истории; две строки об одном были
+   * бы двумя правдами.
+   */
+  async findQueue(
+    subject: RequestSubject,
+    projectId: string,
+    executor: Executor = this.db,
+  ): Promise<TranscriptionJob[]> {
+    await this.requireWrite(subject, projectId, executor);
+
+    const rows = await executor
+      .select()
+      .from(transcriptionJobs)
+      .where(
+        and(
+          eq(transcriptionJobs.projectId, projectId),
+          inArray(transcriptionJobs.state, QUEUE_STATES),
+        ),
+      )
+      .orderBy(desc(transcriptionJobs.startedAt));
+
+    return this.projectionsOf(executor, rows);
+  }
+
+  /**
+   * Очередь по всем проектам, где у субъекта есть право записи на хронику.
+   *
+   * Фильтрует существующая `projectIdsWithLevel` — та самая, которую
+   * завела первая итерация. Новой функции доступа не появляется.
+   */
+  async findOverview(subject: RequestSubject): Promise<TranscriptionJob[]> {
+    const ids = await this.access.projectIdsWithLevel(
+      subject,
+      Section.Chronicle,
+      AccessLevel.Write,
+    );
+
+    if (ids.length === 0) return [];
+
+    const rows = await this.db
+      .select()
+      .from(transcriptionJobs)
+      .where(
+        and(
+          inArray(transcriptionJobs.projectId, ids),
+          inArray(transcriptionJobs.state, QUEUE_STATES),
+        ),
+      )
+      .orderBy(desc(transcriptionJobs.startedAt));
+
+    return this.projectionsOf(this.db, rows);
+  }
+
+  /**
+   * Последняя задача расшифровки саммари либо `null`.
+   *
+   * Нужна отдаче дорожки и проекции деталей: «запись саммари» — это
+   * дорожка его последней задачи, и своих колонок под неё у `summaries` не
+   * появилось (дизайн, 2.2).
+   *
+   * Чужое саммари выглядит несуществующим — выборка по `(id, project_id)`:
+   * `403` сообщил бы, что объект существует.
+   */
+  async lastForSummary(
+    subject: RequestSubject,
+    projectId: string,
+    summaryId: string,
+    executor: Executor = this.db,
+  ): Promise<TranscriptionJobRow | null> {
+    await this.requireWrite(subject, projectId, executor);
+
+    const [summary] = await executor
+      .select({ id: summaries.id })
+      .from(summaries)
+      .where(and(eq(summaries.id, summaryId), eq(summaries.projectId, projectId)))
+      .limit(1);
+
+    if (!summary) {
+      throw new SectionNotVisibleError();
+    }
+
+    return latestOf(executor, summaryId);
+  }
+
+  /**
+   * Незакрытые задачи для прогона, старые первыми.
+   *
+   * Субъекта не принимает: прогон не действует «от системы», но и прав на
+   * этом шаге не проверяет — он собирает `RequestSubject` по
+   * `requested_by_subject_id` каждой строки и работает им дальше
+   * (дизайн, 6.4).
+   */
+  async pending(executor: Executor = this.db): Promise<TranscriptionJobRow[]> {
+    return executor
+      .select()
+      .from(transcriptionJobs)
+      .where(inArray(transcriptionJobs.state, UNCLOSED_STATES))
+      .orderBy(asc(transcriptionJobs.startedAt));
+  }
+
+  /**
+   * Захватывает работу по извлечению дорожки.
+   *
+   * Не журналирование — наружу ничего не уходит, — а захват: без него два
+   * тика двух экземпляров API запустили бы два `ffmpeg` на один файл и
+   * писали бы в один и тот же выходной путь. `sent_at` не трогается:
+   * запись машину не покидала.
+   */
+  async markExtracting(tx: Transaction, jobId: string): Promise<void> {
+    await tx
+      .update(transcriptionJobs)
+      .set({ state: TranscriptionState.Extracting })
+      .where(eq(transcriptionJobs.id, jobId));
+  }
+
+  /**
+   * Записывает готовую дорожку и возвращает задачу в очередь.
+   *
+   * Одной транзакцией: `audio_*` без возврата в `queued` читались бы как
+   * «дорожка есть, а работа висит».
+   *
+   * Переводит **только из `extracting`**, и `false` означает «задачу успели
+   * закрыть». Это охрана, а не аккуратность: отмена закрывает строку, но
+   * идущий `ffmpeg` не убивает, — и без условия дошедшее до конца
+   * извлечение вернуло бы отменённую задачу в очередь, то есть отправило бы
+   * запись наружу **после** отмены.
+   */
+  async markExtracted(
+    tx: Transaction,
+    jobId: string,
+    audio: { path: string; bytes: number; type: string },
+  ): Promise<boolean> {
+    const updated = await tx
+      .update(transcriptionJobs)
+      .set({
+        state: TranscriptionState.Queued,
+        audioPath: audio.path,
+        audioBytes: audio.bytes,
+        audioType: audio.type,
+      })
+      .where(
+        and(
+          eq(transcriptionJobs.id, jobId),
+          eq(transcriptionJobs.state, TranscriptionState.Extracting),
+        ),
+      )
+      .returning({ id: transcriptionJobs.id });
+
+    return updated.length > 0;
+  }
+
+  /**
+   * Отмечает начало передачи записи наружу.
+   *
+   * Отвергает задачу с пустым `audio_path` — это **охрана** инварианта
+   * «наружу уходит только то, что лежит в `audio_path`». Решение принимает
+   * `prepareDecision`, и это второе место, где правило держится: решение
+   * можно переписать, охрану забыть нельзя (дизайн, 2.6).
+   */
+  async markSending(
+    tx: Transaction,
+    jobId: string,
+    // Имя узла обнуляемо, как и колонка: у локального адаптера адрес может
+    // быть без имени хоста, и выдумывать его ради `not null` значило бы
+    // записать в журнал передачи неправду.
+    target: { host: string | null },
+  ): Promise<void> {
+    const updated = await tx
+      .update(transcriptionJobs)
+      .set({ state: TranscriptionState.Sending, sentAt: new Date(), host: target.host })
+      .where(and(eq(transcriptionJobs.id, jobId), isNotNull(transcriptionJobs.audioPath)))
+      .returning({ id: transcriptionJobs.id });
+
+    if (updated.length === 0) {
+      throw new RecordingStoreFailure(
+        RECORDING_MISSING,
+        'Отправлять нечего: дорожка не извлечена',
+      );
+    }
+  }
+
+  /**
+   * Отмечает, что провайдер взял работу.
+   *
+   * Требует непустого идентификатора операции: строка `running` без него —
+   * строка, которую нечем опросить.
+   */
+  async markRunning(tx: Transaction, jobId: string, externalId: string): Promise<void> {
+    const trimmed = externalId.trim();
+
+    if (trimmed.length === 0) {
+      throw new RecordingStoreFailure(
+        RECORDING_MISSING,
+        'Операция провайдера не названа: опрашивать нечего',
+      );
+    }
+
+    await tx
+      .update(transcriptionJobs)
+      .set({ state: TranscriptionState.Running, externalId: trimmed })
+      .where(eq(transcriptionJobs.id, jobId));
+  }
+
+  /**
+   * Закрывает задачу неудачей.
+   *
+   * `upload_path` не трогает, и это главный довод решения владельца 2:
+   * **исходник переживает любую неудачу**, потому что повторить попытку
+   * всегда есть из чего (дизайн, 2.6 и 7.5).
+   */
+  async markFailed(tx: Transaction, jobId: string, code: string): Promise<void> {
+    await tx
+      .update(transcriptionJobs)
+      .set({ state: TranscriptionState.Failed, failureCode: code, finishedAt: new Date() })
+      .where(eq(transcriptionJobs.id, jobId));
+  }
+
+  /**
+   * Закрывает задачу успехом и отдаёт путь исходника на уборку.
+   *
+   * **Единственный** метод, обнуляющий `upload_path`, и единственное место,
+   * где живёт сравнение путей:
+   *
+   * ```
+   * если upload_path пуст             → sourcePath = null (убирать нечего)
+   * если upload_path === audio_path   → sourcePath = null (файл один, 2.1)
+   * иначе                             → обнулить upload_path, вернуть его
+   * ```
+   *
+   * Возвращает путь, а не удаляет файл: `unlink` обязан идти **после**
+   * фиксации транзакции, и делает его служба. Обратный порядок — убрать
+   * файл, а потом фиксировать — при откате оставил бы саммари без
+   * исходника и без текста; а `unlink` внутри транзакции не
+   * откатывается вовсе.
+   *
+   * Ни один другой переход состояния `upload_path` не трогает — иначе
+   * правило «исходник переживает любую неудачу» держалось бы на
+   * внимательности.
+   */
+  async markDone(
+    tx: Transaction,
+    jobId: string,
+    // Саммари первой расшифровки родилось в **этой же** транзакции, и
+    // связать строку с ним больше негде: до укладки текста саммари не
+    // существовало. У повторной связь уже стоит, и передавать нечего.
+    //
+    // Без этой связи задача после успеха осталась бы сиротой: удаление
+    // саммари ищет свои расшифровки по `summary_id` (`clearTranscriptions`),
+    // и дорожка не ушла бы с тома никогда.
+    summaryId?: string,
+  ): Promise<{ sourcePath: string | null }> {
+    const [row] = await tx
+      .select()
+      .from(transcriptionJobs)
+      .where(eq(transcriptionJobs.id, jobId))
+      .limit(1);
+
+    if (!row) {
+      throw new SectionNotVisibleError();
+    }
+
+    // Равенство путей означает «убирать нечего»: иначе уборка удалила бы
+    // единственный файл саммари и оставила запись, которую нечем
+    // переслушать.
+    const sourcePath =
+      row.uploadPath !== null && row.uploadPath !== row.audioPath ? row.uploadPath : null;
+
+    await tx
+      .update(transcriptionJobs)
+      .set({
+        state: TranscriptionState.Done,
+        finishedAt: new Date(),
+        ...(summaryId === undefined ? {} : { summaryId }),
+        ...(sourcePath === null ? {} : { uploadPath: null }),
+      })
+      .where(eq(transcriptionJobs.id, jobId));
+
+    return { sourcePath };
+  }
+
+  /**
+   * Удаляет задачу и отдаёт пути её файлов вызывающему.
+   *
+   * Файлы удаляются **после** фиксации транзакции, не внутри: удаление
+   * файла не откатывается (дизайн, 2.5 пункт 4).
+   */
+  async remove(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    jobId: string,
+  ): Promise<RemovedMedia> {
+    const row = await this.requireRow(subject, tx, projectId, jobId);
+
+    await tx.delete(transcriptionJobs).where(eq(transcriptionJobs.id, jobId));
+
+    return { mediaPaths: mediaPathsOf([row]) };
+  }
+
+  /**
+   * Обнуляет оба пути, оставляя размеры.
+   *
+   * Нужно, когда файлы убрали, а строку сохранили: после потери доступа
+   * (дизайн, 6.5) или уборки руками. Размер загруженного остаётся — это
+   * единственный ответ на «что я загружал».
+   */
+  async forgetMedia(tx: Transaction, jobId: string): Promise<void> {
+    await tx
+      .update(transcriptionJobs)
+      .set({ uploadPath: null, audioPath: null })
+      .where(eq(transcriptionJobs.id, jobId));
+  }
+
+  /**
+   * Строка задачи проекта из адреса под правом записи на «Хронику».
+   *
+   * Публична, в отличие от проекции: отмене нужен `external_id`, а
+   * удалению — состояние и код отказа для журнала, и ни того, ни другого в
+   * проекции нет намеренно (идентификатор чужой операции наружу не идёт).
+   */
+  async requireRow(
+    subject: RequestSubject,
+    executor: Executor,
+    projectId: string,
+    jobId: string,
+  ): Promise<TranscriptionJobRow> {
+    await this.requireWrite(subject, projectId, executor);
+
+    const [row] = await executor
+      .select()
+      .from(transcriptionJobs)
+      .where(and(eq(transcriptionJobs.id, jobId), eq(transcriptionJobs.projectId, projectId)))
+      .limit(1);
+
+    if (!row) {
+      throw new SectionNotVisibleError();
+    }
+
+    return row;
+  }
+
+  /** Право, которым открывается загрузка записи: то же, что у саммари. */
+  private async requireWrite(
+    subject: RequestSubject,
+    projectId: string,
+    executor: Executor,
+  ): Promise<void> {
+    await this.access.requireLevel(
+      subject,
+      projectId,
+      Section.Chronicle,
+      AccessLevel.Write,
+      executor,
+    );
+  }
+
+  /** Проекция одной задачи: имя проекта одним запросом. */
+  private async projectionOf(
+    executor: Executor,
+    row: TranscriptionJobRow,
+  ): Promise<TranscriptionJob> {
+    const [projection] = await this.projectionsOf(executor, [row]);
+
+    return projection!;
+  }
+
+  /**
+   * Проекции задач: имена проектов одним запросом на список.
+   *
+   * Существование файла на диске **не** проверяется: это обращение к
+   * диску на каждую строку каждого списка ради сведения, которое важно
+   * ровно в один момент — когда человек нажал «слушать» (дизайн, 3.5).
+   * `hasRecording` читается из колонки пути.
+   */
+  private async projectionsOf(
+    executor: Executor,
+    rows: TranscriptionJobRow[],
+  ): Promise<TranscriptionJob[]> {
+    if (rows.length === 0) return [];
+
+    const names = new Map<string, string>();
+    const found = await executor
+      .select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .where(inArray(projects.id, [...new Set(rows.map((row) => row.projectId))]));
+
+    for (const project of found) {
+      names.set(project.id, project.name);
+    }
+
+    return rows.map((row) => jobProjectionOf(row, names.get(row.projectId) ?? ''));
+  }
+}
+
+/**
+ * Последняя задача саммари; `null` — расшифровок не было.
+ *
+ * Своей функцией, а не методом: её зовут и репозиторий расшифровок, и
+ * проекция деталей саммари, и второй порядок сортировки разошёлся бы с
+ * первым — «последняя» должна означать одно и то же в обоих местах.
+ */
+export async function latestOf(
+  executor: Executor,
+  summaryId: string,
+): Promise<TranscriptionJobRow | null> {
+  const [row] = await executor
+    .select()
+    .from(transcriptionJobs)
+    .where(eq(transcriptionJobs.summaryId, summaryId))
+    .orderBy(desc(transcriptionJobs.startedAt))
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
+ * Проекция строки задачи в контракт.
+ *
+ * Чистой функцией и экспортом, потому что её зовут из двух репозиториев:
+ * задачи видны и своей очередью, и деталью саммари, а две проекции одной
+ * строки разошлись бы на первой же новой колонке.
+ *
+ * Чего в проекции **нет**: `external_id` (чужой идентификатор операции
+ * наружу не идёт), путей файлов (вместо них признак `hasRecording`) и
+ * идентификатора субъекта.
+ */
+export function jobProjectionOf(row: TranscriptionJobRow, projectName: string): TranscriptionJob {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    projectName,
+    summaryId: row.summaryId,
+    occurredOn: row.occurredOn,
+    title: row.title,
+    state: row.state,
+    transcriber: row.transcriber,
+    model: row.model,
+    host: row.host,
+    uploadBytes: row.uploadBytes,
+    uploadType: row.uploadType,
+    audioBytes: row.audioBytes,
+    audioType: row.audioType,
+    hasRecording: row.audioPath !== null,
+    failureCode: row.failureCode,
+    startedAt: row.startedAt.toISOString(),
+    sentAt: row.sentAt?.toISOString() ?? null,
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+  };
+}

@@ -5,10 +5,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { describeApiError, summaryFailureOf } from '@/api';
+import { BROWSER_API_URL, describeApiError, summaryFailureOf } from '@/api';
 import {
   SUMMARY_KEYS,
   useMutationReleaseSummary,
+  useMutationRetryTranscription,
   useMutationSaveSummaryTasks,
   useMutationSuggestSummaryTasks,
   useMutationUpdateChronicleEntry,
@@ -20,6 +21,7 @@ import {
 import { ChronicleForm } from '@/components/ChronicleForm';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { Loader } from '@/components/Loader';
+import { SummaryRecording } from '@/components/SummaryRecording';
 import { SummaryText } from '@/components/SummaryText';
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning';
 
@@ -50,6 +52,7 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   const save = useMutationSaveSummaryTasks(projectId, summaryId);
   const release = useMutationReleaseSummary(projectId, summaryId);
   const updateEntry = useMutationUpdateChronicleEntry(projectId);
+  const retryTranscription = useMutationRetryTranscription();
   const [isEditing, setIsEditing] = useState(false);
   const [hasUnsavedTasks, setHasUnsavedTasks] = useState(false);
 
@@ -72,6 +75,20 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
 
   return (
     <div className="space-y-8">
+      {/* Блока нет вовсе, когда записи не было: «Запись недоступна» у
+          текста, который никто не записывал, было бы рассказом о записи,
+          которой не существовало (дизайн, 8.5). */}
+      {(summary.recording !== null || summary.transcription !== null) && (
+        <SummaryRecording
+          recording={summary.recording}
+          transcription={summary.transcription}
+          src={`${BROWSER_API_URL}/projects/${projectId}/summaries/${summaryId}/recording`}
+          isRetrying={retryTranscription.isPending}
+          retryError={describeApiError(retryTranscription.error)}
+          onRetry={() => retryTranscription.mutate({ projectId, summaryId })}
+        />
+      )}
+
       <section className="space-y-2">
         <h2 className="text-lg font-medium">{SUMMARY_TEXTS.textHeading}</h2>
         <SummaryText
