@@ -20,7 +20,6 @@ import { RoadmapRepository } from '../../roadmap/roadmap.repository';
 import { startTestDatabase, type TestDatabase } from '../../../test/db-fixture';
 import { SummariesRepository } from '../summaries.repository';
 import { RecordingStore, type AcceptedRecording } from './recording-store';
-import { TRANSCRIPTION_ENV_NAMES } from './settings';
 import type { Transcriber, TranscriptionAnswer, TranscriptionInput } from './transcriber';
 import { TranscriptionRepository } from './transcription.repository';
 import { TranscriptionService } from './transcription.service';
@@ -140,11 +139,13 @@ describe('установка без ffmpeg', () => {
 
   beforeEach(async () => {
     await testDb.truncate();
-    // Ключ или предел, оставленный соседним тестом, менял бы поведение
-    // ручки приёма: настройки читаются при каждом вызове.
-    for (const name of TRANSCRIPTION_ENV_NAMES) {
-      delete process.env[name];
-    }
+    // Переменные окружения здесь **не чистятся**, и это не недосмотр:
+    // `CAIRN_TRANSCRIPTION_POLL_SECONDS=0` стоит в `vitest.config.ts` и
+    // выключает фоновый цикл всем файлам, а `process.env` у воркеров
+    // Vitest общий — снести его значило бы оживить прогон в соседних
+    // файлах и отдать ему замок в базе. Настройки этому тесту не нужны:
+    // порт и извлечение подменены, предел загрузки не читается (хранилище
+    // стоит заглушкой).
     store.saved.length = 0;
     store.bytes = SMALL_MP3;
 
