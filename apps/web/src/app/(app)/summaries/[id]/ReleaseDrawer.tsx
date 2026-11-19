@@ -23,6 +23,7 @@ export function ReleaseDrawer({
   onClose,
   suggestedLabel,
   taskCount,
+  versions,
   isRoadmapPublic,
   isReleasing,
   releaseError,
@@ -38,6 +39,7 @@ export function ReleaseDrawer({
       <SummaryReleaseForm
         suggestedLabel={suggestedLabel}
         taskCount={taskCount}
+        versions={versions}
         isRoadmapPublic={isRoadmapPublic}
         isSubmitting={isReleasing}
         error={releaseError}

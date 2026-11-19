@@ -1,10 +1,12 @@
 import type {
-  RoadmapVersionCreate,
   SummaryDetail,
+  SummaryRelease,
   SummaryTask,
   SummaryTasksReplace,
   TaskSuggesterInfo,
 } from '@cairn/shared';
+
+import type { IReleaseTargetVersion } from '@/components/SummaryReleaseForm';
 
 /** Пропсы экрана одного саммари. */
 export interface IProps {
@@ -95,9 +97,11 @@ export interface IReleaseDrawerProps {
   suggestedLabel: string | null;
   /** Сколько отмеченных задач уедет: число названо до нажатия. */
   taskCount: number;
+  /** Версии проекта для цели «существующая версия» (дизайн, 4.5). */
+  versions: IReleaseTargetVersion[];
   /** Роадмап опубликован: чекпоинты попадут в публичную выдачу. */
   isRoadmapPublic: boolean;
-  onRelease: (input: RoadmapVersionCreate) => void;
+  onRelease: (target: SummaryRelease['target']) => void;
   isReleasing: boolean;
   releaseError?: string;
 }

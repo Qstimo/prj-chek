@@ -548,6 +548,50 @@ describe('экран саммари', () => {
     expect(screen.queryByText(/Сначала сохраните правки/)).not.toBeInTheDocument();
   });
 
+  it('список версий для цели релиза берётся запросом роадмапа', async () => {
+    // Второго места для списка версий не появляется: деталь саммари его
+    // не отдаёт, а роадмап субъекту с правом на релиз и так открыт
+    // (дизайн, 4.5).
+    vi.mocked(hooks.useQueryRoadmap).mockReturnValue(
+      query({
+        stage: { current: 1, total: 1 },
+        versions: [
+          {
+            id: VERSION_ID,
+            label: 'v1.2',
+            state: RoadmapVersionState.Planned,
+            plannedDate: null,
+            releasedDate: null,
+            position: 1,
+            progress: { done: 0, total: 0 },
+            unfinished: 0,
+            hasUnfinishedOnRelease: false,
+          },
+        ],
+        summary: [],
+      }),
+    );
+
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Сформировать релиз (1)' }));
+    await userEvent.selectOptions(screen.getByLabelText('Цель релиза'), 'existing');
+
+    expect(screen.getByRole('option', { name: 'v1.2' })).toBeInTheDocument();
+  });
+
+  it('без выдачи на роадмап версии не запрашиваются', () => {
+    // Запрос ответил бы `404`: право на релиз и право читать версии — одно
+    // и то же, и спрашивать их тому, кому релиз закрыт, незачем.
+    vi.mocked(hooks.useQuerySections).mockReturnValue(
+      query({ [Section.Chronicle]: AccessLevel.Write }),
+    );
+
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    expect(vi.mocked(hooks.useQueryRoadmap)).toHaveBeenCalledWith(PROJECT_ID, false);
+  });
+
   it('отмеченные задачи уходят в архив одним действием', async () => {
     const archive = mutation();
     vi.mocked(hooks.useMutationArchiveSummaryTasks).mockReturnValue(archive);

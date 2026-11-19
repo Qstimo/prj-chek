@@ -1,6 +1,6 @@
 'use client';
 
-import { Section } from '@cairn/shared';
+import { AccessLevel, Section } from '@cairn/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -17,6 +17,7 @@ import {
   useMutationSuggestSummaryTasks,
   useMutationUpdateChronicleEntry,
   useQueryPublicLink,
+  useQueryRoadmap,
   useQuerySections,
   useQuerySummary,
   useQueryTaskSuggester,
@@ -63,6 +64,12 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   const sections = useQuerySections(projectId);
   const suggester = useQueryTaskSuggester();
   const publicLink = useQueryPublicLink(projectId);
+  // Право на релиз и право читать версии — одно и то же, поэтому список
+  // версий для цели «существующая» берётся существующим запросом
+  // роадмапа, а не новым полем детали (дизайн, 4.5). Без выдачи запрос
+  // выключен: он ответил бы `404`, и спрашивать его незачем.
+  const canRelease = sections.data?.[Section.Roadmap] === AccessLevel.Write;
+  const roadmap = useQueryRoadmap(projectId, canRelease);
   const suggest = useMutationSuggestSummaryTasks(projectId, summaryId);
   const save = useMutationSaveSummaryTasks(projectId, summaryId);
   const archive = useMutationArchiveSummaryTasks(projectId, summaryId);
@@ -175,6 +182,7 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
         onClose={() => setReleasing(undefined)}
         suggestedLabel={summary.suggestedVersionLabel}
         taskCount={releasing?.length ?? 0}
+        versions={(roadmap.data?.versions ?? []).map(({ id, label }) => ({ id, label }))}
         isRoadmapPublic={publicLink.data !== null && publicLink.data !== undefined}
         isReleasing={release.isPending}
         releaseError={failureMessageOf(
@@ -182,9 +190,9 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
           undefined,
           describeApiError(release.error),
         )}
-        onRelease={(input) =>
+        onRelease={(target) =>
           release.mutate(
-            { taskIds: releasing ?? [], target: { kind: 'new', version: input } },
+            { taskIds: releasing ?? [], target },
             {
               onSuccess: (result) => {
                 setReleasing(undefined);
