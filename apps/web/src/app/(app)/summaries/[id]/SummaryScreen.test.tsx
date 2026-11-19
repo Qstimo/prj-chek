@@ -147,6 +147,11 @@ function mutation() {
   return { mutate: vi.fn(), isPending: false, error: null } as never;
 }
 
+/** Мутация в полёте: её ждёт бирка состояния в шапке. */
+function pending() {
+  return { mutate: vi.fn(), isPending: true, error: null } as never;
+}
+
 /** Шпион `mutate` у подменённой мутации: мок объявлен как `never`. */
 function mutateOf(stub: unknown): ReturnType<typeof vi.fn> {
   return (stub as { mutate: ReturnType<typeof vi.fn> }).mutate;
@@ -547,6 +552,66 @@ describe('экран саммари', () => {
       projectId: PROJECT_ID,
       summaryId: SUMMARY_ID,
     });
+  });
+
+  it('шапка называет проект, дату и заголовок саммари', () => {
+    // Колонки прокручиваются каждая своим содержимым, и человек,
+    // уехавший к концу списка задач, обязан видеть, что он правит.
+    renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Созвон по релизу' })).toBeInTheDocument();
+    expect(screen.getByText(/CAIRN/)).toBeInTheDocument();
+    expect(screen.getByText(/16\.11\.2026/)).toBeInTheDocument();
+  });
+
+  it('идущая расшифровка названа биркой в шапке', () => {
+    // Шапка — единственное место, где состояние потока названо целиком
+    // (дизайн, 4.1).
+    renderScreen(
+      {
+        ...FROM_RECORDING,
+        transcription: { ...FROM_RECORDING.transcription!, state: TranscriptionState.Running },
+      },
+      LOCAL_SUGGESTER,
+    );
+
+    expect(screen.getByText('Идёт расшифровка')).toBeInTheDocument();
+  });
+
+  it('законченная расшифровка бирки не держит', () => {
+    renderScreen(FROM_RECORDING, LOCAL_SUGGESTER);
+
+    expect(screen.queryByText('Идёт расшифровка')).not.toBeInTheDocument();
+  });
+
+  it('идущая разбивка названа биркой в шапке', () => {
+    vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(pending());
+
+    renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
+
+    expect(screen.getByText('Идёт разбивка')).toBeInTheDocument();
+  });
+
+  it('правленный после разбивки текст назван биркой в шапке', () => {
+    renderScreen({ ...WITH_TASKS, isTextStale: true }, LOCAL_SUGGESTER);
+
+    expect(screen.getByText('Текст правили после разбивки')).toBeInTheDocument();
+  });
+
+  it('сформированный релиз назван биркой в шапке', () => {
+    renderScreen(RELEASED_DETAIL, LOCAL_SUGGESTER);
+
+    expect(screen.getByText('Релиз сформирован')).toBeInTheDocument();
+  });
+
+  it('у саммари в работе бирок состояния нет вовсе', () => {
+    // Отсутствие бирок и означает «всё обычно»: бирка «в работе» стояла
+    // бы всегда и перестала бы читаться.
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    expect(screen.queryByText('Идёт разбивка')).not.toBeInTheDocument();
+    expect(screen.queryByText('Текст правили после разбивки')).not.toBeInTheDocument();
+    expect(screen.queryByText('Релиз сформирован')).not.toBeInTheDocument();
   });
 
   it('саммари из чужого проекта не раскрывается', () => {

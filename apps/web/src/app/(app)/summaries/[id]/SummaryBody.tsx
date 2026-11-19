@@ -25,13 +25,25 @@ import { SummaryRecording } from '@/components/SummaryRecording';
 import { SummaryText } from '@/components/SummaryText';
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning';
 
-import { SUMMARY_TEXTS, failureMessageOf, releaseBlockedNoteOf } from '../constants';
+import {
+  SUMMARY_TEXTS,
+  failureMessageOf,
+  releaseBlockedNoteOf,
+  stateBadgesOf,
+} from '../constants';
 import { ReleaseBlock } from './ReleaseBlock';
+import { SummaryHeader } from './SummaryHeader';
 import { TasksBlock } from './TasksBlock';
 import type { IBodyProps } from './types';
 
 /**
- * Три блока по шагам потока: текст, задачи, релиз (дизайн, раздел 7.3).
+ * Рабочее место: слева запись и текст, справа задачи и релиз.
+ *
+ * Две колонки, а не лестница из четырёх блоков: решать по задаче, глядя
+ * на текст, — ровно то, зачем экран существует, а в лестнице текст и
+ * задачи никогда не видны одновременно (дизайн, 4.1). На узком экране
+ * колонки складываются обратно в лестницу: две колонки на телефоне дали
+ * бы две щели.
  *
  * Текст правится **существующей** ручкой записи хроники: вторая дверь к
  * нему разошлась бы с первой. После правки перечитывается и саммари —
@@ -74,71 +86,86 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   const failure = summaryFailureOf(suggest.error);
 
   return (
-    <div className="space-y-8">
-      {/* Блока нет вовсе, когда записи не было: «Запись недоступна» у
-          текста, который никто не записывал, было бы рассказом о записи,
-          которой не существовало (дизайн, 8.5). */}
-      {(summary.recording !== null || summary.transcription !== null) && (
-        <SummaryRecording
-          recording={summary.recording}
-          transcription={summary.transcription}
-          src={`${BROWSER_API_URL}/projects/${projectId}/summaries/${summaryId}/recording`}
-          isRetrying={retryTranscription.isPending}
-          retryError={describeApiError(retryTranscription.error)}
-          onRetry={() => retryTranscription.mutate({ projectId, summaryId })}
-        />
-      )}
-
-      <section className="space-y-2">
-        <h2 className="text-lg font-medium">{SUMMARY_TEXTS.textHeading}</h2>
-        <SummaryText
-          text={summary.text}
-          chronicleHref={`/projects/${projectId}/chronicle`}
-          actions={
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              className="rounded-md border border-border px-3 py-1 text-sm"
-            >
-              {SUMMARY_TEXTS.edit}
-            </button>
-          }
-        />
-      </section>
-
-      <TasksBlock
-        summary={summary}
-        suggester={suggester.data}
-        onSuggest={() => suggest.mutate()}
-        isSuggesting={suggest.isPending}
-        suggestError={failureMessageOf(
-          failure.code,
-          failure.maxChars,
-          describeApiError(suggest.error),
-        )}
-        onSave={(input) => save.mutate(input)}
-        onDirtyChange={setHasUnsavedTasks}
-        isSaving={save.isPending}
-        saveError={describeApiError(save.error)}
+    <div className="space-y-6">
+      <SummaryHeader
+        projectName={summary.projectName}
+        occurredOn={summary.occurredOn}
+        title={summary.title}
+        badges={stateBadgesOf(summary, suggest.isPending)}
       />
 
-      <ReleaseBlock
-        summary={summary}
-        blockedNote={releaseBlockedNoteOf(sections.data[Section.Roadmap], hasUnsavedTasks)}
-        isRoadmapPublic={publicLink.data !== null && publicLink.data !== undefined}
-        isReleasing={release.isPending}
-        releaseError={failureMessageOf(
-          summaryFailureOf(release.error).code,
-          undefined,
-          describeApiError(release.error),
-        )}
-        onRelease={(input) =>
-          release.mutate(input, {
-            onSuccess: (result) =>
-              router.push(`/projects/${projectId}/roadmap?version=${result.versionId}`),
-          })
-        }
-      />
+      {/* `items-start` обязателен: без него колонки тянутся до высоты
+          соседки, и короткий текст уезжал бы вниз за задачами. */}
+      <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <div className="space-y-8">
+          {/* Блока нет вовсе, когда записи не было: «Запись недоступна» у
+              текста, который никто не записывал, было бы рассказом о записи,
+              которой не существовало (дизайн, 8.5). */}
+          {(summary.recording !== null || summary.transcription !== null) && (
+            <SummaryRecording
+              recording={summary.recording}
+              transcription={summary.transcription}
+              src={`${BROWSER_API_URL}/projects/${projectId}/summaries/${summaryId}/recording`}
+              isRetrying={retryTranscription.isPending}
+              retryError={describeApiError(retryTranscription.error)}
+              onRetry={() => retryTranscription.mutate({ projectId, summaryId })}
+            />
+          )}
+
+          <section className="space-y-2">
+            <h2 className="text-lg font-medium">{SUMMARY_TEXTS.textHeading}</h2>
+            <SummaryText
+              text={summary.text}
+              chronicleHref={`/projects/${projectId}/chronicle`}
+              actions={
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  className="rounded-md border border-border px-3 py-1 text-sm"
+                >
+                  {SUMMARY_TEXTS.edit}
+                </button>
+              }
+            />
+          </section>
+        </div>
+
+        <div className="space-y-8">
+          <TasksBlock
+            summary={summary}
+            suggester={suggester.data}
+            onSuggest={() => suggest.mutate()}
+            isSuggesting={suggest.isPending}
+            suggestError={failureMessageOf(
+              failure.code,
+              failure.maxChars,
+              describeApiError(suggest.error),
+            )}
+            onSave={(input) => save.mutate(input)}
+            onDirtyChange={setHasUnsavedTasks}
+            isSaving={save.isPending}
+            saveError={describeApiError(save.error)}
+          />
+
+          <ReleaseBlock
+            summary={summary}
+            blockedNote={releaseBlockedNoteOf(sections.data[Section.Roadmap], hasUnsavedTasks)}
+            isRoadmapPublic={publicLink.data !== null && publicLink.data !== undefined}
+            isReleasing={release.isPending}
+            releaseError={failureMessageOf(
+              summaryFailureOf(release.error).code,
+              undefined,
+              describeApiError(release.error),
+            )}
+            onRelease={(input) =>
+              release.mutate(input, {
+                onSuccess: (result) =>
+                  router.push(`/projects/${projectId}/roadmap?version=${result.versionId}`),
+              })
+            }
+          />
+        </div>
+      </div>
 
       <Drawer
         isOpen={isEditing}
