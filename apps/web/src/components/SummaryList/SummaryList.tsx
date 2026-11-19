@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 import { formatDate } from '@/utils';
 
-import { COLUMNS, LIST_TEXTS, stateOf } from './constants';
+import { COLUMNS, LIST_TEXTS, countsNoteOf, stateOf } from './constants';
 import type { IProps } from './types';
 
 /**
@@ -43,14 +43,17 @@ export function SummaryList({ items }: IProps) {
                 </Link>
               </td>
               <td className="px-3 py-2 text-muted-foreground">{item.projectName}</td>
-              <td className="px-3 py-2 tabular-nums">{item.taskCount}</td>
+              {/* Три числа одной строкой, а не одно: после архива и
+                  выборочного релиза «задач: 3» не говорит, где эти
+                  задачи (дизайн, 3.8). */}
+              <td className="whitespace-nowrap px-3 py-2 tabular-nums">{countsNoteOf(item)}</td>
               <td className="px-3 py-2">
                 {/* Обозначение и идентификатор версии выходят по одному
                     правилу видимости, поэтому проверяются вместе: ссылка
                     без идентификатора вела бы на полосу целиком, а
                     обозначение без него не бывает. */}
                 {!item.isReleased ? (
-                  stateOf(item.taskCount)
+                  stateOf(item)
                 ) : item.releasedVersionLabel === null || item.releasedVersionId === null ? (
                   LIST_TEXTS.releasedHidden
                 ) : (

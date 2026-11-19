@@ -1,3 +1,5 @@
+import type { SummaryListItem } from '@cairn/shared';
+
 /** Заголовки столбцов истории. */
 export const COLUMNS = ['Дата', 'Заголовок', 'Проект', 'Задач', 'Состояние'] as const;
 
@@ -6,6 +8,8 @@ export const LIST_TEXTS = {
   empty: 'Саммари пока нет.',
   /** Текст сохранён, разбивки ещё не было. */
   textOnly: 'Текст',
+  /** Задачи есть: где именно — говорит строка чисел рядом. */
+  inWork: 'В работе',
   /**
    * Релиз сформирован, но обозначение версии скрыто.
    *
@@ -17,7 +21,37 @@ export const LIST_TEXTS = {
   releasedHidden: 'Ушло в роадмап',
 } as const;
 
-/** Состояние строки по числу задач: стадия вычисляется, а не хранится. */
-export function stateOf(taskCount: number): string {
-  return taskCount > 0 ? `Задачи: ${taskCount}` : LIST_TEXTS.textOnly;
+/**
+ * Состояние строки: стадия вычисляется, а не хранится.
+ *
+ * Числа здесь больше не называются — их говорит {@link countsNoteOf}
+ * в соседней клетке. Одно и то же число в двух клетках разошлось бы при
+ * первой правке, а состояние отвечает на другой вопрос: «на какой стадии
+ * саммари», а не «сколько задач и где».
+ *
+ * Считается по всем трём числам, а не по активным: у саммари, где всё
+ * отложено, задачи есть, и «Текст» про него соврал бы.
+ */
+export function stateOf(item: SummaryListItem): string {
+  const total = item.taskCount + item.archivedCount + item.releasedCount;
+
+  return total > 0 ? LIST_TEXTS.inWork : LIST_TEXTS.textOnly;
+}
+
+/**
+ * Строка истории: «3 в работе · 2 в архиве · 5 в релизе».
+ *
+ * Нули не показываются, и пустая строка законна: одного числа задач
+ * после архива и выборочного релиза не хватает — «задач: 3» не говорит,
+ * где эти задачи, — а «0 в архиве» рассказывал бы про отсутствующее.
+ */
+export function countsNoteOf(item: SummaryListItem): string {
+  return [
+    [item.taskCount, 'в работе'],
+    [item.archivedCount, 'в архиве'],
+    [item.releasedCount, 'в релизе'],
+  ]
+    .filter(([count]) => (count as number) > 0)
+    .map(([count, where]) => `${count} ${where}`)
+    .join(' · ');
 }
