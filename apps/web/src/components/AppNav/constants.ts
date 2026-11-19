@@ -15,7 +15,17 @@ export const COMMON_LINKS = [
 export const ADMIN_LINKS = [
   { href: '/servers', label: 'Серверы' },
   { href: '/domains', label: 'Домены' },
-  { href: '/model-services', label: 'Модели' },
   { href: '/users', label: 'Пользователи' },
   { href: '/audit', label: 'Журнал' },
 ] as const;
+
+/**
+ * Настройки установки — не раздел, а место, куда идут, когда что-то не
+ * работает.
+ *
+ * Поэтому в полосе ссылка стоит справа, рядом с именем субъекта, а не
+ * пунктом слева: слева — разделы, куда ходят работать (дизайн, 5.2). В
+ * выезжающем меню правого угла нет вовсе, и там она идёт вместе с
+ * остальными.
+ */
+export const SETTINGS_LINK = { href: '/settings', label: 'Настройки' } as const;
