@@ -220,27 +220,20 @@ describe('ModelServiceSettingsService', () => {
     expect(settings.hasSecret).toBe(true);
   });
 
-  it('называет имена переменных окружения и то, действуют ли они', async () => {
+  it('об окружении проекция говорит одной биркой источника, без имён переменных', async () => {
     await repository.save(testDb.db, kind, subjectId, input);
     process.env[SUGGESTER_API_KEY_ENV] = 'из-окружения';
 
     const settings = await service.settings(kind);
 
-    // Без этой строки администратор, вписавший ключ в `.env` и
-    // перезапустивший API, не имеет никакого способа узнать, почему
-    // ничего не изменилось (дизайн, 2.2).
+    // Бирка отвечает на тот же вопрос, а поле в ответе, которое никто не
+    // показывает, со следующей правкой начнут показывать по ошибке
+    // (дизайн 2026-11-19, 5.3). Сравнение по именам полей, а не по
+    // значению: вернуть поле обратно должно быть видно отсюда.
     expect(settings.source).toBe(ModelServiceSource.Database);
-    expect(settings.hasEnvironmentSettings).toBe(true);
-    expect(settings.envVarNames).toContain(SUGGESTER_API_KEY_ENV);
-  });
-
-  it('объявленная пустой переменная заданной не считается', async () => {
-    // Compose объявляет все переменные через `${VAR:-}`, то есть пустой
-    // строкой: правило по факту объявления назвало бы «действующими»
-    // переменные на любой установке (дизайн, 2.3).
-    process.env[SUGGESTER_API_KEY_ENV] = '';
-
-    expect((await service.settings(kind)).hasEnvironmentSettings).toBe(false);
+    expect(Object.keys(settings)).not.toContain('envVarNames');
+    expect(Object.keys(settings)).not.toContain('hasEnvironmentSettings');
+    expect(JSON.stringify(settings)).not.toContain(SUGGESTER_API_KEY_ENV);
   });
 
   it('проекция называет, кто и когда правил настройку', async () => {

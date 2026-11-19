@@ -173,10 +173,6 @@ export const modelServiceSettingsSchema = z.object({
    * разбирает, фразу можно переписать.
    */
   blockedBy: z.string().nullable(),
-  /** Имена переменных окружения этого узла — для обеих подсказок 2.2. */
-  envVarNames: z.array(z.string()),
-  /** Объявлены ли они на этой установке: источник «не действуют». */
-  hasEnvironmentSettings: z.boolean(),
   updatedAt: z.string().nullable(),
   updatedByLabel: z.string().nullable(),
 });

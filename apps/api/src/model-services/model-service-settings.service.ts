@@ -13,11 +13,7 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
-import {
-  SUGGESTER_NODE_ENV_NAMES,
-  hostOf,
-  suggesterSettings,
-} from '../summaries/suggester/settings';
+import { hostOf, suggesterSettings } from '../summaries/suggester/settings';
 import { ModelServicesRepository, type ModelServiceRecord } from './model-services.repository';
 
 /**
@@ -64,8 +60,6 @@ interface EnvironmentModelService {
   timeoutSeconds: number;
   /** Человек выключил узел переменной вида. */
   isOff: boolean;
-  /** Имена переменных **этого узла**: их называет экран. */
-  envVarNames: string[];
 }
 
 /**
@@ -94,16 +88,22 @@ export class ModelServiceSettingsService {
     private readonly repository: ModelServicesRepository,
   ) {}
 
-  /** Настройка с ключом — для потребителей внутри процесса. */
+  /**
+   * Настройка с ключом — для потребителей внутри процесса.
+   *
+   * Окружение читается только тогда, когда строки нет: выбор источника
+   * целиком на узел, и прочитать запасной источник впрок значило бы
+   * завести место, откуда он может долиться в запись.
+   */
   async resolve(kind: ModelServiceKind): Promise<ResolvedModelService> {
-    return (await this.resolveBoth(kind)).resolved;
+    const record = await this.repository.find(this.db, kind);
+
+    return record ? fromRecord(kind, record) : fromEnvironment(kind, environmentOf(kind));
   }
 
   /** Проекция для экрана: ключа в ней нет ни одним полем. */
   async settings(kind: ModelServiceKind): Promise<ModelServiceSettings> {
-    const { resolved, environment } = await this.resolveBoth(kind);
-
-    return settingsOf(resolved, environment);
+    return settingsOf(await this.resolve(kind));
   }
 
   /**
@@ -115,26 +115,6 @@ export class ModelServiceSettingsService {
    */
   async allSettings(): Promise<ModelServiceSettings[]> {
     return Promise.all(Object.values(ModelServiceKind).map((kind) => this.settings(kind)));
-  }
-
-  /**
-   * Разрешение настройки и прочитанное окружение рядом.
-   *
-   * Окружение нужно обеим проекциям, но по разным поводам: настройке — как
-   * запасной источник, экрану — чтобы назвать переменные и сказать,
-   * действуют ли они. Читается оно один раз, и **выбор источника от этого
-   * не меняется**: ветка одна, целиком на узел.
-   */
-  private async resolveBoth(
-    kind: ModelServiceKind,
-  ): Promise<{ resolved: ResolvedModelService; environment: EnvironmentModelService }> {
-    const environment = environmentOf(kind);
-    const record = await this.repository.find(this.db, kind);
-
-    return {
-      resolved: record ? fromRecord(kind, record) : fromEnvironment(kind, environment),
-      environment,
-    };
   }
 }
 
@@ -155,7 +135,6 @@ function environmentOf(kind: ModelServiceKind): EnvironmentModelService {
         placement: settings.placement,
         timeoutSeconds: settings.timeoutSeconds,
         isOff: settings.isOff,
-        envVarNames: SUGGESTER_NODE_ENV_NAMES,
       };
     }
   }
@@ -266,10 +245,7 @@ function blockerOf(input: {
  * в ней рядом, и `...resolved` вынес бы его наружу первой же правкой
  * (дизайн, 3.5).
  */
-function settingsOf(
-  resolved: ResolvedModelService,
-  environment: EnvironmentModelService,
-): ModelServiceSettings {
+function settingsOf(resolved: ResolvedModelService): ModelServiceSettings {
   return {
     kind: resolved.kind,
     source: resolved.source,
@@ -284,14 +260,6 @@ function settingsOf(
     isEnabled: resolved.isEnabled,
     isOperational: resolved.isOperational,
     blockedBy: resolved.blockedBy,
-    envVarNames: environment.envVarNames,
-    // По непустому значению, а не по факту объявления: compose объявляет
-    // все переменные через `${VAR:-}`, то есть пустой строкой, и правило
-    // «объявлена» назвало бы их действующими на любой установке
-    // (дизайн, 2.3).
-    hasEnvironmentSettings: environment.envVarNames.some(
-      (name) => (process.env[name] ?? '').trim() !== '',
-    ),
     updatedAt: resolved.updatedAt?.toISOString() ?? null,
     updatedByLabel: resolved.updatedByLabel,
   };
