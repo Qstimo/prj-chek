@@ -1,6 +1,6 @@
 import {
-  roadmapVersionCreateSchema, summaryCreateSchema, summaryTasksReplaceSchema,
-  type RoadmapVersionCreate, type SummaryCreate, type SummaryDetail,
+  summaryCreateSchema, summaryReleaseSchema, summaryTaskIdsSchema, summaryTasksReplaceSchema,
+  type SummaryRelease, type SummaryTaskIds, type SummaryCreate, type SummaryDetail,
   type SummaryListItem, type SummaryReleaseResult, type SummaryTasksReplace,
 } from '@cairn/shared';
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
@@ -76,13 +76,46 @@ export class SummariesController {
     return this.summaries.replaceTasks(subject, projectId, id, body);
   }
 
+  @Post(':id/tasks/archive')
+  @HttpCode(200)
+  archiveTasks(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(summaryTaskIdsSchema)) body: SummaryTaskIds,
+  ): Promise<SummaryDetail> {
+    return this.summaries.archiveTasks(subject, projectId, id, body);
+  }
+
+  @Post(':id/tasks/restore')
+  @HttpCode(200)
+  restoreTasks(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(summaryTaskIdsSchema)) body: SummaryTaskIds,
+  ): Promise<SummaryDetail> {
+    return this.summaries.restoreTasks(subject, projectId, id, body);
+  }
+
+  @Post(':id/tasks/remove')
+  @HttpCode(200)
+  removeTasks(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(summaryTaskIdsSchema)) body: SummaryTaskIds,
+  ): Promise<SummaryDetail> {
+    return this.summaries.removeTasks(subject, projectId, id, body);
+  }
+
   /** Версия валидируется общей схемой: путь записи роадмапа остаётся единым. */
-  @Post(':id/release')
+  @Post(':id/tasks/release')
   release(
     @CurrentSubject() subject: RequestSubject,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body(new ZodValidationPipe(roadmapVersionCreateSchema)) body: RoadmapVersionCreate,
+    @Body(new ZodValidationPipe(summaryReleaseSchema)) body: SummaryRelease,
   ): Promise<SummaryReleaseResult> {
     return this.summaries.release(subject, projectId, id, body);
   }

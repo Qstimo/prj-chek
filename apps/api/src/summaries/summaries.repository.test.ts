@@ -5,12 +5,14 @@ import {
   Section,
   SubjectKind,
   SummaryTaskOrigin,
+  SummaryTaskState,
+  SUMMARY_TASK_NOT_ACTIVE,
   TranscriberKind,
   TranscriptionState,
   summaryDetailSchema,
   type SummaryCreate,
 } from '@cairn/shared';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -494,22 +496,100 @@ describe('репозиторий саммари', () => {
       expect(await testDb.rowsOf(summaryTaskDrafts)).toHaveLength(1);
     });
 
-    it('после сформированного релиза черновик не правится', async () => {
-      // Чекпоинты уже живут в роадмапе: правка задним числом развела бы
-      // две правды о том, что уехало.
+    it.each(['ручная правка', 'предложение модели'])('%s заменяет только активные задачи', async (kind) => {
       const summaryId = await createSummary();
       const versionId = await createVersion('v1.3');
-      await testDb.db.update(summaries).set({ releasedVersionId: versionId }).where(
-        eq(summaries.id, summaryId),
-      );
+      const activeId = await addTask(summaryId, 'Уходит при замене');
+      const archivedId = await addTask(summaryId, 'Архив');
+      const releasedId = await addTask(summaryId, 'В версии');
+      await testDb.db.update(summaryTaskDrafts).set({ state: SummaryTaskState.Archived })
+        .where(eq(summaryTaskDrafts.id, archivedId));
+      await testDb.db.update(summaryTaskDrafts).set({ state: SummaryTaskState.Released, releasedVersionId: versionId })
+        .where(eq(summaryTaskDrafts.id, releasedId));
+      await testDb.db.update(summaries).set({ releasedVersionId: versionId }).where(eq(summaries.id, summaryId));
+      const [platform] = await testDb.db.insert(projectPlatforms)
+        .values({ projectId, name: 'Веб', kind: PlatformKind.Server, position: 1 }).returning();
+      await testDb.db.insert(summaryTaskPlatforms).values([
+        { draftId: archivedId, platformId: platform!.id },
+        { draftId: releasedId, platformId: platform!.id },
+        { draftId: activeId, platformId: platform!.id },
+      ]);
 
-      await expect(
-        testDb.db.transaction((tx) =>
-          repository.replaceTasks(admin(), tx, projectId, summaryId, {
-            tasks: [{ title: 'поздно' }],
-          }),
-        ),
-      ).rejects.toBeInstanceOf(ConflictException);
+      const result = await testDb.db.transaction((tx) => kind === 'ручная правка'
+        ? repository.replaceTasks(admin(), tx, projectId, summaryId, { tasks: [{ title: 'Новое' }] })
+        : repository.replaceWithSuggested(admin(), tx, projectId, summaryId, ['Новое'], { ...STAMP, dropped: 7 }));
+      expect(result).toMatchObject({ taskCount: 1, archivedCount: 1, releasedCount: 1 });
+      expect(result.tasks.find((task) => task.id === activeId)).toBeUndefined();
+      expect(result.tasks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ title: 'Новое', state: SummaryTaskState.Active }),
+        expect.objectContaining({ id: archivedId, state: SummaryTaskState.Archived, platformIds: [platform!.id] }),
+        expect.objectContaining({ id: releasedId, state: SummaryTaskState.Released, platformIds: [platform!.id] }),
+      ]));
+      if (kind === 'предложение модели') expect(result.suggester).toMatchObject({ model: STAMP.model, dropped: 7 });
+    });
+
+    it.each([SummaryTaskState.Archived, SummaryTaskState.Released])('правка задачи %s возвращает конфликт', async (state) => {
+      const summaryId = await createSummary();
+      const id = await addTask(summaryId, 'Сохраняем');
+      await testDb.db.update(summaryTaskDrafts).set({ state }).where(eq(summaryTaskDrafts.id, id));
+      await expect(testDb.db.transaction((tx) =>
+        repository.replaceTasks(admin(), tx, projectId, summaryId, { tasks: [{ id, title: 'Новая формулировка' }] }),
+      )).rejects.toMatchObject({ status: 409, response: { code: SUMMARY_TASK_NOT_ACTIVE } });
+      expect(await testDb.rowsOf(summaryTaskDrafts)).toMatchObject([{ id, title: 'Сохраняем', state }]);
+    });
+
+    it('история считает состояния, а обозначение и ссылка видны только с выдачей роадмапа', async () => {
+      const summaryId = await createSummary();
+      await addTask(summaryId, 'Работа');
+      const archivedId = await addTask(summaryId, 'Архив');
+      const releasedId = await addTask(summaryId, 'Готово');
+      const versionId = await createVersion('v1.3');
+      await testDb.db.update(summaryTaskDrafts).set({ state: SummaryTaskState.Archived })
+        .where(eq(summaryTaskDrafts.id, archivedId));
+      await testDb.db.update(summaryTaskDrafts).set({ state: SummaryTaskState.Released, releasedVersionId: versionId })
+        .where(eq(summaryTaskDrafts.id, releasedId));
+      await grant(Section.Chronicle, AccessLevel.Write);
+      const detail = await repository.findById(member(), projectId, summaryId);
+      expect(detail.tasks.find((task) => task.id === releasedId)).toMatchObject({
+        state: SummaryTaskState.Released, releasedVersionId: null, releasedVersionLabel: null,
+      });
+      await grant(Section.Roadmap, AccessLevel.Metadata);
+      const visible = await repository.findById(member(), projectId, summaryId);
+      expect(visible.tasks.find((task) => task.id === releasedId)).toMatchObject({
+        releasedVersionId: versionId, releasedVersionLabel: 'v1.3',
+      });
+      expect(await repository.findForProject(member(), projectId)).toMatchObject([
+        { taskCount: 1, archivedCount: 1, releasedCount: 1 },
+      ]);
+      await testDb.db.delete(roadmapVersions).where(eq(roadmapVersions.id, versionId));
+      expect(await testDb.rowsOf(summaryTaskDrafts)).toContainEqual(expect.objectContaining({
+        id: releasedId, state: SummaryTaskState.Released, releasedVersionId: null,
+      }));
+    });
+
+    it('удаление задачи проверяет принадлежность и состояние и уносит её теги', async () => {
+      const summaryId = await createSummary();
+      const taskId = await addTask(summaryId, 'Удаляем');
+      const [platform] = await testDb.db.insert(projectPlatforms)
+        .values({ projectId, name: 'Веб', kind: PlatformKind.Server, position: 1 }).returning();
+      await testDb.db.insert(summaryTaskPlatforms).values({ draftId: taskId, platformId: platform!.id });
+      const anotherId = await createSummary();
+      await expect(testDb.db.transaction((tx) =>
+        repository.removeTasks(admin(), tx, projectId, anotherId, [taskId]),
+      )).rejects.toMatchObject({ status: 404 });
+      await expect(testDb.db.transaction((tx) =>
+        repository.removeTasks(admin(), tx, otherProjectId, summaryId, [taskId]),
+      )).rejects.toMatchObject({ status: 404 });
+      await testDb.db.update(summaryTaskDrafts).set({ state: SummaryTaskState.Released })
+        .where(eq(summaryTaskDrafts.id, taskId));
+      await expect(testDb.db.transaction((tx) =>
+        repository.removeTasks(admin(), tx, projectId, summaryId, [taskId]),
+      )).rejects.toMatchObject({ status: 409, response: { code: SUMMARY_TASK_NOT_ACTIVE } });
+      await testDb.db.update(summaryTaskDrafts).set({ state: SummaryTaskState.Archived })
+        .where(eq(summaryTaskDrafts.id, taskId));
+      await testDb.db.transaction((tx) => repository.removeTasks(admin(), tx, projectId, summaryId, [taskId]));
+      expect(await testDb.rowsOf(summaryTaskDrafts)).toEqual([]);
+      expect(await testDb.rowsOf(summaryTaskPlatforms)).toEqual([]);
     });
 
     it('уровня чтения хроники для правки не хватает', async () => {

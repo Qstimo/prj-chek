@@ -45,6 +45,9 @@ export enum AuditAction {
    */
   SummaryTasksSuggested = 'summary.tasks_suggested',
   SummaryTasksSuggestionFailed = 'summary.tasks_suggestion_failed',
+  SummaryTasksArchived = 'summary.tasks_archived',
+  SummaryTasksRestored = 'summary.tasks_restored',
+  SummaryTasksDeleted = 'summary.tasks_deleted',
   SummaryReleased = 'summary.released',
   SummaryDeleted = 'summary.deleted',
   /** Запись созвона дотекла на том: задача расшифровки заведена. */

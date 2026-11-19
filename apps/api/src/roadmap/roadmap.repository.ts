@@ -286,6 +286,13 @@ export class RoadmapRepository {
     return version;
   }
 
+  /** Получатель задач саммари под тем же правом, что создание чекпоинта. */
+  async releaseTarget(subject: RequestSubject, tx: Transaction, projectId: string, versionId: string) {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockProject(tx, projectId);
+    return this.requireVersion(tx, projectId, versionId);
+  }
+
   /** Создаёт чекпоинт в конце списка версии. */
   async createCheckpoint(
     subject: RequestSubject,

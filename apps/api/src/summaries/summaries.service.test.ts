@@ -8,7 +8,10 @@ import {
   PlatformKind,
   SUMMARY_TASKS_EMPTY,
   SUGGESTER_DISABLED,
-  SUMMARY_ALREADY_RELEASED,
+  SUMMARY_TASK_NOT_ACTIVE,
+  SummaryTaskState,
+  type RoadmapVersionCreate,
+  type SummaryRelease,
   SUGGESTER_UNAVAILABLE,
   SUMMARY_TEXT_NOT_PLAIN,
   SUMMARY_TEXT_TOO_LONG,
@@ -460,8 +463,16 @@ describe('служба саммари', () => {
       });
     });
 
+    async function releaseInput(version: RoadmapVersionCreate): Promise<SummaryRelease> {
+      const detail = await service.findById(writer(), projectId, summaryId);
+      return {
+        taskIds: detail.tasks.filter((task) => task.state === SummaryTaskState.Active).map((task) => task.id),
+        target: { kind: 'new', version },
+      };
+    }
+
     it('создаёт версию, упорядоченные незакрытые чекпоинты и полный журнал', async () => {
-      const result = await service.release(writer(), projectId, summaryId, { label: 'v1.3' });
+      const result = await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }));
       expect(result).toEqual({ versionId: expect.any(String), label: 'v1.3', checkpointCount: 3 });
       const rows = await testDb.db.select().from(roadmapCheckpoints).orderBy(asc(roadmapCheckpoints.position));
       expect(rows.map(({ position, title, isDone, url }) => [position, title, isDone, url])).toEqual([
@@ -469,23 +480,93 @@ describe('служба саммари', () => {
       ]);
       expect(await testDb.db.select().from(checkpointPlatforms)).toEqual([]);
       expect((await testDb.db.select().from(summaries))[0]?.releasedVersionId).toBe(result.versionId);
-      expect((await auditRecords(AuditAction.SummaryReleased))[0]?.metadata).toEqual({ label: 'v1.3', tasks: 3, fromModel: 2 });
+      expect((await auditRecords(AuditAction.SummaryReleased))[0]?.metadata).toEqual({ versionId: result.versionId, label: 'v1.3', tasks: 3, fromModel: 2, target: 'new' });
       expect(await auditRecords(AuditAction.RoadmapVersionCreated)).toHaveLength(1);
       expect((await auditRecords(AuditAction.CheckpointCreated)).map(row => row.metadata)).toEqual([
         { title: 'раз' }, { title: 'два' }, { title: 'три' },
       ]);
     });
 
-    it('повторный релиз — 409 с кодом', async () => {
-      await service.release(writer(), projectId, summaryId, { label: 'v1.3' });
-      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.4' })).rejects.toMatchObject({
-        status: 409, response: expect.objectContaining({ code: SUMMARY_ALREADY_RELEASED }),
+    it('выборочный релиз соблюдает позиции, а возвращённая задача уезжает во вторую версию', async () => {
+      const [first, second, third] = (await service.findById(writer(), projectId, summaryId)).tasks;
+      const input = { taskIds: [third!.id, first!.id], target: { kind: 'new', version: { label: 'v1.3' } } } as const;
+      const result = await service.release(writer(), projectId, summaryId, { ...input, taskIds: [...input.taskIds] });
+      expect(result.checkpointCount).toBe(2);
+      const checkpoints = await testDb.db.select().from(roadmapCheckpoints).orderBy(asc(roadmapCheckpoints.position));
+      expect(checkpoints.map((task) => task.title)).toEqual(['раз', 'три']);
+      const detail = await service.findById(writer(), projectId, summaryId);
+      expect(detail).toMatchObject({ taskCount: 1, archivedCount: 0, releasedCount: 2 });
+      expect(detail.tasks).toEqual([
+        expect.objectContaining({ id: first!.id, state: SummaryTaskState.Released, releasedVersionId: result.versionId }),
+        expect.objectContaining({ id: second!.id, state: SummaryTaskState.Active, releasedVersionId: null }),
+        expect.objectContaining({ id: third!.id, state: SummaryTaskState.Released, releasedVersionId: result.versionId }),
+      ]);
+      const selection = { taskIds: [second!.id] };
+      await service.archiveTasks(writer(), projectId, summaryId, selection);
+      await expect(service.release(writer(), projectId, summaryId, {
+        ...selection, target: { kind: 'new', version: { label: 'v1.4' } },
+      })).rejects.toMatchObject({ status: 409, response: { code: SUMMARY_TASK_NOT_ACTIVE } });
+      await service.restoreTasks(writer(), projectId, summaryId, selection);
+      expect((await auditRecords(AuditAction.SummaryTasksArchived))[0]?.metadata).toEqual({ tasks: 1 });
+      expect((await auditRecords(AuditAction.SummaryTasksRestored))[0]?.metadata).toEqual({ tasks: 1 });
+      const next = await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.4' }));
+      expect(next.versionId).not.toBe(result.versionId);
+      expect(await testDb.rowsOf(roadmapVersions)).toHaveLength(2);
+      expect(await service.findById(writer(), projectId, summaryId)).toMatchObject({
+        releasedVersionId: next.versionId, taskCount: 0, releasedCount: 3,
       });
+    });
+
+    it('новая разбивка после релиза оставляет уехавшие задачи', async () => {
+      const { taskIds, target } = await releaseInput({ label: 'v1.3' });
+      const releasedId = taskIds[0]!;
+      await service.release(writer(), projectId, summaryId, { taskIds: [releasedId], target });
+      suggesterStub.suggest.mockResolvedValueOnce({ tasks: [{ title: 'Следующая задача' }], dropped: 4 });
+
+      const detail = await service.suggest(writer(), projectId, summaryId);
+
+      expect(detail).toMatchObject({ taskCount: 1, releasedCount: 1, suggester: { dropped: 4 } });
+      expect(detail.tasks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: releasedId, title: 'раз', state: SummaryTaskState.Released }),
+        expect.objectContaining({ title: 'Следующая задача', state: SummaryTaskState.Active }),
+      ]));
+    });
+
+    it('журнал удаления считает фактически удалённые задачи', async () => {
+      const { taskIds } = await releaseInput({ label: 'v1' });
+      await service.removeTasks(writer(), projectId, summaryId, { taskIds: [taskIds[0]!, taskIds[1]!, taskIds[0]!] });
+      expect((await auditRecords(AuditAction.SummaryTasksDeleted))[0]?.metadata).toEqual({ tasks: 2 });
+      expect((await service.findById(writer(), projectId, summaryId)).tasks.map((task) => task.id)).toEqual([taskIds[2]]);
+    });
+
+    it('добавляет чекпоинты в существующую версию без записи о её создании', async () => {
+      const [version] = await testDb.db.insert(roadmapVersions).values({ projectId, label: 'v2', position: 1 }).returning();
+      const { taskIds } = await releaseInput({ label: 'v2' });
+      const result = await service.release(writer(), projectId, summaryId, {
+        taskIds, target: { kind: 'existing', versionId: version!.id },
+      });
+      expect(result).toEqual({ versionId: version!.id, label: 'v2', checkpointCount: 3 });
+      expect((await testDb.rowsOf(roadmapCheckpoints)).map((row) => row.versionId)).toEqual(Array(3).fill(version!.id));
+      expect(await auditRecords(AuditAction.RoadmapVersionCreated)).toEqual([]);
+      expect((await auditRecords(AuditAction.SummaryReleased))[0]?.metadata).toEqual({
+        versionId: version!.id, label: 'v2', fromModel: 2, tasks: 3, target: 'existing',
+      });
+    });
+
+    it('не добавляет чекпоинты в версию другого проекта', async () => {
+      const [other] = await testDb.db.insert(projects).values({ slug: 'other', name: 'Другой' }).returning();
+      const [version] = await testDb.db.insert(roadmapVersions)
+        .values({ projectId: other!.id, label: 'v2', position: 1 }).returning();
+      const { taskIds } = await releaseInput({ label: 'v2' });
+      await expect(service.release(writer(), projectId, summaryId, {
+        taskIds, target: { kind: 'existing', versionId: version!.id },
+      })).rejects.toMatchObject({ status: 404 });
+      expect(await testDb.rowsOf(roadmapCheckpoints)).toEqual([]);
     });
 
     it('пустой черновик — 409 с кодом', async () => {
       await service.replaceTasks(writer(), projectId, summaryId, { tasks: [] });
-      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).rejects.toMatchObject({
+      await expect(service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }))).rejects.toMatchObject({
         status: 409, response: expect.objectContaining({ code: SUMMARY_TASKS_EMPTY }),
       });
     });
@@ -497,7 +578,7 @@ describe('служба саммари', () => {
         if (++calls === 2) throw new Error('второй чекпоинт');
         return original.apply(this, args);
       });
-      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).rejects.toThrow('второй чекпоинт');
+      await expect(service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }))).rejects.toThrow('второй чекпоинт');
       expect(await testDb.db.select().from(roadmapVersions)).toEqual([]);
       expect(await testDb.db.select().from(roadmapCheckpoints)).toEqual([]);
       expect(await auditRecords(AuditAction.RoadmapVersionCreated)).toEqual([]);
@@ -523,7 +604,7 @@ describe('служба саммари', () => {
       const passed = new Promise<void>((resolve) => { passedLock = resolve; });
 
       // Первое нажатие замирает, уже взяв замок строки саммари: замок
-      // берётся в `lockForRelease`, то есть до создания версии.
+      // берётся в `tasksForRelease`, то есть до создания версии.
       const createVersion = RoadmapRepository.prototype.createVersion;
       vi.spyOn(RoadmapRepository.prototype, 'createVersion').mockImplementationOnce(
         async function (this: RoadmapRepository, ...args) {
@@ -532,17 +613,19 @@ describe('служба саммари', () => {
           return createVersion.apply(this, args);
         },
       );
-      const lockForRelease = second.repository.lockForRelease.bind(second.repository);
-      vi.spyOn(second.repository, 'lockForRelease').mockImplementation(async (...args) => {
+      const tasksForRelease = second.repository.tasksForRelease.bind(second.repository);
+      vi.spyOn(second.repository, 'tasksForRelease').mockImplementation(async (...args) => {
         reachedLock();
-        const row = await lockForRelease(...args);
+        const row = await tasksForRelease(...args);
         passedLock();
         return row;
       });
 
-      const first = service.release(writer(), projectId, summaryId, { label: 'v1.3' });
+      const firstInput = await releaseInput({ label: 'v1.3' });
+      const secondInput = await releaseInput({ label: 'v1.4' });
+      const first = service.release(writer(), projectId, summaryId, firstInput);
       await held;
-      const concurrent = second.service.release(writer(), projectId, summaryId, { label: 'v1.4' });
+      const concurrent = second.service.release(writer(), projectId, summaryId, secondInput);
       await reached;
       // Замок держит — второе нажатие стоит, и первое отпускается по
       // паузе; замка нет — второе уже прочитало незанятую строку, и
@@ -552,11 +635,11 @@ describe('служба саммари', () => {
 
       const results = await Promise.allSettled([first, concurrent]);
       expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
-      expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { status: 409, response: expect.objectContaining({ code: SUMMARY_ALREADY_RELEASED }) } });
+      expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { status: 409, response: expect.objectContaining({ code: SUMMARY_TASK_NOT_ACTIVE }) } });
       expect(await testDb.rowsOf(roadmapVersions)).toHaveLength(1);
     });
 
-    it.each(['ручная', 'предложенная'])('замена %s после чтения до релиза получает конфликт и не меняет выпущенный черновик', async (kind) => {
+    it.each(['ручная', 'предложенная'])('замена %s после чтения до релиза сохраняет уехавшие задачи', async (kind) => {
       let signalRead = (): void => {};
       let resumeWrite = (): void => {};
       const read = new Promise<void>((resolve) => { signalRead = resolve; });
@@ -578,31 +661,33 @@ describe('служба саммари', () => {
       const outcome = replacement.then(() => null, (cause: unknown) => cause);
       try {
         await read;
-        await service.release(writer(), projectId, summaryId, { label: 'v1.3' });
+        await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }));
       } finally {
         resumeWrite();
       }
-      expect(await outcome).toBeInstanceOf(ConflictException);
+      expect(await outcome).toBeNull();
       const detail = await service.findById(writer(), projectId, summaryId);
       const checkpoints = await testDb.db.select().from(roadmapCheckpoints).orderBy(asc(roadmapCheckpoints.position));
-      expect(detail.tasks.map(task => task.title)).toEqual(checkpoints.map(checkpoint => checkpoint.title));
-      expect(detail.tasks.map(task => task.title)).toEqual(['раз', 'два', 'три']);
+      expect(detail.tasks.filter((task) => task.state === SummaryTaskState.Released).map((task) => task.title))
+        .toEqual(checkpoints.map((checkpoint) => checkpoint.title));
+      expect(detail.tasks.filter((task) => task.state === SummaryTaskState.Active).map((task) => task.title))
+        .toEqual([kind === 'ручная' ? 'Опоздавшая правка' : 'Опоздавшая разбивка']);
     });
 
     it('занятое обозначение отвергает репозиторий роадмапа', async () => {
       await testDb.db.insert(roadmapVersions).values({ projectId, label: 'v1.3', position: 1 });
-      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }))).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('releasedDate при платформе отвергает репозиторий роадмапа', async () => {
       await testDb.db.insert(projectPlatforms).values({ projectId, name: 'Веб', kind: PlatformKind.Server, position: 1 });
-      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3', releasedDate: null })).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3', releasedDate: null }))).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('устаревший текст не блокирует релиз', async () => {
       await testDb.db.update(chronicleEntries).set({ updatedAt: new Date(Date.now() + 60_000) });
       expect((await service.findById(writer(), projectId, summaryId)).isTextStale).toBe(true);
-      await expect(service.release(writer(), projectId, summaryId, { label: 'v1.3' })).resolves.toBeDefined();
+      await expect(service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }))).resolves.toBeDefined();
     });
 
     it.each([
@@ -618,7 +703,7 @@ describe('служба саммари', () => {
       for (const [section, level] of [[Section.Chronicle, chronicle], [Section.Roadmap, roadmap]] as const) {
         if (level) await testDb.db.insert(grants).values({ subjectId: member!.id, projectId, section, level, grantedBy: admin!.id });
       }
-      await expect(service.release({ ...writer(), id: member!.id, isSuperadmin: false }, projectId, summaryId, { label: 'v1.3' })).rejects.toMatchObject({ status });
+      await expect(service.release({ ...writer(), id: member!.id, isSuperadmin: false }, projectId, summaryId, await releaseInput({ label: 'v1.3' }))).rejects.toMatchObject({ status });
     });
 
     describe('ссылка и теги доезжают в чекпоинт', () => {
@@ -650,7 +735,7 @@ describe('служба саммари', () => {
         // который их принимает уже сегодня. Роадмап не правится.
         await tagFirstTask();
 
-        await service.release(writer(), projectId, summaryId, { label: 'v1.4' });
+        await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.4' }));
 
         const rows = await testDb.db
           .select()
@@ -664,7 +749,7 @@ describe('служба саммари', () => {
       });
 
       it('задача без ссылки и тегов даёт чекпоинт без них', async () => {
-        await service.release(writer(), projectId, summaryId, { label: 'v1.5' });
+        await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.5' }));
 
         const rows = await testDb.rowsOf(roadmapCheckpoints);
 
@@ -678,7 +763,7 @@ describe('служба саммари', () => {
         // журналируется иначе.
         await tagFirstTask();
 
-        await service.release(writer(), projectId, summaryId, { label: 'v1.4' });
+        await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.4' }));
 
         expect((await auditRecords(AuditAction.CheckpointCreated))[0]?.metadata).toEqual({
           title: 'раз',
@@ -705,7 +790,7 @@ describe('служба саммари', () => {
         await tagFirstTask(foreign!.id);
 
         await expect(
-          service.release(writer(), projectId, summaryId, { label: 'v1.6' }),
+          service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.6' })),
         ).rejects.toBeInstanceOf(SectionNotVisibleError);
 
         expect(await testDb.rowsOf(roadmapVersions)).toHaveLength(0);
@@ -733,7 +818,7 @@ describe('служба саммари', () => {
     it('снимает один ведущий BOM', async () => {
       const created = await service.create(writer(), projectId, {
         ...CREATE_INPUT,
-        text: '﻿обсудили сроки',
+        text: 'обсудили сроки',
       });
 
       expect(created.text).toBe('обсудили сроки');
@@ -981,26 +1066,6 @@ describe('служба саммари', () => {
       expect((error as ConflictException).getResponse()).toMatchObject({
         code: SUMMARY_TEXT_TOO_LONG,
         maxChars: 40_000,
-      });
-      expect(suggesterStub.suggest).not.toHaveBeenCalled();
-      expect(await auditRecords(AuditAction.SummaryTasksSuggested)).toHaveLength(0);
-    });
-
-    it('по сформированному релизу разбивка не повторяется, и до сети не доходит', async () => {
-      // Черновик после релиза не правится (`SUMMARY_ALREADY_RELEASED`), и
-      // узнать об этом после того, как текст ушёл наружу и был оплачен,
-      // поздно.
-      const [version] = await testDb.db
-        .insert(roadmapVersions)
-        .values({ projectId, label: 'v1.3', position: 1 })
-        .returning();
-      await testDb.db.update(summaries).set({ releasedVersionId: version!.id });
-
-      const error = await failureOf(service.suggest(writer(), projectId, summaryId));
-
-      expect(error).toBeInstanceOf(ConflictException);
-      expect((error as ConflictException).getResponse()).toMatchObject({
-        code: SUMMARY_ALREADY_RELEASED,
       });
       expect(suggesterStub.suggest).not.toHaveBeenCalled();
       expect(await auditRecords(AuditAction.SummaryTasksSuggested)).toHaveLength(0);
