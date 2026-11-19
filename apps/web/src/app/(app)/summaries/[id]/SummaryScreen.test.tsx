@@ -152,6 +152,11 @@ function mutation() {
   return { mutate: vi.fn(), isPending: false, error: null } as never;
 }
 
+/** Мутация в полёте: её ждёт бирка состояния в шапке. */
+function pending() {
+  return { mutate: vi.fn(), isPending: true, error: null } as never;
+}
+
 /** Шпион `mutate` у подменённой мутации: мок объявлен как `never`. */
 function mutateOf(stub: unknown): ReturnType<typeof vi.fn> {
   return (stub as { mutate: ReturnType<typeof vi.fn> }).mutate;
@@ -251,21 +256,17 @@ describe('экран саммари', () => {
     expect(screen.getByText(/ссылки и теги/i)).toBeInTheDocument();
   });
 
-  it('чипы платформ приходят из детали саммари', async () => {
+  it('чипы платформ приходят из детали саммари', () => {
     // Один запрос и один гейт: платформы едут тем же ответом, что
     // обозначение версии-получателя (дизайн, 3.2).
     renderScreen({ ...WITH_TASKS, platforms: [API] }, LOCAL_SUGGESTER);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
-
     expect(screen.getByRole('checkbox', { name: 'API' })).toBeInTheDocument();
   });
 
-  it('без платформ в детали чипов на экране нет', async () => {
+  it('без платформ в детали чипов на экране нет', () => {
     // Неотличимо от проекта без платформ — это и есть нераскрытие.
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
 
     expect(screen.queryByRole('group', { name: 'Платформы' })).not.toBeInTheDocument();
   });
@@ -480,7 +481,7 @@ describe('экран саммари', () => {
     vi.mocked(hooks.useMutationReleaseSummary).mockReturnValue(release);
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
-    await userEvent.type(screen.getByRole('textbox'), ' быстрее');
+    await userEvent.type(screen.getByLabelText('Формулировка задачи'), ' быстрее');
     await userEvent.click(screen.getByRole('button', { name: /Сформировать релиз/ }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -506,7 +507,7 @@ describe('экран саммари', () => {
     // перехватить: предупреждает браузер по `preventDefault`.
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
-    await userEvent.type(screen.getByRole('textbox'), ' быстрее');
+    await userEvent.type(screen.getByLabelText('Формулировка задачи'), ' быстрее');
     const leaving = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(leaving);
 
@@ -565,6 +566,66 @@ describe('экран саммари', () => {
       projectId: PROJECT_ID,
       summaryId: SUMMARY_ID,
     });
+  });
+
+  it('шапка называет проект, дату и заголовок саммари', () => {
+    // Колонки прокручиваются каждая своим содержимым, и человек,
+    // уехавший к концу списка задач, обязан видеть, что он правит.
+    renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Созвон по релизу' })).toBeInTheDocument();
+    expect(screen.getByText(/CAIRN/)).toBeInTheDocument();
+    expect(screen.getByText(/16\.11\.2026/)).toBeInTheDocument();
+  });
+
+  it('идущая расшифровка названа биркой в шапке', () => {
+    // Шапка — единственное место, где состояние потока названо целиком
+    // (дизайн, 4.1).
+    renderScreen(
+      {
+        ...FROM_RECORDING,
+        transcription: { ...FROM_RECORDING.transcription!, state: TranscriptionState.Running },
+      },
+      LOCAL_SUGGESTER,
+    );
+
+    expect(screen.getByText('Идёт расшифровка')).toBeInTheDocument();
+  });
+
+  it('законченная расшифровка бирки не держит', () => {
+    renderScreen(FROM_RECORDING, LOCAL_SUGGESTER);
+
+    expect(screen.queryByText('Идёт расшифровка')).not.toBeInTheDocument();
+  });
+
+  it('идущая разбивка названа биркой в шапке', () => {
+    vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(pending());
+
+    renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
+
+    expect(screen.getByText('Идёт разбивка')).toBeInTheDocument();
+  });
+
+  it('правленный после разбивки текст назван биркой в шапке', () => {
+    renderScreen({ ...WITH_TASKS, isTextStale: true }, LOCAL_SUGGESTER);
+
+    expect(screen.getByText('Текст правили после разбивки')).toBeInTheDocument();
+  });
+
+  it('сформированный релиз назван биркой в шапке', () => {
+    renderScreen(RELEASED_DETAIL, LOCAL_SUGGESTER);
+
+    expect(screen.getByText('Релиз сформирован')).toBeInTheDocument();
+  });
+
+  it('у саммари в работе бирок состояния нет вовсе', () => {
+    // Отсутствие бирок и означает «всё обычно»: бирка «в работе» стояла
+    // бы всегда и перестала бы читаться.
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    expect(screen.queryByText('Идёт разбивка')).not.toBeInTheDocument();
+    expect(screen.queryByText('Текст правили после разбивки')).not.toBeInTheDocument();
+    expect(screen.queryByText('Релиз сформирован')).not.toBeInTheDocument();
   });
 
   it('саммари из чужого проекта не раскрывается', () => {

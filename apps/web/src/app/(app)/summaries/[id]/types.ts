@@ -16,6 +16,22 @@ export interface IBodyProps {
   summaryId: string;
 }
 
+/** Пропсы шапки рабочего экрана. */
+export interface IHeaderProps {
+  projectName: string;
+  /** День созвона: шапка показывает его по-русски. */
+  occurredOn: string;
+  title: string;
+  /**
+   * Бирки состояния потока, уже собранные и упорядоченные.
+   *
+   * Строки, а не признаки: состояний четыре, и признак на каждое означал
+   * бы четыре условия в разметке вместо одного списка. Решает, что
+   * показать, `stateBadgesOf` — там же, где живут сами фразы.
+   */
+  badges: string[];
+}
+
 /** Пропсы шага «Задачи». */
 export interface ITasksProps {
   summary: SummaryDetail;

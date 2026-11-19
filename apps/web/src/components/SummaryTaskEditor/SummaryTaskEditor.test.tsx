@@ -44,9 +44,17 @@ const API: Platform = {
   position: 1,
 };
 
+/** Подпись поля формулировки: в карточке рядом с ним живёт поле ссылки. */
+const TITLE = 'Формулировка задачи';
+
+/** Поля формулировок в том порядке, в котором они показаны. */
+function titleFields(): HTMLTextAreaElement[] {
+  return screen.getAllByLabelText(TITLE) as HTMLTextAreaElement[];
+}
+
 /** Формулировки в том порядке, в котором они показаны. */
 function titles(): string[] {
-  return screen.getAllByRole('textbox').map((field) => (field as HTMLInputElement).value);
+  return titleFields().map((field) => field.value);
 }
 
 describe('редактор черновика задач', () => {
@@ -95,8 +103,8 @@ describe('редактор черновика задач', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Добавить задачу/ }));
 
-    expect(screen.getAllByRole('textbox')).toHaveLength(1);
-    expect(screen.getByRole('textbox')).toHaveFocus();
+    expect(titleFields()).toHaveLength(1);
+    expect(screen.getByLabelText(TITLE)).toHaveFocus();
   });
 
   it('до правки «Сохранить» выключена, после — доступна', async () => {
@@ -107,7 +115,7 @@ describe('редактор черновика задач', () => {
 
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
 
-    await userEvent.type(screen.getByRole('textbox'), ' ещё');
+    await userEvent.type(screen.getByLabelText(TITLE), ' ещё');
 
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeEnabled();
   });
@@ -154,7 +162,7 @@ describe('редактор черновика задач', () => {
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]}
         onSave={vi.fn()} isReleased />);
 
-    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.getByLabelText(TITLE)).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Удалить' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Добавить задачу/ })).not.toBeInTheDocument();
   });
@@ -162,7 +170,7 @@ describe('редактор черновика задач', () => {
   it('пустая формулировка сохраняться не даёт', async () => {
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]}
         onSave={vi.fn()} />);
-    await userEvent.clear(screen.getByRole('textbox'));
+    await userEvent.clear(screen.getByLabelText(TITLE));
 
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
   });
@@ -209,9 +217,9 @@ describe('редактор черновика задач', () => {
     render(<SummaryTaskEditor tasks={[{ ...TASK_A, title: long }]} platforms={[]}
         onSave={vi.fn()} />);
 
-    await userEvent.type(screen.getByRole('textbox'), 'ещё');
+    await userEvent.type(screen.getByLabelText(TITLE), 'ещё');
 
-    expect(screen.getByRole('textbox')).toHaveValue(long);
+    expect(screen.getByLabelText(TITLE)).toHaveValue(long);
   });
 
   it('строк больше предела не добавляется, и предел назван', async () => {
@@ -226,66 +234,51 @@ describe('редактор черновика задач', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Добавить задачу/ }));
 
-    expect(screen.getAllByRole('textbox')).toHaveLength(MAX_SUMMARY_TASKS);
-    expect(screen.getByText(new RegExp(String(MAX_SUMMARY_TASKS)))).toBeInTheDocument();
+    expect(titleFields()).toHaveLength(MAX_SUMMARY_TASKS);
+    // Числом из контракта, но фразой предела: формулировка «задача 200»
+    // в карточке — тоже текст с этим числом.
+    expect(
+      screen.getByText(new RegExp(`не больше ${MAX_SUMMARY_TASKS} задач`)),
+    ).toBeInTheDocument();
   });
 
   it('о несохранённых правках сказано рядом с кнопкой', async () => {
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} />);
 
-    await userEvent.type(screen.getByRole('textbox'), ' ещё');
+    await userEvent.type(screen.getByLabelText(TITLE), ' ещё');
 
     expect(screen.getByText(/не сохранены/)).toBeInTheDocument();
   });
 });
 
-describe('ссылка и теги в строке', () => {
-  it('поля скрыты, пока строку не раскрыли', () => {
-    // Два поля на каждой из двадцати строк сделали бы список нечитаемым
-    // (дизайн, 7.1).
+describe('ссылка и теги в карточке', () => {
+  it('поля видны всегда, без раскрытия', () => {
+    // Карточка, а не строка с раскрывателем: «сразу всё видно» — это и
+    // есть смысл рабочего экрана (дизайн, 4.3).
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={vi.fn()} />);
-
-    expect(screen.queryByLabelText('Ссылка на задачу')).not.toBeInTheDocument();
-    expect(screen.queryByRole('checkbox', { name: 'API' })).not.toBeInTheDocument();
-  });
-
-  it('раскрывает строку на месте', async () => {
-    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={vi.fn()} />);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
 
     expect(screen.getByLabelText('Ссылка на задачу')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'API' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Подробнее' })).not.toBeInTheDocument();
   });
 
-  it('раскрыватель называет своё состояние читалке', () => {
-    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={vi.fn()} />);
-
-    expect(screen.getByRole('button', { name: 'Подробнее' })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    );
-  });
-
-  it('раскрывает все строки разом', async () => {
-    // Это и есть «один проход по списку» буквально.
+  it('раскрывателя и переключателя «у всех» больше нет', () => {
+    // Они существовали только затем, чтобы достать поля из-под стрелки.
     render(<SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[API]} onSave={vi.fn()} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Показать подробности у всех' }));
-
+    expect(screen.queryByRole('button', { name: /подробност/i })).not.toBeInTheDocument();
     expect(screen.getAllByLabelText('Ссылка на задачу')).toHaveLength(2);
   });
 
-  it('сворачивает все строки тем же переключателем', async () => {
-    render(<SummaryTaskEditor tasks={[TASK_A, TASK_B]} platforms={[API]} onSave={vi.fn()} />);
+  it('формулировка набирается в несколько строк', () => {
+    // Задача созвона в одну строку не укладывается, а поле, которое её
+    // обрезает, заставляет править текст вслепую (дизайн, 4.3).
+    render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Показать подробности у всех' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Скрыть подробности у всех' }));
-
-    expect(screen.queryByLabelText('Ссылка на задачу')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(TITLE).tagName).toBe('TEXTAREA');
   });
 
-  it('свёрнутая строка не скрывает заполненного', () => {
+  it('заполненные поля видны со своими значениями', () => {
     // Поле, которого не видно и о котором ничего не сказано, человек
     // считает пустым — и поставит второй раз или не заметит чужого.
     render(
@@ -296,17 +289,15 @@ describe('ссылка и теги в строке', () => {
       />,
     );
 
-    expect(screen.getByText('API')).toBeInTheDocument();
-    expect(screen.getByText(/ссылка/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Ссылка на задачу')).toHaveValue('https://tracker.example/1');
+    expect(screen.getByRole('checkbox', { name: 'API' })).toBeChecked();
   });
 
-  it('без платформ чипов нет вовсе, а поле ссылки есть', async () => {
+  it('без платформ чипов нет вовсе, а поле ссылки есть', () => {
     // Пустой список означает «показывать нечего» и накрывает два случая
     // намеренно неотличимо (дизайн, 3.2). Ссылку при этом вписывает и
     // субъект без выдачи на роадмап: она уедет туда же тем же релизом.
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={vi.fn()} />);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
 
     expect(screen.queryByRole('group', { name: 'Платформы' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Ссылка на задачу')).toBeInTheDocument();
@@ -317,7 +308,7 @@ describe('ссылка и теги в строке', () => {
     const onSave = vi.fn();
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[]} onSave={onSave} />);
 
-    await userEvent.type(screen.getByLabelText('Формулировка задачи'), '!');
+    await userEvent.type(screen.getByLabelText(TITLE), '!');
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     expect(onSave).toHaveBeenCalledWith({
@@ -329,7 +320,6 @@ describe('ссылка и теги в строке', () => {
     const onSave = vi.fn();
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={onSave} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
     await userEvent.click(screen.getByRole('checkbox', { name: 'API' }));
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
@@ -343,7 +333,6 @@ describe('ссылка и теги в строке', () => {
     // уходе со страницы.
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={vi.fn()} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
     await userEvent.type(screen.getByLabelText('Ссылка на задачу'), 'https://tracker.example/1');
 
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeEnabled();
@@ -358,7 +347,6 @@ describe('ссылка и теги в строке', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
     await userEvent.click(screen.getByRole('checkbox', { name: 'API' }));
 
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeEnabled();
@@ -369,7 +357,6 @@ describe('ссылка и теги в строке', () => {
     // отказа и без указания строки (дизайн, 7.3).
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={vi.fn()} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
     await userEvent.type(screen.getByLabelText('Ссылка на задачу'), 'CAIRN-1');
 
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
@@ -386,7 +373,6 @@ describe('ссылка и теги в строке', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
     await userEvent.clear(screen.getByLabelText('Ссылка на задачу'));
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
@@ -395,10 +381,8 @@ describe('ссылка и теги в строке', () => {
     });
   });
 
-  it('после релиза поля только читаются', async () => {
+  it('после релиза поля только читаются', () => {
     render(<SummaryTaskEditor tasks={[TASK_A]} platforms={[API]} onSave={vi.fn()} isReleased />);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Подробнее' }));
 
     expect(screen.getByLabelText('Ссылка на задачу')).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: 'API' })).toBeDisabled();
@@ -416,7 +400,7 @@ describe('ссылка и теги в строке', () => {
       />,
     );
 
-    await userEvent.type(screen.getByLabelText('Формулировка задачи'), '!');
+    await userEvent.type(screen.getByLabelText(TITLE), '!');
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     expect(onSave).toHaveBeenCalledWith({

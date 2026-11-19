@@ -7,8 +7,11 @@ import {
   SUMMARY_TEXT_NOT_PLAIN,
   SUMMARY_TEXT_TOO_LONG,
   ModelServicePlacement,
+  type SummaryDetail,
   type TaskSuggesterInfo,
 } from '@cairn/shared';
+
+import { isWorkingState } from '@/components/SummaryRecording';
 
 /** Тексты экрана истории. */
 export const SCREEN_TEXTS = {
@@ -56,7 +59,49 @@ export const SUMMARY_TEXTS = {
    */
   unsavedTasks: 'Сначала сохраните правки черновика: релиз формируется из сохранённых задач.',
   released: 'Задачи ушли в роадмап.',
+  /**
+   * Бирки состояния потока в шапке рабочего экрана.
+   *
+   * Шапка — единственное место, где состояние названо целиком; дальше
+   * каждый блок говорит только о себе (дизайн, 4.1). Поэтому фразы здесь
+   * короткие и не повторяют объяснений блоков: «Текст правили после
+   * разбивки» — бирка, а «задачи могли устареть» — предупреждение шага
+   * задач, и одно другое не заменяет.
+   */
+  badgeTranscribing: 'Идёт расшифровка',
+  badgeSuggesting: 'Идёт разбивка',
+  badgeStale: 'Текст правили после разбивки',
+  badgeReleased: 'Релиз сформирован',
 } as const;
+
+/**
+ * Бирки состояния потока — в порядке самого потока.
+ *
+ * Пустой список означает «всё обычно, работаем»: бирка «в работе» стояла
+ * бы всегда и перестала бы читаться. Разбивка — единственное состояние,
+ * которого в саммари нет: она живёт в полёте мутации, а не в данных.
+ */
+export function stateBadgesOf(summary: SummaryDetail, isSuggesting: boolean): string[] {
+  const badges: string[] = [];
+
+  if (summary.transcription !== null && isWorkingState(summary.transcription.state)) {
+    badges.push(SUMMARY_TEXTS.badgeTranscribing);
+  }
+
+  if (isSuggesting) {
+    badges.push(SUMMARY_TEXTS.badgeSuggesting);
+  }
+
+  if (summary.isTextStale) {
+    badges.push(SUMMARY_TEXTS.badgeStale);
+  }
+
+  if (summary.isReleased) {
+    badges.push(SUMMARY_TEXTS.badgeReleased);
+  }
+
+  return badges;
+}
 
 /**
  * Объяснения отказов по коду из контракта.

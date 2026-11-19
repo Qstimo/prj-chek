@@ -94,6 +94,9 @@ function payloadOf(
 /**
  * Редактор черновика задач: формулировки, порядок, добавление, удаление.
  *
+ * Карточки, а не строки с раскрывателем: все поля задачи видны сразу, и
+ * состояния «что раскрыто» у редактора больше нет вовсе (дизайн, 4.3).
+ *
  * Правки накапливаются в памяти и уходят одной кнопкой «Сохранить» в
  * прилипшей шапке, как у панели версии: `isDirty` считается сравнением с
  * загруженным набором. Компонент чистый — запросы, подтверждения и
@@ -113,9 +116,6 @@ export function SummaryTaskEditor({
   const signature = signatureOf(loaded);
   const [state, setState] = useState(() => ({ signature, draft: loaded }));
   const [focusKey, setFocusKey] = useState<string>();
-  // Способ смотреть, а не данные: ни в адрес, ни в хранилище браузера
-  // раскрытие не едет (дизайн, 11.2 пункт 6).
-  const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(new Set());
   const nextKey = useRef(0);
 
   // Пришёл другой набор (сохранение, новая разбивка) — черновик берётся
@@ -131,7 +131,6 @@ export function SummaryTaskEditor({
   const isComplete = draft.every((task) => task.title.trim().length > 0);
   const hasBadUrl = draft.some((task) => urlErrorOf(task.url) !== undefined);
   const isFull = draft.length >= MAX_SUMMARY_TASKS;
-  const areAllOpen = draft.length > 0 && draft.every((task) => openKeys.has(task.key));
 
   // Эффектом, а не из обработчика: сброс черновика свежим ответом идёт
   // при отрисовке, и о нём контейнер обязан узнать так же, как о правке.
@@ -162,17 +161,6 @@ export function SummaryTaskEditor({
     setFocusKey(key);
   }
 
-  /** Раскрытия независимы: идя по списку, предыдущие не закрываются. */
-  function toggle(key: string): void {
-    const next = new Set(openKeys);
-
-    if (!next.delete(key)) {
-      next.add(key);
-    }
-
-    setOpenKeys(next);
-  }
-
   return (
     <div className="space-y-3">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 bg-background py-2">
@@ -186,18 +174,6 @@ export function SummaryTaskEditor({
             className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
           >
             {isSaving ? 'Сохранение…' : EDITOR_TEXTS.save}
-          </button>
-        )}
-
-        {draft.length > 0 && (
-          <button
-            type="button"
-            onClick={() =>
-              setOpenKeys(areAllOpen ? new Set() : new Set(draft.map((task) => task.key)))
-            }
-            className="rounded-md border border-border px-3 py-2 text-sm"
-          >
-            {areAllOpen ? EDITOR_TEXTS.collapseAll : EDITOR_TEXTS.expandAll}
           </button>
         )}
 
@@ -227,8 +203,6 @@ export function SummaryTaskEditor({
               isReadOnly={isReleased}
               shouldFocus={task.key === focusKey}
               platforms={platforms}
-              isOpen={openKeys.has(task.key)}
-              onToggle={() => toggle(task.key)}
               onChange={(title) =>
                 update(draft.map((item) => (item.key === task.key ? { ...item, title } : item)))
               }

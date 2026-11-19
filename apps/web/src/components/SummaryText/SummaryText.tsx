@@ -49,7 +49,13 @@ export function SummaryText({ text, chronicleHref, actions }: IProps) {
         )}
       </div>
 
-      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface p-3 text-sm">
+      {/* Своя полоса прокрутки, и на широком экране предел считается от
+          окна: текст живёт в колонке рабочего экрана и обязан занять её
+          высоту целиком, а не растянуть страницу — иначе соседняя колонка
+          с задачами уезжает за край у часового созвона (дизайн, 4.2).
+          `16rem` — то, что над текстом: полоса навигации, шапка страницы
+          и собственная кнопочная строка. */}
+      <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface p-3 text-sm lg:max-h-[calc(100vh-16rem)]">
         {text}
       </pre>
 
