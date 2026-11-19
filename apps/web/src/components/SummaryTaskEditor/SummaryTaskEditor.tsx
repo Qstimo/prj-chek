@@ -9,9 +9,10 @@ import {
 } from '@cairn/shared';
 import { useEffect, useRef, useState } from 'react';
 
+import { ConfirmDialog } from '../ConfirmDialog';
 import { FormError } from '../FormError';
 import { TaskRow } from './TaskRow';
-import { EDITOR_TEXTS } from './constants';
+import { EDITOR_TEXTS, deleteQuestionOf, selectedNoteOf } from './constants';
 import type { IDraftTask, IProps } from './types';
 
 /**
@@ -96,19 +97,23 @@ function payloadOf(
  *
  * Карточки, а не строки с раскрывателем: все поля задачи видны сразу, и
  * состояния «что раскрыто» у редактора больше нет вовсе (дизайн, 4.3).
+ * Признака «релиз сформирован» у редактора нет: замораживаются уехавшие
+ * задачи своим состоянием, а сюда они не попадают — у них свой список
+ * только для чтения (дизайн, 2.5).
  *
  * Правки накапливаются в памяти и уходят одной кнопкой «Сохранить» в
  * прилипшей шапке, как у панели версии: `isDirty` считается сравнением с
- * загруженным набором. Компонент чистый — запросы, подтверждения и
- * перехват уходa со страницы живут на экране-контейнере, которому
- * несохранённое сообщается `onDirtyChange`.
+ * загруженным набором. Запросы и перехват ухода со страницы живут на
+ * экране-контейнере, которому несохранённое сообщается `onDirtyChange`;
+ * подтверждение удаления остаётся здесь — число отмеченных знает только
+ * редактор, и дорогу к прилипшей полосе диалог обязан держать короткой.
  */
 export function SummaryTaskEditor({
   tasks,
   platforms,
   onSave,
+  actions,
   onDirtyChange,
-  isReleased = false,
   isSaving = false,
   error,
 }: IProps) {
@@ -116,14 +121,20 @@ export function SummaryTaskEditor({
   const signature = signatureOf(loaded);
   const [state, setState] = useState(() => ({ signature, draft: loaded }));
   const [focusKey, setFocusKey] = useState<string>();
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const nextKey = useRef(0);
 
-  // Пришёл другой набор (сохранение, новая разбивка) — черновик берётся
-  // от него: держать поверх свежего ответа своё прежнее значило бы
-  // показывать то, чего на сервере нет.
+  // Пришёл другой набор (сохранение, новая разбивка, действие над
+  // выбором) — черновик берётся от него: держать поверх свежего ответа
+  // своё прежнее значило бы показывать то, чего на сервере нет. Отметки
+  // уходят вместе с ним: отметка поверх свежего ответа предлагала бы
+  // действие над строкой, которой уже нет (дизайн, 4.3).
   if (state.signature !== signature) {
     setState({ signature, draft: loaded });
     setFocusKey(undefined);
+    setSelectedIds([]);
+    setIsConfirmingDelete(false);
   }
 
   const { draft } = state;
@@ -131,6 +142,15 @@ export function SummaryTaskEditor({
   const isComplete = draft.every((task) => task.title.trim().length > 0);
   const hasBadUrl = draft.some((task) => urlErrorOf(task.url) !== undefined);
   const isFull = draft.length >= MAX_SUMMARY_TASKS;
+
+  // Отметки сверяются с черновиком, а не берутся как есть: строка,
+  // пропавшая из набора, не должна уехать в ручку действия.
+  const selectable = draft.flatMap((task) => (task.id === undefined ? [] : [task.id]));
+  const selected = selectable.filter((id) => selectedIds.includes(id));
+  const isAllSelected = selectable.length > 0 && selected.length === selectable.length;
+  // Несохранённые правки выключают все три: ручки работают с тем, что в
+  // базе (дизайн, 4.3). Право на роадмап — только у релиза.
+  const canAct = selected.length > 0 && !isDirty && actions?.isBusy !== true;
 
   // Эффектом, а не из обработчика: сброс черновика свежим ответом идёт
   // при отрисовке, и о нём контейнер обязан узнать так же, как о правке.
@@ -140,6 +160,12 @@ export function SummaryTaskEditor({
 
   function update(next: IDraftTask[]): void {
     setState({ signature, draft: next });
+  }
+
+  function toggle(id: string, isSelected: boolean): void {
+    setSelectedIds((current) =>
+      isSelected ? [...current, id] : current.filter((chosen) => chosen !== id),
+    );
   }
 
   function move(index: number, step: number): void {
@@ -163,8 +189,26 @@ export function SummaryTaskEditor({
 
   return (
     <div className="space-y-3">
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 bg-background py-2">
-        {!isReleased && (
+      {/* Полоса прилипает к верху колонки: список задач длиннее экрана, а
+          действие над выбором нажимают, стоя у той строки, которую
+          отметили последней. */}
+      <div className="sticky top-0 z-10 space-y-2 bg-background py-2">
+        <div className="flex flex-wrap items-center gap-3">
+          {actions !== undefined && (
+            <>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(isAllSelected ? [] : selectable)}
+                disabled={selectable.length === 0}
+                className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+              >
+                {isAllSelected ? EDITOR_TEXTS.selectNone : EDITOR_TEXTS.selectAll}
+              </button>
+
+              <p className="text-sm text-muted-foreground">{selectedNoteOf(selected.length)}</p>
+            </>
+          )}
+
           <button
             type="button"
             onClick={() =>
@@ -175,18 +219,73 @@ export function SummaryTaskEditor({
           >
             {isSaving ? 'Сохранение…' : EDITOR_TEXTS.save}
           </button>
+
+          {actions !== undefined && (
+            <>
+              <button
+                type="button"
+                onClick={() => actions.onRelease(selected)}
+                disabled={!canAct || actions.releaseBlockedNote !== undefined}
+                className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+              >
+                {`${EDITOR_TEXTS.releaseSelected} (${selected.length})`}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => actions.onArchive(selected)}
+                disabled={!canAct}
+                className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+              >
+                {`${EDITOR_TEXTS.archiveSelected} (${selected.length})`}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsConfirmingDelete(true)}
+                disabled={!canAct}
+                className="rounded-md border border-destructive px-3 py-2 text-sm text-destructive disabled:opacity-50"
+              >
+                {`${EDITOR_TEXTS.deleteSelected} (${selected.length})`}
+              </button>
+            </>
+          )}
+
+          {isDirty && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {EDITOR_TEXTS.dirty}
+            </p>
+          )}
+        </div>
+
+        {/* Две причины называются по-разному и обе здесь: несохранённое
+            касается всех трёх действий, право на роадмап — одного. */}
+        {isDirty && actions !== undefined && (
+          <p className="text-sm text-muted-foreground">{EDITOR_TEXTS.unsavedActions}</p>
         )}
 
-        {isDirty && (
-          <p role="status" className="text-sm text-muted-foreground">
-            {EDITOR_TEXTS.dirty}
-          </p>
+        {actions?.releaseBlockedNote !== undefined && (
+          <p className="text-sm text-muted-foreground">{actions.releaseBlockedNote}</p>
+        )}
+
+        {isConfirmingDelete && (
+          <ConfirmDialog
+            label={EDITOR_TEXTS.deleteLabel}
+            confirmLabel={EDITOR_TEXTS.deleteConfirm}
+            onConfirm={() => {
+              setIsConfirmingDelete(false);
+              actions?.onDelete(selected);
+            }}
+            onCancel={() => setIsConfirmingDelete(false)}
+          >
+            {deleteQuestionOf(selected.length)}
+          </ConfirmDialog>
         )}
       </div>
 
       {/* Постоянная подпись, а не всплывающая: человек обязан видеть, что
           список предложен машиной, до того как нажмёт релиз (ТЗ 5.3). */}
-      {!isReleased && <p className="text-sm text-muted-foreground">{EDITOR_TEXTS.modelNotice}</p>}
+      <p className="text-sm text-muted-foreground">{EDITOR_TEXTS.modelNotice}</p>
 
       <FormError message={error} />
 
@@ -200,7 +299,12 @@ export function SummaryTaskEditor({
               task={task}
               isFirst={index === 0}
               isLast={index === draft.length - 1}
-              isReadOnly={isReleased}
+              isSelected={task.id !== undefined && selected.includes(task.id)}
+              onSelect={
+                actions === undefined
+                  ? undefined
+                  : (isSelected) => toggle(task.id ?? '', isSelected)
+              }
               shouldFocus={task.key === focusKey}
               platforms={platforms}
               onChange={(title) =>
@@ -222,20 +326,18 @@ export function SummaryTaskEditor({
         </ul>
       )}
 
-      {!isReleased && (
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={add}
-            disabled={isFull}
-            className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
-          >
-            {EDITOR_TEXTS.add}
-          </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={add}
+          disabled={isFull}
+          className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+        >
+          {EDITOR_TEXTS.add}
+        </button>
 
-          {isFull && <p className="text-sm text-muted-foreground">{EDITOR_TEXTS.limit}</p>}
-        </div>
-      )}
+        {isFull && <p className="text-sm text-muted-foreground">{EDITOR_TEXTS.limit}</p>}
+      </div>
     </div>
   );
 }

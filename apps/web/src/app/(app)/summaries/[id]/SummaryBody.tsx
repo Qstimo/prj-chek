@@ -1,6 +1,6 @@
 'use client';
 
-import { Section, SummaryTaskState } from '@cairn/shared';
+import { Section } from '@cairn/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -8,7 +8,10 @@ import { useState } from 'react';
 import { BROWSER_API_URL, describeApiError, summaryFailureOf } from '@/api';
 import {
   SUMMARY_KEYS,
+  useMutationArchiveSummaryTasks,
   useMutationReleaseSummary,
+  useMutationRemoveSummaryTasks,
+  useMutationRestoreSummaryTasks,
   useMutationRetryTranscription,
   useMutationSaveSummaryTasks,
   useMutationSuggestSummaryTasks,
@@ -31,7 +34,7 @@ import {
   releaseBlockedNoteOf,
   stateBadgesOf,
 } from '../constants';
-import { ReleaseBlock } from './ReleaseBlock';
+import { ReleaseDrawer } from './ReleaseDrawer';
 import { SummaryHeader } from './SummaryHeader';
 import { TasksBlock } from './TasksBlock';
 import type { IBodyProps } from './types';
@@ -62,11 +65,18 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   const publicLink = useQueryPublicLink(projectId);
   const suggest = useMutationSuggestSummaryTasks(projectId, summaryId);
   const save = useMutationSaveSummaryTasks(projectId, summaryId);
+  const archive = useMutationArchiveSummaryTasks(projectId, summaryId);
+  const restore = useMutationRestoreSummaryTasks(projectId, summaryId);
+  const remove = useMutationRemoveSummaryTasks(projectId, summaryId);
   const release = useMutationReleaseSummary(projectId, summaryId);
   const updateEntry = useMutationUpdateChronicleEntry(projectId);
   const retryTranscription = useMutationRetryTranscription();
   const [isEditing, setIsEditing] = useState(false);
   const [hasUnsavedTasks, setHasUnsavedTasks] = useState(false);
+  // Отмеченные задачи, ждущие панели релиза. Список, а не признак
+  // «панель открыта»: в ручку уедет ровно то, что было отмечено в момент
+  // нажатия, а не то, что окажется отмеченным к отправке формы.
+  const [releasing, setReleasing] = useState<string[]>();
 
   useUnsavedWarning(hasUnsavedTasks);
 
@@ -84,6 +94,10 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
 
   const summary = detail.data;
   const failure = summaryFailureOf(suggest.error);
+  const isActing = archive.isPending || restore.isPending || remove.isPending;
+  // Отказ любого из трёх действий называется одной строкой: они стоят в
+  // одной полосе, и три места для одного отказа заняли бы её целиком.
+  const actionError = describeApiError(archive.error ?? restore.error ?? remove.error);
 
   return (
     <div className="space-y-6">
@@ -145,38 +159,41 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
             onDirtyChange={setHasUnsavedTasks}
             isSaving={save.isPending}
             saveError={describeApiError(save.error)}
-          />
-
-          <ReleaseBlock
-            summary={summary}
-            blockedNote={releaseBlockedNoteOf(sections.data[Section.Roadmap], hasUnsavedTasks)}
-            isRoadmapPublic={publicLink.data !== null && publicLink.data !== undefined}
-            isReleasing={release.isPending}
-            releaseError={failureMessageOf(
-              summaryFailureOf(release.error).code,
-              undefined,
-              describeApiError(release.error),
-            )}
-            onRelease={(input) =>
-              release.mutate(
-                {
-                  // Пока отметок нет, уезжают все активные задачи — ровно
-                  // то, что делал релиз до появления состояний. Выбор
-                  // появится вместе с полосой действий (дизайн, 4.3).
-                  taskIds: summary.tasks
-                    .filter((task) => task.state === SummaryTaskState.Active)
-                    .map((task) => task.id),
-                  target: { kind: 'new', version: input },
-                },
-                {
-                  onSuccess: (result) =>
-                    router.push(`/projects/${projectId}/roadmap?version=${result.versionId}`),
-                },
-              )
-            }
+            onRelease={setReleasing}
+            onArchive={(taskIds) => archive.mutate({ taskIds })}
+            onRestore={(taskIds) => restore.mutate({ taskIds })}
+            onDelete={(taskIds) => remove.mutate({ taskIds })}
+            releaseBlockedNote={releaseBlockedNoteOf(sections.data[Section.Roadmap])}
+            isActing={isActing}
+            actionError={actionError}
           />
         </div>
       </div>
+
+      <ReleaseDrawer
+        isOpen={releasing !== undefined}
+        onClose={() => setReleasing(undefined)}
+        suggestedLabel={summary.suggestedVersionLabel}
+        taskCount={releasing?.length ?? 0}
+        isRoadmapPublic={publicLink.data !== null && publicLink.data !== undefined}
+        isReleasing={release.isPending}
+        releaseError={failureMessageOf(
+          summaryFailureOf(release.error).code,
+          undefined,
+          describeApiError(release.error),
+        )}
+        onRelease={(input) =>
+          release.mutate(
+            { taskIds: releasing ?? [], target: { kind: 'new', version: input } },
+            {
+              onSuccess: (result) => {
+                setReleasing(undefined);
+                router.push(`/projects/${projectId}/roadmap?version=${result.versionId}`);
+              },
+            },
+          )
+        }
+      />
 
       <Drawer
         isOpen={isEditing}

@@ -1,3 +1,3 @@
 export { SummaryTaskEditor } from './SummaryTaskEditor';
-export { EDITOR_TEXTS } from './constants';
-export type { IDraftTask, IProps } from './types';
+export { EDITOR_TEXTS, deleteQuestionOf } from './constants';
+export type { IDraftTask, IProps, ISelectionActions } from './types';
