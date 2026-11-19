@@ -253,8 +253,14 @@ describe('репозиторий инцидентов', () => {
   });
 
   it('выдача по проекту делит открытый и закрытые', async () => {
+    // Закрытие — «сейчас», а не жёсткой датой: `open` ставит начало
+    // моментом вставки (третий аргумент задаёт последнюю проверку, а не
+    // начало), поэтому окно здесь считается от настоящего «сейчас». С
+    // датой закрытия в октябре тест жил ровно до того дня, когда она
+    // вышла из тридцатидневного окна, и с 19 ноября падал на пустом
+    // `past`, ничего не сообщая о самом разделении.
     await repository.open(domainId, 'раз');
-    await repository.resolve(domainId, new Date('2026-10-20T11:00:00Z'));
+    await repository.resolve(domainId, new Date());
     await repository.open(domainId, 'два');
 
     const [address] = await repository.forProject(superadmin(), projectId);
