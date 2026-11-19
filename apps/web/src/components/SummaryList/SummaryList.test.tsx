@@ -129,6 +129,25 @@ describe('история саммари', () => {
     );
   });
 
+  it('нажимается вся строка, а не одни буквы заголовка', () => {
+    // Ссылкой была только клетка заголовка: человек жал по дате, по
+    // проекту, по числам — и строка не открывалась.
+    render(<SummaryList items={[TEXT_ONLY]} />);
+
+    const link = screen.getByRole('link', { name: 'Созвон по релизу' });
+
+    expect(link.className).toMatch(/after:inset-0/);
+    expect(link.closest('tr')?.className).toMatch(/relative/);
+  });
+
+  it('ссылка на версию не тонет под растянутой ссылкой строки', () => {
+    // Растянутая ссылка накрывает всю строку: без своего слоя вторая
+    // ссылка перестала бы нажиматься вовсе.
+    render(<SummaryList items={[RELEASED]} />);
+
+    expect(screen.getByRole('link', { name: 'Ушло в v1.4' }).className).toMatch(/relative/);
+  });
+
   it('пустая история говорит об этом', () => {
     render(<SummaryList items={[]} />);
 

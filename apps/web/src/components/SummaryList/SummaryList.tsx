@@ -33,12 +33,22 @@ export function SummaryList({ items }: IProps) {
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr key={item.id} className="border-b border-border/50">
+            <tr
+              key={item.id}
+              className="relative border-b border-border/50 hover:bg-surface-strong/60"
+            >
               <td className="whitespace-nowrap px-3 py-2 tabular-nums">
                 {formatDate(item.occurredOn)}
               </td>
               <td className="px-3 py-2">
-                <Link href={`/summaries/${item.id}`} className="hover:underline">
+                {/* Ссылка растянута на всю строку: нажималась одна клетка
+                    заголовка, а человек целит в строку — в дату, в проект,
+                    в числа. Ссылка остаётся одна и настоящая, поэтому
+                    работают и клавиатура, и «открыть в новой вкладке». */}
+                <Link
+                  href={`/summaries/${item.id}`}
+                  className="hover:underline after:absolute after:inset-0"
+                >
                   {item.title}
                 </Link>
               </td>
@@ -59,7 +69,7 @@ export function SummaryList({ items }: IProps) {
                 ) : (
                   <Link
                     href={`/projects/${item.projectId}/roadmap?version=${item.releasedVersionId}`}
-                    className="hover:underline"
+                    className="relative hover:underline"
                   >
                     {`Ушло в ${item.releasedVersionLabel}`}
                   </Link>

@@ -6,7 +6,6 @@ import {
   SUMMARY_TASKS_EMPTY,
   SUMMARY_TEXT_NOT_PLAIN,
   SUMMARY_TEXT_TOO_LONG,
-  ModelServicePlacement,
   type SummaryDetail,
   type TaskSuggesterInfo,
 } from '@cairn/shared';
@@ -181,26 +180,19 @@ export function failureMessageOf(
 }
 
 /**
- * Постоянная подпись о передаче текста наружу (дизайн, раздел 5.7).
+ * Подпись над кнопкой разбивки — только о неработающей разбивке.
  *
- * Не всплывающая и не скрываемая: она говорит правду до нажатия и
- * заменяет диалог подтверждения на каждый вызов — диалог, который человек
- * видит двадцатый раз за день, перестаёт читаться. Ключа API здесь нет и
- * быть не может: ручка настроек его не отдаёт.
+ * Прежде подпись стояла всегда и называла узел, модель и то, что текст
+ * уходит на этот адрес (дизайн, раздел 5.7). **Отменено**: узел и модель
+ * задаёт тот же человек на `/settings`, и рассказывать ему о его же
+ * настройке на каждом саммари — шум, за которым перестаёт читаться
+ * единственное, что здесь неочевидно: почему кнопка не нажимается.
+ *
+ * Остался этот случай. Пустая строка означает «подписи нет»: у
+ * работающей разбивки сказать над кнопкой нечего.
  */
 export function suggesterNoticeOf(suggester: TaskSuggesterInfo): string {
-  if (!suggester.isEnabled) {
-    return FAILURE_MESSAGES[SUGGESTER_DISABLED] ?? '';
-  }
-
-  const host = suggester.host ?? 'настроенный узел';
-  const model = suggester.model === null ? '' : `, модель ${suggester.model}`;
-
-  if (suggester.placement === ModelServicePlacement.Local) {
-    return `Разбивку делает ${host} в вашем контуре${model}. Текст саммари уходит на этот адрес; за пределы контура он не передаётся.`;
-  }
-
-  return `Разбивку делает ${host}${model}. Текст саммари уходит на этот адрес.`;
+  return suggester.isEnabled ? '' : (FAILURE_MESSAGES[SUGGESTER_DISABLED] ?? '');
 }
 
 /** Отметка о текущей разбивке: чем и когда она построена. */

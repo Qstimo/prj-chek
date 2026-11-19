@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FormError } from '@/components/FormError';
+import { Loader } from '@/components/Loader';
 import { EDITOR_TEXTS, SummaryTaskEditor, deleteQuestionOf } from '@/components/SummaryTaskEditor';
 
 import { SUMMARY_TEXTS, droppedNoteOf, stampNoteOf, suggesterNoticeOf } from '../constants';
@@ -45,6 +46,7 @@ export function TasksBlock({
 }: ITasksProps) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string[]>();
+  const notice = suggesterNoticeOf(suggester);
 
   const active = summary.tasks.filter((task) => task.state === SummaryTaskState.Active);
   const archived = summary.tasks.filter((task) => task.state === SummaryTaskState.Archived);
@@ -64,11 +66,11 @@ export function TasksBlock({
     <section className="space-y-3">
       <h2 className="text-lg font-medium">{SUMMARY_TEXTS.tasksHeading}</h2>
 
-      {/* Постоянная подпись: говорит правду до нажатия и заменяет
-          диалог подтверждения на каждый вызов. */}
-      <p className="rounded-md border border-border bg-surface p-3 text-sm">
-        {suggesterNoticeOf(suggester)}
-      </p>
+      {/* Подпись осталась одна — о неработающей разбивке: иначе кнопка
+          не нажимается без объяснения. У работающей сказать нечего. */}
+      {notice !== '' && (
+        <p className="rounded-md border border-border bg-surface p-3 text-sm">{notice}</p>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -80,10 +82,14 @@ export function TasksBlock({
           {active.length > 0 ? SUMMARY_TEXTS.suggestAgain : SUMMARY_TEXTS.suggest}
         </button>
 
+        {/* Енот, а не одна строка текста: разбивка идёт до минуты, и
+            неподвижная надпись на таком сроке читается как «зависло».
+            Подпись рядом с ним, потому что своя у него — для чтеца. */}
         {isSuggesting && (
-          <p role="status" className="text-sm text-muted-foreground">
+          <span className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader label={SUMMARY_TEXTS.suggesting} />
             {SUMMARY_TEXTS.suggesting}
-          </p>
+          </span>
         )}
       </div>
 

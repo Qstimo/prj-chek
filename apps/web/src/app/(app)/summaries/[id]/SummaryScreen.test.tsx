@@ -238,20 +238,31 @@ beforeEach(() => {
 });
 
 describe('экран саммари', () => {
-  it('подпись о передаче видна до нажатия кнопки', () => {
-    // Постоянная, не всплывающая: она говорит правду до нажатия и
-    // заменяет диалог подтверждения на каждый вызов.
+  it('работающая разбивка над кнопкой ничего не рассказывает', () => {
+    // Узел и модель задаёт тот же человек на `/settings`, и пересказ его
+    // же настройки на каждом саммари — шум, за которым перестаёт
+    // читаться единственное здесь неочевидное: почему кнопка мертва.
     renderScreen(TEXT_ONLY, EXTERNAL_SUGGESTER);
 
-    expect(screen.getByText(/api\.openai\.com/)).toBeInTheDocument();
-    expect(screen.getByText(/gpt-4o-mini/)).toBeInTheDocument();
-    expect(screen.getByText(/уходит на этот адрес/)).toBeInTheDocument();
+    expect(screen.queryByText(/api\.openai\.com/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/уходит на этот адрес/)).not.toBeInTheDocument();
   });
 
-  it('локальный предложитель говорит про контур', () => {
+  it('и локальная разбивка тоже молчит', () => {
     renderScreen(TEXT_ONLY, LOCAL_SUGGESTER);
 
-    expect(screen.getByText(/в вашем контуре/)).toBeInTheDocument();
+    expect(screen.queryByText(/в вашем контуре/)).not.toBeInTheDocument();
+  });
+
+  it('идущая разбивка показывает лоадер, а не одну надпись', () => {
+    // Разбивка идёт до минуты: неподвижная строка на таком сроке
+    // читается как «зависло», и человек жмёт кнопку второй раз.
+    vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(pending());
+
+    renderScreen(TEXT_ONLY, EXTERNAL_SUGGESTER);
+
+    expect(screen.getByRole('status')).toHaveTextContent(/Разбиваем текст/);
+    expect(screen.getByRole('button', { name: /Создать задачи/ })).toBeDisabled();
   });
 
   it('выключенный предложитель объясняет, а не предлагает повтор', () => {
