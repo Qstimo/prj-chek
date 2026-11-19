@@ -1,7 +1,8 @@
 'use client';
 
 import type {
-  RoadmapVersionCreate,
+  SummaryRelease,
+  SummaryTaskIds,
   SummaryCreate,
   SummaryDetail,
   SummaryReleaseResult,
@@ -86,20 +87,43 @@ export function useMutationSaveSummaryTasks(projectId: string, summaryId: string
   });
 }
 
-/**
- * Формирование релиза: версия с чекпоинтами одной транзакцией.
- *
- * Тело — общая `RoadmapVersionCreate`, и форма наполняет в нём ровно три
- * поля: обозначение, состояние и плановую дату. `releasedDate` не уходит
- * никогда, даже как `null` (дизайн, раздел 7.5).
- */
+function useMutationChangeSummaryTasks(
+  projectId: string,
+  summaryId: string,
+  action: 'archive' | 'restore' | 'remove',
+) {
+  const invalidate = useSummaryInvalidation(projectId, summaryId);
+
+  return useMutation({
+    mutationFn: (input: SummaryTaskIds) =>
+      apiClient<SummaryDetail>(`/projects/${projectId}/summaries/${summaryId}/tasks/${action}`, {
+        method: 'POST',
+        body: input,
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useMutationArchiveSummaryTasks(projectId: string, summaryId: string) {
+  return useMutationChangeSummaryTasks(projectId, summaryId, 'archive');
+}
+
+export function useMutationRestoreSummaryTasks(projectId: string, summaryId: string) {
+  return useMutationChangeSummaryTasks(projectId, summaryId, 'restore');
+}
+
+export function useMutationRemoveSummaryTasks(projectId: string, summaryId: string) {
+  return useMutationChangeSummaryTasks(projectId, summaryId, 'remove');
+}
+
+/** Отмеченные задачи переезжают в роадмап одной транзакцией. */
 export function useMutationReleaseSummary(projectId: string, summaryId: string) {
   const client = useQueryClient();
   const invalidate = useSummaryInvalidation(projectId, summaryId);
 
   return useMutation({
-    mutationFn: (input: RoadmapVersionCreate) =>
-      apiClient<SummaryReleaseResult>(`/projects/${projectId}/summaries/${summaryId}/release`, {
+    mutationFn: (input: SummaryRelease) =>
+      apiClient<SummaryReleaseResult>(`/projects/${projectId}/summaries/${summaryId}/tasks/release`, {
         method: 'POST',
         body: input,
       }),

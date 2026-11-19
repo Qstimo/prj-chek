@@ -2,10 +2,13 @@ import { RoadmapVersionState, SUMMARY_TEXT_TOO_LONG } from '@cairn/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { summaryFailureOf } from '../summary-failure';
 import {
+  useMutationArchiveSummaryTasks,
+  useMutationRestoreSummaryTasks,
+  useMutationRemoveSummaryTasks,
   useMutationCreateSummary,
   useMutationReleaseSummary,
   useMutationSaveSummaryTasks,
@@ -15,18 +18,21 @@ const PROJECT_ID = '11111111-1111-1111-1111-111111111111';
 const SUMMARY_ID = '22222222-2222-2222-2222-222222222222';
 const TASK_ID = '33333333-3333-3333-3333-333333333333';
 
-/** Тело формирования релиза: три поля формы и ничего больше. */
 const RELEASE_BODY = {
-  label: 'v1.3',
-  state: RoadmapVersionState.Planned,
-  plannedDate: '2026-12-01',
+  taskIds: [TASK_ID],
+  target: {
+    kind: 'new' as const,
+    version: {
+      label: 'v1.3',
+      state: RoadmapVersionState.Planned,
+      plannedDate: '2026-12-01',
+    },
+  },
 };
 
 let client: QueryClient;
 
 function wrapper({ children }: { children: ReactNode }) {
-  client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
@@ -41,6 +47,10 @@ function bodyOf(fetchMock: ReturnType<typeof okFetch>): unknown {
 }
 
 describe('мутации саммари', () => {
+  beforeEach(() => {
+    client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -86,6 +96,29 @@ describe('мутации саммари', () => {
     });
   });
 
+  it.each([
+    ['archive', useMutationArchiveSummaryTasks],
+    ['restore', useMutationRestoreSummaryTasks],
+    ['remove', useMutationRemoveSummaryTasks],
+  ] as const)('%s отправляет выбранные задачи и сбрасывает деталь и историю', async (action, useChange) => {
+    const fetchMock = okFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useChange(PROJECT_ID, SUMMARY_ID), { wrapper });
+
+    const selection = { taskIds: ['task-id'] };
+    result.current.mutate(selection);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/projects/${PROJECT_ID}/summaries/${SUMMARY_ID}/tasks/${action}`,
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(bodyOf(fetchMock)).toEqual(selection);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['summaries'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['summaries', PROJECT_ID, SUMMARY_ID] });
+  });
+
   it('формирование релиза уходит по адресу саммари и телом формы', async () => {
     // Что `releasedDate` в теле не бывает, проверяется там, где тело
     // собирается, — в форме (`SummaryReleaseForm.test.tsx`) и на экране
@@ -104,7 +137,7 @@ describe('мутации саммари', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      `/api/projects/${PROJECT_ID}/summaries/${SUMMARY_ID}/release`,
+      `/api/projects/${PROJECT_ID}/summaries/${SUMMARY_ID}/tasks/release`,
     );
     expect(bodyOf(fetchMock)).toEqual(RELEASE_BODY);
   });
