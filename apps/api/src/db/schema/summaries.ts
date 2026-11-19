@@ -1,4 +1,4 @@
-import { SummaryTaskOrigin } from '@cairn/shared';
+import { SummaryTaskOrigin, SummaryTaskState } from '@cairn/shared';
 import { sql } from 'drizzle-orm';
 import {
   check,
@@ -22,6 +22,12 @@ import { subjects } from './subjects';
 export const summaryTaskOriginEnum = pgEnum('summary_task_origin', [
   SummaryTaskOrigin.Model,
   SummaryTaskOrigin.Human,
+]);
+
+export const summaryTaskStateEnum = pgEnum('summary_task_state', [
+  SummaryTaskState.Active,
+  SummaryTaskState.Archived,
+  SummaryTaskState.Released,
 ]);
 
 /**
@@ -115,9 +121,13 @@ export const summaryTaskDrafts = pgTable(
     position: integer('position').notNull(),
     /** Признак «предложено моделью» для интерфейса и журнала релиза. */
     origin: summaryTaskOriginEnum('origin').notNull(),
+    state: summaryTaskStateEnum('state').notNull().default(SummaryTaskState.Active),
+    releasedVersionId: uuid('released_version_id').references(() => roadmapVersions.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('summary_task_drafts_summary_idx').on(table.summaryId, table.position)],
+  (table) => [index('summary_task_drafts_summary_state_idx').on(table.summaryId, table.state, table.position)],
 );
 
 /**

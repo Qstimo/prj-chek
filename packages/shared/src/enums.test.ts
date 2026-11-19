@@ -1,3 +1,4 @@
+import { SummaryTaskState } from './enums';
 import { describe, expect, it } from 'vitest';
 
 import * as enums from './enums';
@@ -152,4 +153,8 @@ describe('перечни служб модели', () => {
     // Два перечня с одинаковыми значениями разошлись бы на втором порте.
     expect('TaskSuggesterKind' in enums).toBe(false);
   });
+});
+
+it('состояния задачи саммари совпадают с контрактом базы', () => {
+  expect(Object.values(SummaryTaskState)).toEqual(['active', 'archived', 'released']);
 });

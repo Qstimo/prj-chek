@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { PlatformKind, SummaryTaskOrigin, TranscriberKind, TranscriptionState } from '../enums';
+import { PlatformKind, SummaryTaskOrigin, SummaryTaskState, TranscriberKind, TranscriptionState } from '../enums';
 import {
   MAX_SUMMARY_TASKS,
   normalizeSummaryText,
   summaryCreateSchema,
   summaryDetailSchema,
+  summaryReleaseSchema,
+  summaryTaskIdsSchema,
   summaryListItemSchema,
   summaryTasksReplaceSchema,
   summarySuggesterStampSchema,
@@ -22,6 +24,8 @@ const LIST_ITEM = {
   occurredOn: '2026-11-16',
   title: 'Созвон по релизу',
   taskCount: 0,
+  archivedCount: 0,
+  releasedCount: 0,
   isReleased: false,
   releasedVersionId: null,
   releasedVersionLabel: null,
@@ -183,7 +187,7 @@ describe('деталь саммари', () => {
           id: ID,
           title: 'Сделать',
           position: 1,
-          origin: SummaryTaskOrigin.Model,
+          origin: SummaryTaskOrigin.Model, state: SummaryTaskState.Active, releasedVersionId: null, releasedVersionLabel: null,
           url: null,
           platformIds: [],
         },
@@ -205,7 +209,7 @@ describe('поля чекпоинта в черновике', () => {
           id: ID,
           title: 'Сделать',
           position: 1,
-          origin: SummaryTaskOrigin.Human,
+          origin: SummaryTaskOrigin.Human, state: SummaryTaskState.Active, releasedVersionId: null, releasedVersionLabel: null,
           url: 'https://tracker.example/CAIRN-1',
           platformIds: [PLATFORM_ID],
         },
@@ -222,7 +226,7 @@ describe('поля чекпоинта в черновике', () => {
     expect(() =>
       summaryDetailSchema.parse({
         ...DETAIL,
-        tasks: [{ id: ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model }],
+        tasks: [{ id: ID, title: 'Сделать', position: 1, origin: SummaryTaskOrigin.Model, state: SummaryTaskState.Active, releasedVersionId: null, releasedVersionLabel: null }],
       }),
     ).toThrow();
   });
@@ -399,5 +403,26 @@ describe('число отброшенных в отметке разбивки',
 
   it.each([-1, 1.5, '7', undefined])('отвергает негодное или отсутствующее число %s', (dropped) => {
     expect(() => summarySuggesterStampSchema.parse({ ...stamp, dropped })).toThrow();
+  });
+});
+describe('выбор задач для релиза', () => {
+  const taskIds = ['fcae61e8-aa95-4d83-844c-252b046d94ac'];
+
+  it('требует хотя бы одну задачу', () => {
+    expect(summaryTaskIdsSchema.safeParse({ taskIds: [] }).success).toBe(false);
+    expect(summaryTaskIdsSchema.safeParse({ taskIds }).success).toBe(true);
+  });
+
+  it('проверяет оба вида цели и отвергает лишние поля', () => {
+    for (const target of [
+      { kind: 'existing' },
+      { kind: 'existing', versionId: taskIds[0], extra: true },
+      { kind: 'new', version: { label: '' } },
+      { kind: 'new', version: { label: 'v1' }, extra: true },
+    ]) {
+      expect(summaryReleaseSchema.safeParse({ taskIds, target }).success).toBe(false);
+    }
+    expect(summaryReleaseSchema.safeParse({ taskIds, target: { kind: 'new', version: { label: 'v1' } } }).success).toBe(true);
+    expect(summaryReleaseSchema.safeParse({ taskIds, target: { kind: 'existing', versionId: taskIds[0] } }).success).toBe(true);
   });
 });

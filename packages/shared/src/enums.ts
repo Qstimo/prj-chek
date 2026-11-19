@@ -77,6 +77,13 @@ export enum ChronicleSource {
   Summary = 'summary',
 }
 
+/** Состояние задачи черновика саммари. */
+export enum SummaryTaskState {
+  Active = 'active',
+  Archived = 'archived',
+  Released = 'released',
+}
+
 /**
  * Кем предложена задача черновика саммари.
  *
