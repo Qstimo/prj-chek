@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 
-import { HealthState, ProjectLifecycle } from '@cairn/shared';
+import {
+  HealthState,
+  ObservationGapReason,
+  ProjectLifecycle,
+  type IncidentProbe,
+} from '@cairn/shared';
 
 import type { Database } from '../db/db.types';
 import { IncidentsService } from '../incidents/incidents.service';
@@ -17,7 +22,11 @@ import { decideMachine } from '../servers/server-discovery';
 import { resolveAddress } from './checkers/address.checker';
 import { checkDomainExpiry, type DomainExpiryResult } from './checkers/domain.checker';
 import { checkHealth, type HealthResult } from './checkers/health.checker';
+import { probeAddress } from './checkers/incident-probe';
 import { checkTls } from './checkers/tls.checker';
+import { checkUplink } from './checkers/uplink.checker';
+import { downPollSecondsOf } from './down-poll';
+import { silenceGapOf } from './observation-gap';
 import { INCIDENT_NOTIFIER, type IncidentNotifier } from './notifier';
 import { recheckDelayMsOf } from './recheck-delay';
 import { StatusRepository, type AddressTarget } from './status.repository';
@@ -28,6 +37,10 @@ export interface Checkers {
   checkTls: typeof checkTls;
   checkDomainExpiry: typeof checkDomainExpiry;
   resolveAddress: typeof resolveAddress;
+  /** Есть ли сеть у нас самих; спрашивается только при падении. */
+  checkUplink: typeof checkUplink;
+  /** Слепок момента падения; снимается один раз за инцидент. */
+  probeAddress: typeof probeAddress;
 }
 
 /** Как запускать прогон. */
@@ -74,6 +87,8 @@ export const REAL_CHECKERS: Checkers = {
   checkTls,
   checkDomainExpiry,
   resolveAddress,
+  checkUplink,
+  probeAddress,
 };
 
 /**
@@ -99,6 +114,8 @@ export const REAL_CHECKERS: Checkers = {
 export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(StatusRunnerService.name);
   private timer: NodeJS.Timeout | null = null;
+  /** Таймер частого опроса лежащих адресов; живёт только вместе со сводным. */
+  private downTimer: NodeJS.Timeout | null = null;
   /**
    * Идущий прогон, если он есть.
    *
@@ -136,11 +153,27 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(start, minutes * 60 * 1000);
     // Процесс не должен жить ради таймера.
     this.timer.unref();
+
+    // Частый опрос лежащих — внутри выключателя сводного прогона: с
+    // выключенным циклом (тесты, локальная разработка) в сеть не ходит
+    // никто, и второй таймер этого правила нарушать не вправе.
+    const seconds = downPollSecondsOf(process.env.CAIRN_STATUS_DOWN_POLL_SECONDS);
+
+    if (seconds > 0) {
+      this.downTimer = setInterval(() => {
+        void this.pollDown().catch(() => undefined);
+      }, seconds * 1000);
+      this.downTimer.unref();
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
     if (this.timer) {
       clearInterval(this.timer);
+    }
+
+    if (this.downTimer) {
+      clearInterval(this.downTimer);
     }
 
     // Гасимся не посреди прогона: иначе замок снялся бы вместе с
@@ -160,7 +193,7 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return new Promise((resolve, reject) => {
-      void this.claim(options, resolve).catch((cause) => {
+      void this.claim(() => this.sweep(options), resolve).catch((cause) => {
         // До ответа о замке отклоняем запрос; после Accepted только
         // сообщаем об отказе фонового обхода, как и прежде.
         reject(cause);
@@ -180,7 +213,23 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
       return StatusRunOutcome.Busy;
     }
 
-    return this.claim(options);
+    return this.claim(() => this.sweep(options));
+  }
+
+  /**
+   * Переспрашивает адреса с открытым падением — и только их.
+   *
+   * Под тем же замком, что сводный прогон: оба читают открытые инциденты
+   * и пишут их, поэтому разойтись им нельзя — идущий прогон отвечает
+   * {@link StatusRunOutcome.Busy}, и этот шаг просто пропускается.
+   * Пропустить его не страшно: сводный прогон переспрашивает сам.
+   */
+  async pollDown(): Promise<StatusRunOutcome> {
+    if (this.current) {
+      return StatusRunOutcome.Busy;
+    }
+
+    return this.claim(() => this.sweepDown());
   }
 
   /** Ждёт конца идущего прогона; без прогона — возвращается сразу. */
@@ -195,10 +244,10 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    * `await`, два одновременных запроса обошли бы оба.
    */
   private claim(
-    options: RunOptions,
+    run: () => Promise<void>,
     onClaimed?: (outcome: StatusRunOutcome) => void,
   ): Promise<StatusRunOutcome> {
-    const running = this.locked(options, onClaimed).finally(() => {
+    const running = this.locked(run, onClaimed).finally(() => {
       this.current = null;
     });
 
@@ -208,7 +257,7 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Берёт замок прогона и под ним обходит адреса.
+   * Берёт замок прогона и под ним делает переданную работу.
    *
    * Транзакция здесь — держатель замка, а не единица записи: сеансовый
    * `pg_try_advisory_lock` принадлежит соединению, а соединение из пула
@@ -218,7 +267,7 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    * своими соединениями и этой транзакции не касаются.
    */
   private async locked(
-    options: RunOptions,
+    run: () => Promise<void>,
     onClaimed?: (outcome: StatusRunOutcome) => void,
   ): Promise<StatusRunOutcome> {
     return this.lockDb.transaction(async (tx) => {
@@ -234,7 +283,7 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
       }
 
       onClaimed?.(StatusRunOutcome.Accepted);
-      await this.sweep(options);
+      await run();
 
       return StatusRunOutcome.Done;
     });
@@ -256,6 +305,10 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
    * важнее скорости (ТЗ 9). Падение одного адреса не прерывает обход.
    */
   private async sweep(options: RunOptions): Promise<void> {
+    const startedAt = new Date();
+    // До первой записи: собственные записи этого прогона сдвинули бы
+    // отметку вперёд, и тишину перед ним стало бы нечем измерить.
+    const lastObservedAt = await this.repository.lastObservedAt();
     const targets = await this.repository.listTargets();
     const health = new Map<string, HealthResult>();
     const suspects: AddressTarget[] = [];
@@ -299,7 +352,235 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
 
     await this.recheck(suspects, health, options.isManual ?? false);
     await this.adoptMachines();
-    await this.settleIncidents(targets.addresses, health);
+
+    if (await this.blind(health)) {
+      // Пропуск открывается, а не записывается отрезком: слепота длится,
+      // и её конец известен только тому прогону, который прозрел.
+      await this.openGap(lastObservedAt ?? startedAt, ObservationGapReason.Blind);
+
+      return;
+    }
+
+    await this.closeGapOrNoteSilence(lastObservedAt, startedAt);
+    // Слепок снимается после ворот по своей сети и до сведения
+    // инцидентов: у слепого прогона он описывал бы нашу беду, а не
+    // чужую, а после сведения — уже другой момент.
+    await this.settleIncidents(
+      targets.addresses,
+      health,
+      await this.probeFalling(targets.addresses, health),
+    );
+  }
+
+  /**
+   * Снимает слепок у адресов, которым инцидент вот-вот откроют.
+   *
+   * Только у них: у адреса с открытым инцидентом слепок уже есть и
+   * относится к моменту падения, а второй описывал бы не тот момент.
+   * Приостановленный проект инцидента не открывает — и слепка не стоит.
+   *
+   * Поэтому проба делается один раз за падение, а не каждый прогон: цена
+   * слепка — два соединения, и платить её каждые четверть часа за адрес,
+   * о котором всё известно, незачем.
+   */
+  private async probeFalling(
+    addresses: AddressTarget[],
+    health: Map<string, HealthResult>,
+  ): Promise<Map<string, IncidentProbe>> {
+    const falling = addresses.filter(
+      (address) =>
+        health.get(address.id)?.health === HealthState.Down &&
+        address.lifecycle !== ProjectLifecycle.Paused &&
+        address.lifecycle !== ProjectLifecycle.Archived,
+    );
+
+    if (falling.length === 0) {
+      return new Map();
+    }
+
+    const open = new Set(await this.incidents.openAddressIds());
+    const probes = new Map<string, IncidentProbe>();
+
+    for (const address of falling.filter((address) => !open.has(address.id))) {
+      try {
+        probes.set(address.id, await this.checkers.probeAddress(address.name, new Date()));
+      } catch (cause) {
+        // Слепок — подробность, а не вердикт: его отказ не должен стоить
+        // инцидента, из-за которого он и снимался.
+        this.logger.warn(`Слепок падения адреса ${address.name} не снят: ${cause}`);
+      }
+    }
+
+    return probes;
+  }
+
+  /**
+   * Открывает пропуск наблюдения, если открытого ещё нет.
+   *
+   * Отказ записи не валит прогон и не меняет его решений: пропуск — это
+   * отметка о незнании, и потерять её хуже, чем прогон, но не настолько,
+   * чтобы ронять обход.
+   */
+  private async openGap(startedAt: Date, reason: ObservationGapReason): Promise<void> {
+    try {
+      if (await this.repository.openObservationGap(startedAt, reason)) {
+        this.logger.warn(`Наблюдение прервано с ${startedAt.toISOString()}: ${reason}.`);
+      }
+    } catch (cause) {
+      this.logger.warn(`Пропуск наблюдения не записан: ${cause}`);
+    }
+  }
+
+  /**
+   * Закрывает открытый пропуск либо записывает прошедшую тишину.
+   *
+   * Либо, а не оба: открытый пропуск уже начинался от последнего
+   * наблюдения и покрыл всю тишину целиком, включая время, когда процесс
+   * не работал, — вторая запись о том же времени задвоила бы счёт
+   * ненаблюдавшихся секунд.
+   *
+   * Тишину видит только прогон, который за ней последовал: пока проверок
+   * не было, сказать о них некому. Поэтому она записывается задним
+   * числом — отрезком от последнего наблюдения до начала этого прогона.
+   */
+  private async closeGapOrNoteSilence(
+    lastObservedAt: Date | null,
+    startedAt: Date,
+  ): Promise<void> {
+    try {
+      if (await this.repository.closeObservationGap(startedAt)) {
+        this.logger.log(`Наблюдение возобновлено в ${startedAt.toISOString()}.`);
+
+        return;
+      }
+
+      const minutes = Number(process.env.CAIRN_STATUS_CHECK_INTERVAL_MINUTES ?? '15');
+      const gap = silenceGapOf(lastObservedAt, startedAt, minutes);
+
+      if (!gap) {
+        return;
+      }
+
+      await this.repository.recordObservationGap(
+        gap.startedAt,
+        gap.endedAt,
+        ObservationGapReason.Silence,
+      );
+      this.logger.warn(
+        `Пропуск наблюдения: с ${gap.startedAt.toISOString()} до ${gap.endedAt.toISOString()} ` +
+          'проверок не было. За это время система не знает ничего.',
+      );
+    } catch (cause) {
+      this.logger.warn(`Пропуск наблюдения не записан: ${cause}`);
+    }
+  }
+
+  /**
+   * Переспрашивает только адреса с открытым падением.
+   *
+   * Отдельный путь, а не сводный прогон почаще: обходить все адреса раз в
+   * минуту значило бы в шестьдесят раз больше запросов ради одного
+   * знания — когда лежащий адрес ответит снова. Пока падение открыто, о
+   * нём известно всё, кроме этого.
+   *
+   * Переспрашивается один health: TLS, разрешение имени и срок
+   * регистрации за минуту не меняются — то же правило, что у переспроса
+   * внутри прогона.
+   *
+   * Контрольные хосты здесь не спрашиваются: открыть инцидент этот путь
+   * не может (у его адресов он уже открыт), а закрыть — только по
+   * настоящему ответу адреса, которого при потерянной сети не будет.
+   * Остаётся лишь ход падения с причиной, которую правда увидели.
+   */
+  private async sweepDown(): Promise<void> {
+    const falling = new Set(await this.incidents.openAddressIds());
+
+    if (falling.size === 0) {
+      return;
+    }
+
+    const targets = (await this.repository.listTargets()).addresses.filter((address) =>
+      falling.has(address.id),
+    );
+
+    if (targets.length === 0) {
+      // Инциденты открыты по адресам, которых больше нет среди целей:
+      // адрес сняли или проект ушёл в архив. Закроет их сводный прогон —
+      // он единственный видит весь список и знает, чего в нём не стало.
+      return;
+    }
+
+    const health = new Map<string, HealthResult>();
+
+    for (const address of targets) {
+      try {
+        const result = await this.checkers.checkHealth(address.name, address.healthCheckPath);
+        const written = await this.repository.updateAddressHealth(address.id, {
+          health: result.health,
+          latencyMs: result.latencyMs,
+          healthError: result.error,
+          healthCode: result.code,
+          redirectTo: result.redirectTo,
+        });
+
+        if (!written) {
+          this.logger.warn(`Статус адреса ${address.name} писать некуда: строки больше нет`);
+          continue;
+        }
+
+        health.set(address.id, result);
+      } catch (cause) {
+        this.logger.warn(`Частый опрос адреса ${address.name} упал: ${cause}`);
+      }
+    }
+
+    await this.settleIncidents(targets, health);
+  }
+
+  /**
+   * Потеряна ли сеть у нас самих — и значит, судить нам не о чем.
+   *
+   * Проверки идут из контейнера, и собственная потеря сети выглядит для
+   * адресов всех проектов одинаково: «сети до адреса нет». Пуш о падении
+   * каждого проекта в эту минуту и ложен, и приходит пачкой, — поэтому
+   * прежде, чем сводить инциденты, спрашиваются контрольные хосты.
+   *
+   * Вопрос задаётся только при падении: установка, у которой всё
+   * отвечает, в сеть за этим не ходит вовсе.
+   *
+   * Слепой прогон не сводит инциденты **никак**: ни открытия, ни
+   * закрытия, ни хода падения. Закрытие — такое же утверждение, как
+   * открытие. Записи проверок при этом остаются: на экране адрес
+   * красный, и причина у него та, которую правда увидели, — скрыто
+   * ничего.
+   */
+  private async blind(health: Map<string, HealthResult>): Promise<boolean> {
+    const fallen = [...health.values()].some((result) => result.health === HealthState.Down);
+
+    if (!fallen) {
+      return false;
+    }
+
+    try {
+      const uplink = await this.checkers.checkUplink();
+
+      if (!uplink.isLost) {
+        return false;
+      }
+
+      this.logger.warn(
+        `Контрольные хосты не отвечают (0 из ${uplink.urls}): сеть потеряна у нас, ` +
+          'инциденты этого прогона не сводятся.',
+      );
+
+      return true;
+    } catch (cause) {
+      // Отказ самой проверки — не повод замолчать: лучше лишний пуш, чем
+      // пропущенное падение.
+      this.logger.warn(`Проверка своей сети упала: ${cause}`);
+
+      return false;
+    }
   }
 
   /**
@@ -404,6 +685,7 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
   private async settleIncidents(
     addresses: AddressTarget[],
     health: Map<string, HealthResult>,
+    probes: Map<string, IncidentProbe> = new Map(),
   ): Promise<void> {
     const events = await this.incidents.reconcile(
       addresses.map((address) => ({
@@ -418,6 +700,7 @@ export class StatusRunnerService implements OnModuleInit, OnModuleDestroy {
         isArchived: address.lifecycle === ProjectLifecycle.Archived,
         health: health.get(address.id)?.health ?? null,
         healthError: health.get(address.id)?.error ?? null,
+        probe: probes.get(address.id) ?? null,
       })),
     );
 

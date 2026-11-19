@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { StatusCheckCode } from '../enums';
+
 import {
   INCIDENT_PAGE_LIMIT,
   INCIDENT_WINDOW_DAYS,
@@ -20,6 +22,7 @@ describe('схема инцидента', () => {
     lastCause: 'HTTP 500',
     lastDownAt: '2026-10-20T10:30:00.000Z',
     checks: 3,
+    probe: null,
   };
 
   it('принимает открытый инцидент', () => {
@@ -72,6 +75,42 @@ describe('схема инцидента', () => {
     });
 
     expect(parsed.lastDownAt).toBeNull();
+  });
+
+  it('слепок падения принимается целиком', () => {
+    // Снимается один раз и читается целиком: форму держит контракт, а не
+    // своя SQL-проверка в базе.
+    const parsed = incidentSchema.parse({
+      ...INCIDENT,
+      probe: {
+        at: '2026-10-20T10:00:05.000Z',
+        resolvedIps: ['203.0.113.10'],
+        resolveError: null,
+        ports: [
+          { port: 443, code: StatusCheckCode.ConnectionRefused, ms: 4 },
+          { port: 80, code: null, ms: 2 },
+        ],
+      },
+    });
+
+    expect(parsed.probe?.ports).toHaveLength(2);
+    expect(parsed.probe?.ports[1]?.code).toBeNull();
+  });
+
+  it('слепок с незнакомым кодом порта отвергается', () => {
+    // Коды — закрытый список контракта: незнакомый означал бы карту
+    // расшифровок, которой у веба нет.
+    expect(() =>
+      incidentSchema.parse({
+        ...INCIDENT,
+        probe: {
+          at: '2026-10-20T10:00:05.000Z',
+          resolvedIps: [],
+          resolveError: null,
+          ports: [{ port: 443, code: 'всё сломалось', ms: 1 }],
+        },
+      }),
+    ).toThrow();
   });
 
   it('отвергает инцидент без единой подтвердившей проверки', () => {
@@ -143,7 +182,7 @@ describe('схема истории падений адреса', () => {
     domainId: '00000000-0000-0000-0000-000000000002',
     name: 'project.ru',
     window: { days: 30, from: '2026-10-17T12:00:00.000Z', to: '2026-11-16T12:00:00.000Z' },
-    summary: { falls: 2, downSeconds: 5400, uptime: 0.997917 },
+    summary: { falls: 2, downSeconds: 5400, unobservedSeconds: 0, uptime: 0.997917 },
     open: null,
     incidents: [],
     offset: 0,
@@ -176,6 +215,24 @@ describe('схема истории падений адреса', () => {
       }),
     ).toThrow();
     expect(addressIncidentHistorySchema.parse({ ...HISTORY, nextOffset: 20 }).nextOffset).toBe(20);
+  });
+
+  it('время без наблюдения обязательно и неотрицательно', () => {
+    // Необязательным его делать нельзя: «поля нет» неотличимо от «нуль
+    // секунд», а это разные утверждения — второе говорит, что наблюдение
+    // шло всё окно.
+    expect(() =>
+      addressIncidentHistorySchema.parse({
+        ...HISTORY,
+        summary: { falls: 2, downSeconds: 5400, uptime: 0.997917 },
+      }),
+    ).toThrow();
+    expect(() =>
+      addressIncidentHistorySchema.parse({
+        ...HISTORY,
+        summary: { ...HISTORY.summary, unobservedSeconds: -1 },
+      }),
+    ).toThrow();
   });
 
   it('отвергает отрицательное суммарное время падения', () => {

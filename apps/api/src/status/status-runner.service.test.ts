@@ -1,4 +1,11 @@
-import { EnvironmentKind, HealthState, ProjectLifecycle, SubjectKind } from '@cairn/shared';
+import {
+  EnvironmentKind,
+  HealthState,
+  ObservationGapReason,
+  ProjectLifecycle,
+  StatusCheckCode,
+  SubjectKind,
+} from '@cairn/shared';
 import { ConflictException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +23,7 @@ import {
   environments,
   projects,
   servers as serversTable,
+  statusObservationGaps,
   subjects,
   users,
 } from '../db/schema';
@@ -141,7 +149,22 @@ describe('runner статусов', () => {
       resolveAddress: vi
         .fn()
         .mockResolvedValue({ ips: ['203.0.113.10'], code: null, error: null }),
+      checkUplink: vi.fn().mockResolvedValue({ urls: 2, alive: 2, isLost: false }),
+      probeAddress: vi.fn().mockResolvedValue({
+        at: '2026-11-19T12:00:00.000Z',
+        resolvedIps: ['203.0.113.10'],
+        resolveError: null,
+        ports: [
+          { port: 443, code: StatusCheckCode.ConnectionRefused, ms: 3 },
+          { port: 80, code: null, ms: 2 },
+        ],
+      }),
     };
+  }
+
+  /** Контрольные хосты молчат: сеть потеряна у нас, а не у проектов. */
+  function lostUplink() {
+    return vi.fn().mockResolvedValue({ urls: 2, alive: 0, isLost: true });
   }
 
   /** Упавший health с заданной причиной: нужен почти каждому тесту об инцидентах. */
@@ -607,6 +630,392 @@ describe('runner статусов', () => {
     await runnerWith({ checkHealth: downHealth() }).runAll();
 
     expect(await testDb.rowsOf(addressIncidents)).toHaveLength(0);
+  });
+
+  describe('своя сеть', () => {
+    it('живой прогон контрольные хосты не спрашивает', async () => {
+      // Вопрос наружу задаётся только тогда, когда он что-то решает:
+      // установка, у которой всё отвечает, в сеть за этим не ходит.
+      await seedOneTarget();
+
+      const checkers = healthyCheckers();
+
+      await runnerWith(checkers).runAll();
+
+      expect(checkers.checkUplink).not.toHaveBeenCalled();
+    });
+
+    it('при потерянной сети наружу инцидента не открывает', async () => {
+      // Проверки идут из контейнера, и потеря сети у нас выглядит как
+      // падение всех адресов сразу. Пуш о падении каждого проекта в этот
+      // момент и ложен, и приходит пачкой.
+      await seedOneTarget();
+
+      const notify = vi.fn();
+
+      await runnerWith(
+        { checkHealth: downHealth('сети до адреса нет'), checkUplink: lostUplink() },
+        { notify },
+      ).runAll();
+
+      expect(await testDb.rowsOf(addressIncidents)).toHaveLength(0);
+      expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('но запись проверки остаётся: от человека ничего не скрыто', async () => {
+      // Не сводится инцидент, а не прячется наблюдение: на экране адрес
+      // красный, и причина у него та, которую правда увидели.
+      await seedOneTarget();
+
+      await runnerWith({
+        checkHealth: downHealth('сети до адреса нет'),
+        checkUplink: lostUplink(),
+      }).runAll();
+
+      const [status] = await testDb.db.select().from(domainStatuses);
+
+      expect(status).toMatchObject({
+        health: HealthState.Down,
+        healthError: 'сети до адреса нет',
+      });
+    });
+
+    it('потерянная сеть не закрывает уже открытое падение', async () => {
+      // Закрытие — такое же утверждение, как открытие: слепой прогон не
+      // вправе объявить, что адрес поднялся.
+      await seedOneTarget();
+      await runnerWith({ checkHealth: downHealth() }).runAll();
+
+      await runnerWith({
+        checkHealth: downHealth('сети до адреса нет'),
+        checkUplink: lostUplink(),
+      }).runAll();
+
+      const [incident] = await testDb.rowsOf(addressIncidents);
+
+      expect(incident?.resolvedAt).toBeNull();
+      // Ход падения тоже не дописан: причина в нём — про нашу сеть, а не
+      // про адрес.
+      expect(incident?.lastCause).toBe('HTTP 500');
+    });
+  });
+
+  describe('пропуски наблюдения', () => {
+    /** Интервал обхода на время теста: без него тишину не с чем сравнить. */
+    async function withInterval(minutes: string, run: () => Promise<void>): Promise<void> {
+      const before = process.env.CAIRN_STATUS_CHECK_INTERVAL_MINUTES;
+
+      process.env.CAIRN_STATUS_CHECK_INTERVAL_MINUTES = minutes;
+
+      try {
+        await run();
+      } finally {
+        process.env.CAIRN_STATUS_CHECK_INTERVAL_MINUTES = before ?? '0';
+      }
+    }
+
+    /** Отодвигает последнее наблюдение назад: прогон читает именно его. */
+    async function observedHoursAgo(hours: number): Promise<void> {
+      await testDb.db
+        .update(domainStatuses)
+        .set({ checkedAt: new Date(Date.now() - hours * 60 * 60 * 1000) });
+    }
+
+    it('первый прогон пропуска не записывает', async () => {
+      // Свежая установка не наблюдала никогда и ничего не теряла.
+      await seedOneTarget();
+
+      await withInterval('15', async () => {
+        await runnerWith(healthyCheckers()).runAll();
+      });
+
+      expect(await testDb.rowsOf(statusObservationGaps)).toHaveLength(0);
+    });
+
+    it('тишина между прогонами записывается задним числом', async () => {
+      // Прежде три часа неработавшего API выглядели в истории тремя
+      // часами исправной работы: журнал падений пуст и там, где адрес
+      // отвечал, и там, где его никто не спрашивал.
+      await seedOneTarget();
+
+      await withInterval('15', async () => {
+        await runnerWith(healthyCheckers()).runAll();
+        await observedHoursAgo(3);
+        await runnerWith(healthyCheckers()).runAll();
+      });
+
+      const [gap] = await testDb.rowsOf(statusObservationGaps);
+
+      expect(gap).toMatchObject({ reason: ObservationGapReason.Silence });
+      expect(gap?.endedAt).not.toBeNull();
+    });
+
+    it('обычная пауза между прогонами пропуском не считается', async () => {
+      await seedOneTarget();
+
+      await withInterval('15', async () => {
+        await runnerWith(healthyCheckers()).runAll();
+        await runnerWith(healthyCheckers()).runAll();
+      });
+
+      expect(await testDb.rowsOf(statusObservationGaps)).toHaveLength(0);
+    });
+
+    it('слепой прогон открывает пропуск, а прозревший его закрывает', async () => {
+      await seedOneTarget();
+
+      await withInterval('15', async () => {
+        await runnerWith({
+          checkHealth: downHealth('сети до адреса нет'),
+          checkUplink: lostUplink(),
+        }).runAll();
+
+        const [open] = await testDb.rowsOf(statusObservationGaps);
+
+        expect(open).toMatchObject({ reason: ObservationGapReason.Blind, endedAt: null });
+
+        await runnerWith(healthyCheckers()).runAll();
+      });
+
+      const rows = await testDb.rowsOf(statusObservationGaps);
+
+      // Отрезок один: слепота кончилась, а не началась заново.
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.endedAt).not.toBeNull();
+    });
+
+    it('подряд слепые прогоны держат один отрезок, а не плодят', async () => {
+      // Каждый прогон видит слепоту заново, но «с какого момента мы
+      // ничего не знаем» — один ответ, и задваивать по нему секунды
+      // нельзя.
+      await seedOneTarget();
+
+      await withInterval('15', async () => {
+        const blind = {
+          checkHealth: downHealth('сети до адреса нет'),
+          checkUplink: lostUplink(),
+        };
+
+        await runnerWith(blind).runAll();
+        await runnerWith(blind).runAll();
+      });
+
+      expect(await testDb.rowsOf(statusObservationGaps)).toHaveLength(1);
+    });
+
+    it('закрытый пропуск не задваивается записью тишины', async () => {
+      // Открытый отрезок начинался от последнего наблюдения и покрыл всю
+      // тишину целиком, включая время, когда процесс не работал.
+      await seedOneTarget();
+
+      await withInterval('15', async () => {
+        await runnerWith({
+          checkHealth: downHealth('сети до адреса нет'),
+          checkUplink: lostUplink(),
+        }).runAll();
+        await observedHoursAgo(3);
+        await runnerWith(healthyCheckers()).runAll();
+      });
+
+      const rows = await testDb.rowsOf(statusObservationGaps);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.reason).toBe(ObservationGapReason.Blind);
+    });
+
+    it('выключенный цикл пропусков не пишет', async () => {
+      // Проверки только кнопкой: регулярного наблюдения никто не обещал.
+      await seedOneTarget();
+
+      await runnerWith(healthyCheckers()).runAll();
+      await observedHoursAgo(10);
+      await runnerWith(healthyCheckers()).runAll();
+
+      expect(await testDb.rowsOf(statusObservationGaps)).toHaveLength(0);
+    });
+  });
+
+  describe('слепок момента падения', () => {
+    it('открытый инцидент помнит, куда смотрело имя и что с портами', async () => {
+      // По одной фразе «ответа не дождались» не понять, к кому идти;
+      // отказ на 443 при живом 80 говорит это сам.
+      await seedOneTarget();
+
+      const checkers = healthyCheckers();
+
+      await runnerWith({ ...checkers, checkHealth: downHealth() }).runAll();
+
+      const [incident] = await testDb.rowsOf(addressIncidents);
+
+      expect(incident?.probe).toMatchObject({
+        resolvedIps: ['203.0.113.10'],
+        ports: [
+          { port: 443, code: StatusCheckCode.ConnectionRefused, ms: 3 },
+          { port: 80, code: null, ms: 2 },
+        ],
+      });
+    });
+
+    it('живой адрес слепка не стоит', async () => {
+      await seedOneTarget();
+
+      const checkers = healthyCheckers();
+
+      await runnerWith(checkers).runAll();
+
+      expect(checkers.probeAddress).not.toHaveBeenCalled();
+    });
+
+    it('уже открытое падение второй раз не снимается', async () => {
+      // Слепок относится к моменту падения, и второй описывал бы не тот
+      // момент, а два соединения за прогон стоили бы впустую.
+      await seedOneTarget();
+      await runnerWith({ checkHealth: downHealth() }).runAll();
+
+      const checkers = healthyCheckers();
+
+      await runnerWith({ ...checkers, checkHealth: downHealth() }).runAll();
+
+      expect(checkers.probeAddress).not.toHaveBeenCalled();
+    });
+
+    it('при потерянной сети наружу слепок не снимается', async () => {
+      // Он описал бы нашу беду, а не чужую: падения нет, и объяснять
+      // нечего.
+      await seedOneTarget();
+
+      const checkers = healthyCheckers();
+
+      await runnerWith({
+        ...checkers,
+        checkHealth: downHealth('сети до адреса нет'),
+        checkUplink: lostUplink(),
+      }).runAll();
+
+      expect(checkers.probeAddress).not.toHaveBeenCalled();
+    });
+
+    it('приостановленный проект слепка не стоит', async () => {
+      // Инцидента он не открывает, а слепок снимается ради инцидента.
+      await seedOneTarget();
+      await testDb.db
+        .update(projects)
+        .set({ lifecycle: ProjectLifecycle.Paused })
+        .where(eq(projects.id, projectId));
+
+      const checkers = healthyCheckers();
+
+      await runnerWith({ ...checkers, checkHealth: downHealth() }).runAll();
+
+      expect(checkers.probeAddress).not.toHaveBeenCalled();
+    });
+
+    it('отказ слепка не отменяет инцидента', async () => {
+      // Слепок — подробность, а не вердикт.
+      await seedOneTarget();
+
+      await runnerWith({
+        checkHealth: downHealth(),
+        probeAddress: vi.fn().mockRejectedValue(new Error('сокет взорвался')),
+      }).runAll();
+
+      const [incident] = await testDb.rowsOf(addressIncidents);
+
+      expect(incident?.cause).toBe('HTTP 500');
+      expect(incident?.probe).toBeNull();
+    });
+  });
+
+  describe('частый опрос лежащих адресов', () => {
+    it('без открытых падений в сеть не ходит', async () => {
+      await seedOneTarget();
+
+      const checkers = healthyCheckers();
+
+      await runnerWith(checkers).pollDown();
+
+      expect(checkers.checkHealth).not.toHaveBeenCalled();
+    });
+
+    it('спрашивает только лежащий адрес, а не весь обход', async () => {
+      // Весь смысл частого шага в том, что он дешёвый: два адреса из
+      // двадцати не повод обходить двадцать каждую минуту.
+      await seedTargets();
+
+      const open = vi.fn().mockImplementation(async (name: string) =>
+        name === 'example.com'
+          ? { health: HealthState.Down, latencyMs: 0, code: null, error: 'HTTP 500', redirectTo: null }
+          : { health: HealthState.Up, latencyMs: 5, code: null, error: null, redirectTo: null },
+      );
+
+      await runnerWith({ checkHealth: open }).runAll();
+
+      const checkers = healthyCheckers();
+
+      await runnerWith(checkers).pollDown();
+
+      expect(checkers.checkHealth).toHaveBeenCalledTimes(1);
+      expect(checkers.checkHealth).toHaveBeenCalledWith('example.com', '/api/health');
+      // Сроки и реестр за минуту не меняются — их частый опрос не трогает.
+      expect(checkers.checkTls).not.toHaveBeenCalled();
+      expect(checkers.checkDomainExpiry).not.toHaveBeenCalled();
+    });
+
+    it('закрывает падение, не дожидаясь сводного прогона', async () => {
+      // Прежде момент возвращения был известен с точностью до интервала,
+      // и любая длительность в истории оказывалась кратной четверти часа.
+      await seedOneTarget();
+      await runnerWith({ checkHealth: downHealth() }).runAll();
+
+      const notify = vi.fn();
+
+      await runnerWith(healthyCheckers(), { notify }).pollDown();
+
+      const [incident] = await testDb.rowsOf(addressIncidents);
+
+      expect(incident?.resolvedAt).not.toBeNull();
+      expect(notify).toHaveBeenCalledWith([
+        expect.objectContaining({ kind: IncidentEventKind.Resolved, address: 'example.com' }),
+      ]);
+    });
+
+    it('дописывает ход падения, не рассылая второго пуша', async () => {
+      await seedOneTarget();
+      await runnerWith({ checkHealth: downHealth('HTTP 500') }).runAll();
+
+      const notify = vi.fn();
+
+      await runnerWith({ checkHealth: downHealth('таймаут') }, { notify }).pollDown();
+
+      const [incident] = await testDb.rowsOf(addressIncidents);
+
+      expect(incident).toMatchObject({ cause: 'HTTP 500', lastCause: 'таймаут', checks: 2 });
+      expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('поверх идущего прогона не начинается', async () => {
+      // Замок у частого опроса тот же, что у сводного прогона: оба читают
+      // открытые инциденты и пишут их, и разойтись им нельзя.
+      await seedOneTarget();
+
+      let release = (): void => {};
+      const checkHealth = vi.fn().mockImplementation(async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+
+        return { health: HealthState.Up, latencyMs: 1, code: null, error: null, redirectTo: null };
+      });
+      const runner = runnerWith({ checkHealth });
+      const running = runner.runAll();
+
+      await vi.waitFor(() => expect(checkHealth).toHaveBeenCalled());
+
+      expect(await runner.pollDown()).toBe(StatusRunOutcome.Busy);
+
+      release();
+      await running;
+    });
   });
 
   it('архивный проект не проверяется и инцидента не открывает', async () => {

@@ -1,4 +1,4 @@
-import type { HealthState } from '@cairn/shared';
+import type { HealthState, IncidentProbe } from '@cairn/shared';
 import { Injectable, Logger } from '@nestjs/common';
 
 import { decideIncident, IncidentAction } from './incident-decision';
@@ -17,6 +17,15 @@ export interface AddressState {
   isArchived: boolean;
   health: HealthState | null;
   healthError: string | null;
+  /**
+   * Слепок момента падения; `null` — не снимали.
+   *
+   * Снимает его прогон, а не правило: сеть — забота того, кто в неё
+   * ходит. Правило лишь передаёт слепок в строку открываемого инцидента,
+   * и у закрытия с ходом падения его нет вовсе — снимать слепок второй
+   * раз значило бы описывать не тот момент.
+   */
+  probe?: IncidentProbe | null;
 }
 
 /** Что случилось с инцидентом. */
@@ -57,6 +66,16 @@ export class IncidentsService {
   private readonly logger = new Logger(IncidentsService.name);
 
   constructor(private readonly repository: IncidentsRepository) {}
+
+  /**
+   * Адреса с открытым падением.
+   *
+   * Их прогон переспрашивает отдельно и часто: пока падение открыто,
+   * важен момент возвращения, а он известен с точностью до шага опроса.
+   */
+  async openAddressIds(): Promise<string[]> {
+    return [...(await this.repository.openByDomain()).keys()];
+  }
 
   /** Применяет правило к каждому адресу и возвращает случившиеся события. */
   async reconcile(states: AddressState[]): Promise<IncidentEvent[]> {
@@ -132,7 +151,12 @@ export class IncidentsService {
     at: Date,
   ): Promise<{ startedAt: Date; resolvedAt: Date | null; cause: string | null } | null> {
     try {
-      return await this.repository.open(state.domainId, state.healthError, at);
+      return await this.repository.open(
+        state.domainId,
+        state.healthError,
+        at,
+        state.probe ?? null,
+      );
     } catch (cause) {
       const raced = (await this.repository.openByDomain()).get(state.domainId);
 

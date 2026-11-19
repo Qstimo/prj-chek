@@ -1,12 +1,15 @@
-import { HealthState, StatusCheckCode } from '@cairn/shared';
+import { HealthState, ObservationGapReason, StatusCheckCode } from '@cairn/shared';
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  index,
   integer,
   pgEnum,
   pgTable,
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -99,3 +102,53 @@ export const domainStatuses = pgTable(
 
 /** Строка статуса адреса. */
 export type DomainStatusRow = typeof domainStatuses.$inferSelect;
+
+/** Почему наблюдение прерывалось. Значения совпадают с контрактом. */
+export const observationGapReasonEnum = pgEnum('observation_gap_reason', [
+  ObservationGapReason.Silence,
+  ObservationGapReason.Blind,
+]);
+
+/**
+ * Отрезок времени, за который система не наблюдала ничего.
+ *
+ * Нужен затем, что доля времени «отвечал» считается по журналу падений, а
+ * журнал пуст в двух совсем разных случаях: адрес отвечал и адрес никем
+ * не спрашивался. Три часа лежащего API выглядели в истории тремя часами
+ * исправной работы — аптайм врал в плюс ровно тогда, когда система не
+ * видела ничего.
+ *
+ * Устроен как инцидент адреса, и нарочно так же: отрезок с обнуляемым
+ * концом плюс частичный уникум «один открытый». Пропуск без конца —
+ * «не наблюдаем прямо сейчас», и читается он до конца окна, как открытое
+ * падение. Закрывает его первый доверяемый прогон: пока слепота длится,
+ * сказать «она кончилась» некому.
+ *
+ * Привязки к адресу нет намеренно: не наблюдает система целиком, а не
+ * отдельный адрес, — и строка на адрес плодила бы десятки копий одного
+ * факта, которые разошлись бы при первой же частичной записи.
+ */
+export const statusObservationGaps = pgTable(
+  'status_observation_gaps',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    /** Обнуляемый: пусто — наблюдения нет до сих пор. */
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    reason: observationGapReasonEnum('reason').notNull(),
+  },
+  (table) => [
+    // Один открытый пропуск на всю систему: индекс по выражению, потому
+    // что привязки к адресу у строки нет, а уникальным должен быть сам
+    // факт «пропуск идёт». Второй открытый означал бы два ответа на
+    // вопрос «с какого момента мы ничего не знаем».
+    uniqueIndex('status_observation_gaps_open')
+      .on(sql`(${table.endedAt} is null)`)
+      .where(sql`${table.endedAt} is null`),
+    // Чтение идёт по пересечению с окном, то есть по обеим границам.
+    index('status_observation_gaps_window').on(table.startedAt, table.endedAt),
+  ],
+);
+
+/** Строка пропуска наблюдения. */
+export type StatusObservationGapRow = typeof statusObservationGaps.$inferSelect;

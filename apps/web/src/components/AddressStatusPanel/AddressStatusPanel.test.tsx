@@ -42,7 +42,12 @@ const HISTORY: AddressIncidentHistory = {
   domainId: DOMAIN_ID,
   name: ADDRESS.name,
   window: { days: 30, from: '2026-08-18T10:00:00.000Z', to: '2026-09-17T10:00:00.000Z' },
-  summary: { falls: 2, downSeconds: 2 * 3600 + 15 * 60, uptime: 0.996875 },
+  summary: {
+    falls: 2,
+    downSeconds: 2 * 3600 + 15 * 60,
+    unobservedSeconds: 0,
+    uptime: 0.996875,
+  },
   open: null,
   incidents: [
     {
@@ -54,6 +59,7 @@ const HISTORY: AddressIncidentHistory = {
       lastCause: 'DNS не отвечает (EAI_AGAIN)',
       lastDownAt: '2026-09-16T10:38:00.000Z',
       checks: 3,
+      probe: null,
     },
   ],
   offset: 0,
@@ -214,7 +220,11 @@ describe('панель разбора адреса', () => {
 
   it('пустая история сказана словами', () => {
     vi.mocked(hooks.useQueryAddressIncidents).mockReturnValue(
-      query({ ...HISTORY, summary: { falls: 0, downSeconds: 0, uptime: 1 }, incidents: [] }),
+      query({
+        ...HISTORY,
+        summary: { falls: 0, downSeconds: 0, unobservedSeconds: 0, uptime: 1 },
+        incidents: [],
+      }),
     );
 
     render(
@@ -224,6 +234,77 @@ describe('панель разбора адреса', () => {
     expect(screen.getByText(/нет зарегистрированных падений за 30 дней/)).toBeInTheDocument();
     expect(screen.getByText(/аптайм не измерен/)).toBeInTheDocument();
     expect(screen.queryByText(/100%/)).not.toBeInTheDocument();
+  });
+
+  it('слепок падения показывает вывод и чем он измерен', () => {
+    // Самое ценное в слепке — строка «к кому идти»: по фразе «ответа не
+    // дождались» этого не понять.
+    vi.mocked(hooks.useQueryAddressIncidents).mockReturnValue(
+      query({
+        ...HISTORY,
+        incidents: [
+          {
+            ...HISTORY.incidents[0]!,
+            probe: {
+              at: '2026-09-16T10:00:05.000Z',
+              resolvedIps: ['203.0.113.10'],
+              resolveError: null,
+              ports: [
+                { port: 443, code: StatusCheckCode.ConnectionRefused, ms: 4 },
+                { port: 80, code: null, ms: 2 },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Слепок момента падения')).toBeInTheDocument();
+    expect(screen.getByText(/отвечает отказом/i)).toBeInTheDocument();
+    expect(screen.getByText(/имя смотрело на 203\.0\.113\.10/)).toBeInTheDocument();
+    expect(screen.getByText(/443 — порт закрыт/)).toBeInTheDocument();
+  });
+
+  it('у падения без слепка раскрытия нет', () => {
+    // Строки, заведённые до появления слепка, его не знают, и выдумывать
+    // нечего.
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.queryByText('Слепок момента падения')).not.toBeInTheDocument();
+  });
+
+  it('время без наблюдения названо отдельно от падений', () => {
+    // Иначе доля читается как утверждение про всё окно, хотя часть его
+    // система не видела вовсе.
+    vi.mocked(hooks.useQueryAddressIncidents).mockReturnValue(
+      query({
+        ...HISTORY,
+        summary: { ...HISTORY.summary, unobservedSeconds: 3 * 3600 + 12 * 60 },
+      }),
+    );
+
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Без наблюдения')).toBeInTheDocument();
+    expect(screen.getByText(/3 ч 12 мин/)).toBeInTheDocument();
+  });
+
+  it('без пропусков о наблюдении не говорит вовсе', () => {
+    // Пустое «без наблюдения: 0» заставляло бы вчитываться в строку,
+    // которая ничего не сообщает.
+    render(
+      <AddressStatusPanel projectId="p1" address={ADDRESS} warnings={[]} onClose={vi.fn()} />,
+    );
+
+    expect(screen.queryByText('Без наблюдения')).not.toBeInTheDocument();
   });
 
   it('отказ истории объясняется, а не гасится', () => {

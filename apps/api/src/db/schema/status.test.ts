@@ -1,8 +1,13 @@
-import { HealthState } from '@cairn/shared';
+import { HealthState, ObservationGapReason } from '@cairn/shared';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
-import { domainStatuses, healthStateEnum } from './status';
+import {
+  domainStatuses,
+  healthStateEnum,
+  observationGapReasonEnum,
+  statusObservationGaps,
+} from './status';
 
 describe('статусы окружений', () => {
   it('перечисление совпадает с контрактом', () => {
@@ -74,5 +79,37 @@ describe('статусы доменов', () => {
     );
 
     expect(unique?.columns.map((column) => column.name)).toEqual(['domain_id']);
+  });
+});
+
+describe('пропуски наблюдения', () => {
+  it('перечисление причин совпадает с контрактом', () => {
+    expect(observationGapReasonEnum.enumValues).toEqual(Object.values(ObservationGapReason));
+  });
+
+  it('пропуск — отрезок с обнуляемым концом', () => {
+    // Пусто — «не наблюдаем до сих пор»: читается до конца окна, как
+    // открытое падение.
+    expect(statusObservationGaps.startedAt.notNull).toBe(true);
+    expect(statusObservationGaps.endedAt.notNull).toBe(false);
+  });
+
+  it('привязки к адресу у пропуска нет', () => {
+    // Не наблюдает система целиком, а не отдельный адрес: строка на
+    // адрес плодила бы десятки копий одного факта.
+    const columns = getTableConfig(statusObservationGaps).columns.map((column) => column.name);
+
+    expect(columns).toEqual(['id', 'started_at', 'ended_at', 'reason']);
+  });
+
+  it('открытый пропуск в системе только один', () => {
+    // Два открытых отрезка были бы двумя ответами на вопрос «с какого
+    // момента мы ничего не знаем».
+    const open = getTableConfig(statusObservationGaps).indexes.find(
+      (index) => index.config.name === 'status_observation_gaps_open',
+    );
+
+    expect(open?.config.unique).toBe(true);
+    expect(open?.config.where).toBeDefined();
   });
 });

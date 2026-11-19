@@ -1,6 +1,7 @@
 import {
   EnvironmentKind,
   INCIDENT_WINDOW_DAYS,
+  ObservationGapReason,
   Section,
   SubjectKind,
   AccessLevel,
@@ -17,6 +18,7 @@ import {
   environments,
   grants,
   projects,
+  statusObservationGaps,
   subjects,
   users,
 } from '../db/schema';
@@ -137,6 +139,19 @@ describe('репозиторий инцидентов', () => {
       .returning();
 
     return row!.id;
+  }
+
+  /**
+   * Пропуск наблюдения: отрезок, за который система не знала ничего.
+   *
+   * Причина для чтения безразлична — доля не различает «процесс не
+   * работал» и «сеть потеряна», потому что знания нет ни в том, ни в
+   * другом случае.
+   */
+  async function gap(startedAt: Date, endedAt: Date | null): Promise<void> {
+    await testDb.db
+      .insert(statusObservationGaps)
+      .values({ startedAt, endedAt, reason: ObservationGapReason.Silence });
   }
 
   /** Момент на столько суток и часов раньше зафиксированного «сейчас». */
@@ -330,6 +345,71 @@ describe('репозиторий инцидентов', () => {
       expect(history.summary.falls).toBe(1);
     });
 
+    describe('пропуски наблюдения', () => {
+      it('без пропусков доля считается от окна целиком', async () => {
+        await fall(before(3), before(2));
+
+        const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+        expect(history.summary.unobservedSeconds).toBe(0);
+        expect(history.summary.uptime).toBeCloseTo(1 - 1 / 30, 6);
+      });
+
+      it('время без наблюдения в доле не участвует', async () => {
+        // Прежде три часа лежащего API выглядели в истории тремя часами
+        // исправной работы: пустой журнал означает и «адрес отвечал», и
+        // «никто не спрашивал», а доля считалась как первое.
+        await gap(before(5), before(5, -3));
+
+        const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+        expect(history.summary.unobservedSeconds).toBe(3 * 60 * 60);
+        // Падений нет, и доля наблюдавшегося времени — единица: про
+        // ненаблюдавшееся она не утверждает ничего.
+        expect(history.summary.uptime).toBe(1);
+      });
+
+      it('доля падения берётся от наблюдавшегося времени, а не от окна', async () => {
+        // Сутки простоя и сутки без наблюдения: знаменатель — 29 суток.
+        await fall(before(3), before(2));
+        await gap(before(10), before(9));
+
+        const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+        expect(history.summary.uptime).toBeCloseTo(1 - 1 / 29, 6);
+      });
+
+      it('открытый пропуск считается до конца окна', async () => {
+        // Пока наблюдения нет, оно не идёт: открытый отрезок читается так
+        // же, как открытое падение.
+        await gap(before(0, 5), null);
+
+        const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+        expect(history.summary.unobservedSeconds).toBe(5 * 60 * 60);
+      });
+
+      it('пропуск вне окна не считается, а задевший — пересечением', async () => {
+        await gap(before(60), before(59));
+        await gap(before(INCIDENT_WINDOW_DAYS + 1), before(INCIDENT_WINDOW_DAYS - 1));
+
+        const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+        expect(history.summary.unobservedSeconds).toBe(DAY_MS / 1000);
+      });
+
+      it('наблюдения в окне не было вовсе: доля ничего не утверждает', async () => {
+        // Знаменатель нулевой, и единственный честный ответ — «данных
+        // нет»: об этом говорит пропуск длиной в окно, а не доля.
+        await gap(before(INCIDENT_WINDOW_DAYS), null);
+
+        const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
+
+        expect(history.summary.unobservedSeconds).toBe((INCIDENT_WINDOW_DAYS * DAY_MS) / 1000);
+        expect(history.summary.uptime).toBe(1);
+      });
+    });
+
     it('открытое падение считается до «сейчас»', async () => {
       await fall(before(0, 2), null);
 
@@ -354,7 +434,12 @@ describe('репозиторий инцидентов', () => {
 
       const history = await repository.forAddress(superadmin(), projectId, domainId, query(), NOW);
 
-      expect(history.summary).toEqual({ falls: 0, downSeconds: 0, uptime: 1 });
+      expect(history.summary).toEqual({
+        falls: 0,
+        downSeconds: 0,
+        unobservedSeconds: 0,
+        uptime: 1,
+      });
       expect(history.incidents).toEqual([]);
     });
 

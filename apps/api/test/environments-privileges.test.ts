@@ -82,6 +82,24 @@ describe('права роли приложения на окружения', () 
     ).resolves.toBeDefined();
   });
 
+  it('роль приложения пишет пропуски наблюдения', async () => {
+    // Запись идёт ровно там, где система и так ничего не видит: отказ в
+    // правах на эту таблицу был бы незаметен до разбора первого спорного
+    // аптайма.
+    await expect(
+      testDb.appDb.execute(
+        sql`INSERT INTO status_observation_gaps (started_at, ended_at, reason)
+            VALUES (now() - interval '1 hour', now(), 'silence')`,
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`UPDATE status_observation_gaps SET ended_at = now()`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM status_observation_gaps`),
+    ).resolves.toBeDefined();
+  });
+
   it('роль приложения читает и пишет статусы адресов', async () => {
     await expect(
       testDb.appDb.execute(sql`SELECT count(*) FROM domain_statuses`),
