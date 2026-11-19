@@ -3,14 +3,21 @@ import Link from 'next/link';
 import { LIFECYCLE_LABELS, LIFECYCLE_STYLES } from '../ProjectCard/constants';
 import { StatusIndicator } from '../StatusIndicator';
 import { TagChips } from '../TagChips';
+import { PROJECT_COLUMN_CLASS } from './columns';
 import { formatUpdatedAt } from './formatUpdatedAt';
 import type { IProps } from './types';
 
 /**
  * Компактная строка проекта в сводке.
  *
- * Кликом по строке открывается карточка; домен при наличии — отдельная
- * внешняя ссылка, чтобы не уводить с обзора в чужой стенд случайно.
+ * Ссылка названия растянута на всю строку (`after:inset-0`): человек целит
+ * в строку — в состояние, в статус, в дату, — а нажималась одна клетка.
+ * Ссылка при этом остаётся одна и настоящая, поэтому работают и
+ * клавиатура, и «открыть в новой вкладке». То же решение в истории
+ * саммари.
+ *
+ * Домен — отдельная внешняя ссылка со своим слоем (`relative`): без него
+ * он утонул бы под растянутой и уводил бы на карточку вместо стенда.
  */
 export function ProjectRow({ project, indicator }: IProps) {
   const platforms =
@@ -19,35 +26,44 @@ export function ProjectRow({ project, indicator }: IProps) {
       : '—';
 
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-surface-strong/60">
-      <td className="px-3 py-2.5">
-        <Link href={`/projects/${project.id}`} className="font-medium hover:underline">
+    <tr className="relative border-b border-border last:border-0 hover:bg-surface-strong/60">
+      <td className={`truncate px-3 py-2.5 ${PROJECT_COLUMN_CLASS.name}`}>
+        <Link
+          href={`/projects/${project.id}`}
+          title={project.name}
+          className="font-medium hover:underline after:absolute after:inset-0"
+        >
           {project.name}
         </Link>
       </td>
-      <td className="max-w-[12rem] px-3 py-2.5">
+      <td className={`px-3 py-2.5 ${PROJECT_COLUMN_CLASS.tags}`}>
         {project.tags.length > 0 ? (
           <TagChips tags={project.tags} />
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
       </td>
-      <td className="px-3 py-2.5 whitespace-nowrap">
-        <span className={`rounded-full px-2 py-0.5 text-xs ${LIFECYCLE_STYLES[project.lifecycle]}`}>
+      <td className={`px-3 py-2.5 ${PROJECT_COLUMN_CLASS.lifecycle}`}>
+        <span
+          className={`inline-block max-w-full truncate rounded-full px-2 py-0.5 text-xs ${LIFECYCLE_STYLES[project.lifecycle]}`}
+        >
           {LIFECYCLE_LABELS[project.lifecycle]}
         </span>
       </td>
-      <td className="max-w-[12rem] truncate px-3 py-2.5 text-sm text-muted-foreground" title={platforms}>
+      <td
+        className={`truncate px-3 py-2.5 text-xs text-muted-foreground ${PROJECT_COLUMN_CLASS.platforms}`}
+        title={platforms}
+      >
         {platforms}
       </td>
-      <td className="px-3 py-2.5 text-sm whitespace-nowrap">
+      <td className={`truncate px-3 py-2.5 text-sm ${PROJECT_COLUMN_CLASS.domain}`}>
         {project.productionDomain ? (
           <a
             href={`https://${project.productionDomain}`}
             target="_blank"
             rel="noreferrer"
-            className="hover:underline"
-            onClick={(event) => event.stopPropagation()}
+            title={project.productionDomain}
+            className="relative hover:underline"
           >
             {project.productionDomain}
           </a>
@@ -55,17 +71,22 @@ export function ProjectRow({ project, indicator }: IProps) {
           <span className="text-muted-foreground">—</span>
         )}
       </td>
-      <td className="max-w-[10rem] truncate px-3 py-2.5 text-sm text-muted-foreground">
+      <td
+        className={`truncate px-3 py-2.5 text-xs text-muted-foreground ${PROJECT_COLUMN_CLASS.server}`}
+        title={project.productionServerName ?? undefined}
+      >
         {project.productionServerName ?? '—'}
       </td>
-      <td className="px-3 py-2.5 whitespace-nowrap">
+      <td className={`truncate px-3 py-2.5 ${PROJECT_COLUMN_CLASS.indicator}`}>
         {indicator ? (
           <StatusIndicator indicator={indicator} />
         ) : (
           <span className="text-sm text-muted-foreground">—</span>
         )}
       </td>
-      <td className="px-3 py-2.5 text-sm text-muted-foreground whitespace-nowrap">
+      <td
+        className={`truncate px-3 py-2.5 text-xs text-muted-foreground ${PROJECT_COLUMN_CLASS.updatedAt}`}
+      >
         {formatUpdatedAt(project.updatedAt)}
       </td>
     </tr>

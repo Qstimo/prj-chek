@@ -10,7 +10,12 @@ import { PushTogglePanel } from './PushTogglePanel';
 import { WarningsPanel, WarningTone } from '@/components/WarningsPanel';
 import { splitWarningsByUrgency } from '@/utils';
 
-/** Сводка проектов. */
+/**
+ * Сводка проектов.
+ *
+ * Шире прочих экранов, как карты и рабочий экран саммари: здесь таблица
+ * в восемь колонок, и в `max-w-5xl` она не укладывалась вовсе.
+ */
 export default async function HomePage() {
   let projects: ProjectListItem[];
   let subject: CurrentSubjectResponse;
@@ -38,7 +43,7 @@ export default async function HomePage() {
   const indicators = Object.fromEntries(summary.map((row) => [row.projectId, row.indicator]));
 
   return (
-    <main className="mx-auto max-w-5xl space-y-6 p-6">
+    <main className="mx-auto max-w-6xl space-y-6 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Проекты</h1>
         <PushTogglePanel />
