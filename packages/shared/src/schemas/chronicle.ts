@@ -4,6 +4,27 @@ import { ChronicleSource } from '../enums';
 import { requiredDaySchema } from './day-date';
 import { HAS_NUL, isNulFree } from './plain-text';
 
+/**
+ * Предел длины содержимого записи хроники, в знаках.
+ *
+ * Прежние 65 536 **отменены**: это полчаса созвона по-русски, а запись
+ * хроники — это и есть текст саммари, то есть расшифровка созвона целиком.
+ * Человек получал `400` на том, для чего поток и сделан, и предел,
+ * отвергающий обычную работу, — не предел, а дефект.
+ *
+ * Новое число выведено из предела **службы распознавания**: она берёт
+ * запись длиной до четырёх часов, а четыре часа речи — это порядка
+ * четверти миллиона знаков. 256 Ки знаков покрывают самый длинный созвон,
+ * который вообще может доехать до текста, и ни одного знака сверх того:
+ * предел остаётся пределом, потому что `text` в PostgreSQL согласился бы и
+ * на мегабайты, а разбирать мегабайты чужого тела — наша память.
+ *
+ * Предел разборщика тела запроса стоит **выше** этого числа
+ * (`apps/api/src/common/body-parsers.ts`): иначе длинный текст получал бы
+ * неназванное `request entity too large` вместо `400` с полем и причиной.
+ */
+export const MAX_CHRONICLE_CONTENT_CHARS = 262_144;
+
 /** Запись хроники на уровне метаданных: дата, заголовок, источник (ТЗ 4.3). */
 export const chronicleMetadataSchema = z.object({
   id: z.string().uuid(),
@@ -30,7 +51,12 @@ export const chronicleDetailSchema = chronicleMetadataSchema.extend({
 export const chronicleEntryCreateSchema = z.object({
   occurredOn: requiredDaySchema,
   title: z.string().trim().min(1).max(300).refine(isNulFree, HAS_NUL),
-  content: z.string().trim().min(1).max(65_536).refine(isNulFree, HAS_NUL),
+  content: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_CHRONICLE_CONTENT_CHARS)
+    .refine(isNulFree, HAS_NUL),
 });
 
 /** Поля для правки. Источник не правится: он описывает происхождение. */

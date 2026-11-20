@@ -3,12 +3,12 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import { eq } from 'drizzle-orm';
-import { text } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
+import { intakeTextParser } from '../src/common/body-parsers';
 import { DATABASE } from '../src/db/db.module';
 import { auditLog, grants, projects, subjects, users } from '../src/db/schema';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
@@ -31,7 +31,9 @@ describe('HTTP: приёмный канал', () => {
     app = moduleRef.createNestApplication();
     app.use(cookieParser());
     // Тот же разбор текста, что и в main.ts: сводку шлют и чистым текстом.
-    app.use(text({ type: 'text/plain', limit: '64kb' }));
+    // Тот же разборщик, что в корне: свой предел в тесте разошёлся бы с
+    // боевым и скрыл бы ровно тот отказ, который мы и чиним.
+    app.use(intakeTextParser());
     await app.init();
   });
 

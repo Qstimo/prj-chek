@@ -1,4 +1,8 @@
-import { ModelAuthScheme, ModelServicePlacement } from '@cairn/shared';
+import {
+  MAX_CHRONICLE_CONTENT_CHARS,
+  ModelAuthScheme,
+  ModelServicePlacement,
+} from '@cairn/shared';
 
 /**
  * Настройки предложителя задач (дизайн, раздел 5.3).
@@ -68,8 +72,21 @@ export const DEFAULT_SUGGESTER_MODEL = 'gpt-4o-mini';
 /** Предел ожидания ответа по умолчанию, в секундах. */
 export const DEFAULT_SUGGESTER_TIMEOUT_SECONDS = 60;
 
-/** Предел объёма текста по умолчанию, в знаках. */
-export const DEFAULT_SUGGESTER_MAX_CHARS = 40_000;
+/**
+ * Предел объёма текста по умолчанию, в знаках.
+ *
+ * Прежние 40 000 **подняты** до предела самого текста саммари: предел
+ * разбивки ниже предела текста означал, что принятое саммари разбить
+ * нельзя, — человек получал отказ на том, для чего поток и сделан.
+ * Четверть миллиона знаков — это около 65 тысяч токенов, то есть треть
+ * окна у нынешних моделей.
+ *
+ * Остаётся настройкой, и это важно: за длинный запрос платит владелец
+ * установки, а узкое окно у модели — его обстоятельство, не наше. Узлу с
+ * маленьким окном число уменьшают переменной, и отказ тогда называет
+ * **его** число, а не наше.
+ */
+export const DEFAULT_SUGGESTER_MAX_CHARS = MAX_CHRONICLE_CONTENT_CHARS;
 
 /** Сколько задач принимаем от модели по умолчанию. */
 export const DEFAULT_SUGGESTER_MAX_TASKS = 50;

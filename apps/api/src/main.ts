@@ -2,10 +2,9 @@ import 'reflect-metadata';
 
 import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
-import { text } from 'express';
 
 import { AppModule } from './app.module';
-import { bodyParsers } from './common/body-parsers';
+import { bodyParsers, intakeTextParser } from './common/body-parsers';
 import { PostgresExceptionFilter } from './common/postgres-exception.filter';
 import { loadEnv } from './env';
 
@@ -21,8 +20,9 @@ async function bootstrap(): Promise<void> {
 
   bodyParsers().forEach((parser) => app.use(parser));
   app.use(cookieParser());
-  // Приёмный канал принимает сводку и чистым текстом (спека 5.1).
-  app.use(text({ type: 'text/plain', limit: '64kb' }));
+  // Приёмный канал принимает сводку и чистым текстом (спека 5.1); предел
+  // считается от его поля контракта, а не равен числу знаков.
+  app.use(intakeTextParser());
   app.setGlobalPrefix('api');
   // Сырое нарушение ограничения базы не должно выглядеть падением сервера.
   app.useGlobalFilters(new PostgresExceptionFilter(app.get(HttpAdapterHost).httpAdapter));

@@ -18,6 +18,7 @@ import { afterAll, beforeAll, beforeEach, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
+import { bodyParsers } from '../src/common/body-parsers';
 import { DATABASE } from '../src/db/db.module';
 import { grants, projects, subjects, users } from '../src/db/schema';
 import {
@@ -125,7 +126,12 @@ export function summariesHttpFixture() {
       // источник-константа отдаёт один и тот же адаптер всем шагам.
       .overrideProvider(TRANSCRIBER_SOURCE).useValue({ current: async () => transcriber })
       .overrideProvider(AUDIO_EXTRACTOR).useValue(extractor).compile();
-    app = module.createNestApplication();
+    // Разборщики — те же, что в корне, и это не придирка: умолчание
+    // `body-parser` (100 КиБ) ниже контракта, и длинный текст получал бы
+    // здесь неназванное `request entity too large` вместо отказа по схеме
+    // — то есть тест врал бы о том, что видит человек.
+    app = module.createNestApplication({ bodyParser: false });
+    bodyParsers().forEach((parser) => app.use(parser));
     app.use(cookieParser());
     await app.init();
   });

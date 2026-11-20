@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as hooks from '@/api/hooks';
 
 import { SummariesScreen } from './SummariesScreen';
-import { SCREEN_TEXTS } from './constants';
+import { DROP_CLOSE_GUARD_MS, SCREEN_TEXTS } from './constants';
 
 vi.mock('@/api/hooks');
 
@@ -233,6 +233,44 @@ describe('экран истории саммари', () => {
     expect(await screen.findByRole('dialog', { name: 'Новое саммари' })).toBeInTheDocument();
     expect(await screen.findByText(/Выбрано: MP4/)).toBeInTheDocument();
     expect(screen.getByLabelText('Заголовок')).toHaveValue('');
+  });
+
+  it('о возможности броска сказано постоянной подписью, а не только под курсором', () => {
+    // Подсказка под курсором приходит слишком поздно: её видит только тот,
+    // кто уже тащит файл.
+    render(<SummariesScreen />);
+
+    expect(screen.getByText(SCREEN_TEXTS.dropInvite)).toBeInTheDocument();
+  });
+
+  it('панель не закрывается тем же отпусканием кнопки, которым её открыли', async () => {
+    // Бросок кончается отпусканием кнопки мыши уже над открывшейся
+    // панелью: без защиты она закрывалась бы мгновенно, будто бросок не
+    // сработал. Проверяется Esc, потому что путь закрытия у Radix один и
+    // тот же — `onOpenChange(false)`.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+      render(<SummariesScreen />);
+
+      fireEvent.drop(window, { dataTransfer: { files: [recordingFile()], types: ['Files'] } });
+
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+
+      await user.keyboard('{Escape}');
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      // Прошло больше защитного окна — закрытие работает как всегда.
+      vi.advanceTimersByTime(DROP_CLOSE_GUARD_MS + 1);
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('пока файл тащат над страницей, сказано, что случится', () => {
