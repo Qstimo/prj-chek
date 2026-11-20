@@ -8,7 +8,7 @@ import { today } from '@/utils';
 import { FormActions } from '../FormActions';
 import { PassportFields } from './PassportFields';
 import { SourceFields } from './SourceFields';
-import { FORM_TEXTS, SummarySource, isRecordingMode } from './constants';
+import { FORM_TEXTS, SummarySource, isRecordingMode, sourceOfFile } from './constants';
 import type { IReadRecording } from './readRecording';
 import type { IProps, ISummaryFormValues } from './types';
 
@@ -23,11 +23,16 @@ import type { IProps, ISummaryFormValues } from './types';
  *
  * Пока запись отправляется, отправить нельзя ничего: кнопка выключена, а
  * процент идёт рядом с выбором файла.
+ *
+ * Форма может открыться с файлом в руках — брошенным на экран саммари. Тогда
+ * способ выбран за человека по расширению файла, а остаётся ему заголовок:
+ * проходить диалог выбора второй раз незачем.
  */
 export function SummaryForm({
   projects,
   onSubmit,
   recording,
+  droppedFile,
   error,
   isSubmitting = false,
 }: IProps) {
@@ -36,7 +41,10 @@ export function SummaryForm({
     occurredOn: today(),
     title: '',
     text: '',
-    source: SummarySource.Text,
+    source:
+      droppedFile === undefined
+        ? SummarySource.Text
+        : sourceOfFile(droppedFile.name, recording?.transcriber.isEnabled === true),
   });
   const [textError, setTextError] = useState<string>();
   const [picked, setPicked] = useState<IReadRecording>();
@@ -99,6 +107,7 @@ export function SummaryForm({
         source={values.source}
         text={values.text}
         {...(recording === undefined ? {} : { recording })}
+        {...(droppedFile === undefined ? {} : { droppedFile })}
         onSource={(source) => change('source', source)}
         onText={(text) => change('text', text)}
         onPick={setPicked}

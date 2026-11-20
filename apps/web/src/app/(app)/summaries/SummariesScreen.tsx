@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { describeApiError, summaryFailureOf } from '@/api';
 import {
@@ -20,6 +20,7 @@ import { Loader } from '@/components/Loader';
 import { SummaryForm, recordingErrorOf } from '@/components/SummaryForm';
 import { SummaryList } from '@/components/SummaryList';
 import { TranscriptionQueue } from '@/components/TranscriptionQueue';
+import { useFileDrop } from '@/hooks/useFileDrop';
 
 import { SCREEN_TEXTS } from './constants';
 
@@ -33,6 +34,13 @@ import { SCREEN_TEXTS } from './constants';
  * не история, и их отказ не повод показать экран ошибки вместо саммари.
  * Нет настроек — нет и третьего способа дать текст, и это ровно то, что
  * видит человек на установке без расшифровки.
+ *
+ * Файл, брошенный на страницу, открывает панель создания с ним в руках:
+ * запись созвона человек берёт из папки выгрузки, и путь «бросил» короче
+ * пути «нажал, нашёл, выбрал» ровно на диалог. Саммари при этом **не
+ * создаётся само**: заголовок — поле паспорта записи хроники, и выдумать
+ * его за человека нечем, а именем файла заполнить его нельзя — имена
+ * файлов наружу не уходят вовсе (дизайн расшифровки, 5.2).
  */
 export function SummariesScreen() {
   const router = useRouter();
@@ -41,6 +49,7 @@ export function SummariesScreen() {
   const transcriptions = useQueryTranscriptions();
   const transcriber = useQueryTranscriber();
   const [isCreating, setIsCreating] = useState(false);
+  const [dropped, setDropped] = useState<File>();
   const [percent, setPercent] = useState<number>();
   const upload = useRef<AbortController | undefined>(undefined);
   const create = useMutationCreateSummary();
@@ -48,6 +57,22 @@ export function SummariesScreen() {
   const cancel = useMutationCancelTranscription();
   const remove = useMutationDeleteTranscription();
   const retry = useMutationRetryTranscription();
+  // Бросок открывает панель с файлом; пока она открыта, бросок на
+  // страницу выключен — поле самой панели принимает его само, и вторая
+  // панель на тот же файл была бы лишней.
+  const isDragging = useFileDrop(
+    useCallback((file: File) => {
+      setDropped(file);
+      setIsCreating(true);
+    }, []),
+    !isCreating,
+  );
+
+  /** Закрытие панели: брошенный файл уходит вместе с ней. */
+  function close(): void {
+    setIsCreating(false);
+    setDropped(undefined);
+  }
 
   if (summaries.isPending || targets.isPending) {
     return <Loader size="page" />;
@@ -89,15 +114,30 @@ export function SummariesScreen() {
 
       <SummaryList items={summaries.data} />
 
+      {isDragging && (
+        <div
+          // Поверх страницы, но под панелью: пока панель открыта, броска
+          // на страницу нет вовсе, и подсказка с ней не встречается.
+          // Мышь сквозь подсказку проходит, иначе бросок пришёлся бы
+          // в неё, а не в страницу.
+          className="pointer-events-none fixed inset-4 z-30 flex items-center justify-center rounded-lg border-2 border-dashed border-border-strong bg-background/80"
+        >
+          <p className="rounded-md border border-border bg-surface px-4 py-2 text-sm">
+            {SCREEN_TEXTS.dropHint}
+          </p>
+        </div>
+      )}
+
       <Drawer
         isOpen={isCreating}
-        onClose={() => setIsCreating(false)}
+        onClose={close}
         title={SCREEN_TEXTS.create}
         width={DrawerWidth.Half}
       >
         <SummaryForm
           projects={targets.data}
           isSubmitting={create.isPending}
+          {...(dropped === undefined ? {} : { droppedFile: dropped })}
           error={describeApiError(create.error)}
           {...(settings === undefined
             ? {}
@@ -128,7 +168,7 @@ export function SummariesScreen() {
                         // Панель закрывается на успехе: саммари ещё нет,
                         // и переходить некуда — в списке появилась строка
                         // очереди (дизайн, 8.2).
-                        onSuccess: () => setIsCreating(false),
+                        onSuccess: close,
                         onSettled: () => setPercent(undefined),
                       },
                     );
@@ -140,7 +180,7 @@ export function SummariesScreen() {
               { projectId, input },
               {
                 onSuccess: (created) => {
-                  setIsCreating(false);
+                  close();
                   router.push(`/summaries/${created.id}`);
                 },
               },

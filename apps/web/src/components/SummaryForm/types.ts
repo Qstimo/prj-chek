@@ -58,6 +58,8 @@ export interface ISourceProps {
   onSource: (source: SummarySource) => void;
   onText: (text: string) => void;
   onPick: (recording: IReadRecording | undefined) => void;
+  /** Файл, брошенный на экран: проверяется тем же путём, что выбранный. */
+  droppedFile?: File;
 }
 
 /** Пропсы загрузки текстового файла. */
@@ -66,12 +68,16 @@ export interface IFileProps {
   hasText: boolean;
   /** Прочитанное и нормализованное содержимое. Имени файла здесь нет. */
   onText: (text: string) => void;
+  /** Файл, брошенный на экран саммари. */
+  droppedFile?: File;
 }
 
 /** Пропсы выбора записи созвона. */
 export interface IRecordingProps extends Omit<IRecordingSupport, 'onSubmit'> {
   /** Проверенная запись либо `undefined` — выбора нет или он негоден. */
   onPick: (recording: IReadRecording | undefined) => void;
+  /** Запись, брошенная на экран саммари. */
+  droppedFile?: File;
 }
 
 /** Пропсы формы создания саммари. */
@@ -87,6 +93,15 @@ export interface IProps {
   onSubmit: (projectId: string, input: SummaryCreate) => void;
   /** Третий способ дать текст; нет пропса — нет и способа. */
   recording?: IRecordingSupport;
+  /**
+   * Файл, брошенный на экран саммари, — с ним форма и открылась.
+   *
+   * Способ выбирается по расширению: текстовый файл едет в поле текста,
+   * остальное — в поле записи. Проверки при этом те же, что у выбранного
+   * кнопкой, вплоть до отказа: расширение решает, **куда** файл попадёт,
+   * а годен ли он — по-прежнему решает проверка поля.
+   */
+  droppedFile?: File;
   /** Отказ сервера. */
   error?: string;
   /** Отправка в процессе. */

@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import { text } from 'express';
 
 import { AppModule } from './app.module';
+import { bodyParsers } from './common/body-parsers';
 import { PostgresExceptionFilter } from './common/postgres-exception.filter';
 import { loadEnv } from './env';
 
@@ -12,8 +13,13 @@ import { loadEnv } from './env';
 async function bootstrap(): Promise<void> {
   loadEnv();
 
-  const app = await NestFactory.create(AppModule);
+  // Разборщики ставятся свои, а не умолчанием Nest: умолчание body-parser
+  // — 100 КиБ, то есть **ниже контракта**, и длинное тело получало
+  // неназванное `request entity too large` вместо `400` по схеме
+  // (`common/body-parsers.ts`).
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
 
+  bodyParsers().forEach((parser) => app.use(parser));
   app.use(cookieParser());
   // Приёмный канал принимает сводку и чистым текстом (спека 5.1).
   app.use(text({ type: 'text/plain', limit: '64kb' }));

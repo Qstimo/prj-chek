@@ -356,6 +356,20 @@ describe('третий способ дать текст: запись созво
     expect(screen.getByRole('button', { name: /Загрузить запись/ })).toBeDisabled();
   });
 
+  it('выбранная запись названа форматом и размером, но не именем', async () => {
+    // Без подтверждения выбор ничем не отличается от его отсутствия:
+    // нативное поле с именем файла спрятано, и сказать о выборе больше
+    // нечему. Имени при этом нет — ни здесь, ни в отправке.
+    await chooseRecording();
+
+    fireEvent.change(screen.getByLabelText(FIELD_LABELS.recording), {
+      target: { files: [recordingFile('Клиент Б, разбор инцидента.mp4')] },
+    });
+
+    expect(await screen.findByText(/Выбрано: MP4/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('Клиент');
+  });
+
   it('показывает настоящий процент загрузки', async () => {
     // Правка по сравнению с первой редакцией: неопределённый индикатор
     // годился при сорока мегабайтах, а на двух гигабайтах читается как
@@ -368,5 +382,63 @@ describe('третий способ дать текст: запись созво
     );
 
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '10');
+  });
+});
+
+describe('форма, открытая брошенным файлом', () => {
+  /** Форма с файлом в руках: так её открывает бросок на экран. */
+  function renderDropped(file: File, settings: Partial<TranscriberInfo> | null = {}) {
+    const onSubmitRecording = vi.fn();
+
+    render(
+      <SummaryForm
+        projects={[PROJECT]}
+        onSubmit={vi.fn()}
+        droppedFile={file}
+        {...(settings === null
+          ? {}
+          : {
+              recording: {
+                transcriber: { ...TRANSCRIBER, ...settings },
+                onSubmit: onSubmitRecording,
+              },
+            })}
+      />,
+    );
+
+    return onSubmitRecording;
+  }
+
+  it('запись проверяется и принимается без второго выбора', async () => {
+    // Проверки те же и в том же порядке: путь чтения у броска и у
+    // кнопки один.
+    renderDropped(recordingFile());
+
+    expect(await screen.findByText(/Выбрано: MP4/)).toBeInTheDocument();
+    expect(screen.getByLabelText(FIELD_LABELS.recording)).toBeInTheDocument();
+  });
+
+  it('негодная запись объясняет отказ, а не молчит', async () => {
+    renderDropped(recordingFile('созвон.mp4', [0x25, 0x50, 0x44, 0x46]));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/не похоже на запись/);
+  });
+
+  it('текстовый файл едет в поле текста, а не в расшифровку', async () => {
+    // `.txt` — это уже готовый текст, и отправлять его в службу
+    // распознавания нечему, даже когда она настроена.
+    renderDropped(fileWith('обсудили сроки', 'созвон.txt'));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Текст саммари/)).toHaveValue('обсудили сроки'),
+    );
+  });
+
+  it('без настроенной расшифровки запись получает названный отказ', async () => {
+    // Молчание заставило бы искать, чего нет: текстовый способ —
+    // единственный, и он честно говорит, что принимает.
+    renderDropped(recordingFile(), null);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/\.txt/);
   });
 });

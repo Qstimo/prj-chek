@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ConfirmDialog } from '../ConfirmDialog';
+import { FileField } from '../FileField';
 import { FormError } from '../FormError';
 import { FIELD_LABELS, FORM_TEXTS } from './constants';
 import { readTextFile } from './readTextFile';
@@ -15,21 +16,18 @@ import type { IFileProps } from './types';
  * обязан видеть и иметь возможность поправить то, что отправляет.
  * Непустое поле заменяется только после подтверждения — заменять молча
  * набранное руками нельзя.
+ *
+ * Файл приходит двумя путями — кнопкой и броском (на поле или на сам
+ * экран саммари), — и путь чтения у них один: отказ по расширению и
+ * кодировке объясняется одинаково независимо от того, как файл попал в
+ * форму.
  */
-export function TextFileField({ hasText, onText }: IFileProps) {
+export function TextFileField({ hasText, onText, droppedFile }: IFileProps) {
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState<string>();
 
-  async function pick(event: ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = event.target.files?.[0];
-    // Поле сбрасывается сразу: иначе выбор того же файла второй раз не
-    // поднимает события, и кнопка выглядела бы мёртвой.
-    event.target.value = '';
+  async function take(file: File): Promise<void> {
     setError(undefined);
-
-    if (!file) {
-      return;
-    }
 
     try {
       const text = await readTextFile(file);
@@ -46,19 +44,24 @@ export function TextFileField({ hasText, onText }: IFileProps) {
     }
   }
 
+  // Брошенный на экран файл читается тем же путём, что выбранный: форма
+  // открывается с ним уже в руках, и второго нажатия от человека ждать
+  // незачем.
+  useEffect(() => {
+    if (droppedFile !== undefined) {
+      void take(droppedFile);
+    }
+  }, [droppedFile]);
+
   return (
     <div className="space-y-1">
-      <label htmlFor="file" className="block text-sm font-medium">
-        {FIELD_LABELS.file}
-      </label>
-      <input
+      <FileField
         id="file"
-        type="file"
+        label={FIELD_LABELS.file}
         accept=".txt,.md"
-        onChange={(event) => void pick(event)}
-        className="block w-full text-sm"
+        hint={FORM_TEXTS.fileHint}
+        onFile={(file) => void take(file)}
       />
-      <p className="text-xs text-muted-foreground">{FORM_TEXTS.fileHint}</p>
 
       <FormError message={error} />
 

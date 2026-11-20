@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as hooks from '@/api/hooks';
 
 import { SummariesScreen } from './SummariesScreen';
+import { SCREEN_TEXTS } from './constants';
 
 vi.mock('@/api/hooks');
 
@@ -208,6 +209,54 @@ describe('экран истории саммари', () => {
       expect(screen.getByRole('button', { name: /Загрузить запись/ })).toBeEnabled(),
     );
 
+    await userEvent.click(screen.getByRole('button', { name: /Загрузить запись/ }));
+
+    expect(mutateOf(upload)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: PROJECT.id,
+        passport: { occurredOn: expect.any(String), title: 'Созвон по релизу' },
+        recording: expect.objectContaining({ uploadType: 'video/mp4' }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('файл, брошенный на страницу, открывает панель с ним в руках', async () => {
+    // Запись созвона человек берёт из папки выгрузки, и путь «бросил»
+    // короче пути «нажал, нашёл, выбрал» ровно на диалог. Саммари при
+    // этом не создаётся само: заголовок спрашивается, и выдумать его
+    // нечем — имя файла наружу не уходит вовсе.
+    render(<SummariesScreen />);
+
+    fireEvent.drop(window, { dataTransfer: { files: [recordingFile()] } });
+
+    expect(await screen.findByRole('dialog', { name: 'Новое саммари' })).toBeInTheDocument();
+    expect(await screen.findByText(/Выбрано: MP4/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Заголовок')).toHaveValue('');
+  });
+
+  it('пока файл тащат над страницей, сказано, что случится', () => {
+    // Без подсказки бросок остаётся угаданной возможностью.
+    render(<SummariesScreen />);
+
+    fireEvent.dragOver(window, { dataTransfer: { types: ['Files'], files: [] } });
+
+    expect(screen.getByText(SCREEN_TEXTS.dropHint)).toBeInTheDocument();
+  });
+
+  it('брошенная запись уходит загрузкой с паспортом, набранным руками', async () => {
+    const upload = mutation();
+
+    vi.mocked(hooks.useMutationUploadRecording).mockReturnValue(upload);
+
+    render(<SummariesScreen />);
+
+    fireEvent.drop(window, { dataTransfer: { files: [recordingFile()] } });
+
+    await userEvent.type(await screen.findByLabelText('Заголовок'), 'Созвон по релизу');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Загрузить запись/ })).toBeEnabled(),
+    );
     await userEvent.click(screen.getByRole('button', { name: /Загрузить запись/ }));
 
     expect(mutateOf(upload)).toHaveBeenCalledWith(
