@@ -1,12 +1,14 @@
 import {
   MODEL_SERVICE_BASE_URL_MISSING,
   MODEL_SERVICE_DISABLED,
+  MODEL_SERVICE_FOLDER_MISSING,
   MODEL_SERVICE_SECRET_MISSING,
   MODEL_SERVICE_SECRET_UNDECRYPTABLE,
   ModelAuthScheme,
   ModelServiceKind,
   ModelServicePlacement,
   ModelServiceSource,
+  TranscriberKind,
   type ModelServiceSettings,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
@@ -14,6 +16,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import { hostOf, suggesterSettings } from '../summaries/suggester/settings';
+import { transcriberSettings } from '../summaries/transcription/settings';
 import { ModelServicesRepository, type ModelServiceRecord } from './model-services.repository';
 
 /**
@@ -118,7 +121,15 @@ export class ModelServiceSettingsService {
   }
 }
 
-/** Настройка узла из окружения. Второй узел добавит здесь свою ветку. */
+/**
+ * Настройка узла из окружения — ветка на узел, механизм один.
+ *
+ * Разбор переменных остаётся там, где он жил: `suggesterSettings()` и
+ * `transcriberSettings()` читают **и** узловые поля, и пределы своего
+ * потока, а здесь берутся только узловые. Второго разбора тех же
+ * переменных не появляется, и граница «узел против поведения потока»
+ * проведена ровно один раз — выбором полей в этих ветках.
+ */
 function environmentOf(kind: ModelServiceKind): EnvironmentModelService {
   switch (kind) {
     case ModelServiceKind.TaskSuggester: {
@@ -137,7 +148,52 @@ function environmentOf(kind: ModelServiceKind): EnvironmentModelService {
         isOff: settings.isOff,
       };
     }
+
+    case ModelServiceKind.Transcriber: {
+      const settings = transcriberSettings();
+
+      return {
+        baseUrl: settings.baseUrl,
+        // Схемы своей переменной у расшифровки нет и не было: она
+        // выводится из вида узла — SpeechKit предъявляет ключ словом
+        // `Api-Key`, свой узел в контуре заголовка не требует вовсе.
+        authScheme: settings.authScheme,
+        secret: settings.apiKey === '' ? null : settings.apiKey,
+        model: settings.model,
+        folder: settings.folder,
+        placement: placementOfTranscriber(settings.kind),
+        timeoutSeconds: settings.timeoutSeconds,
+        isOff: settings.isOff,
+      };
+    }
   }
+}
+
+/**
+ * Вид узла расшифровки в размещение общего перечня.
+ *
+ * Два перечня с одними значениями — цена того, что расшифровка жила своим
+ * окружением; сводить их в один здесь нельзя, потому что `TranscriberKind`
+ * уезжает наружу в контракте очереди расшифровок (`TranscriptionJob`), и
+ * переименование поля сломало бы ответ ручки, а не одну эту функцию.
+ */
+function placementOfTranscriber(kind: TranscriberKind): ModelServicePlacement {
+  return kind === TranscriberKind.Local
+    ? ModelServicePlacement.Local
+    : ModelServicePlacement.External;
+}
+
+/**
+ * Нужен ли узлу каталог провайдера.
+ *
+ * Свойство провайдера, а не узла, но спрашивается по узлу: адаптер
+ * расшифровки у нас один — SpeechKit, и `x-folder-id` у него не
+ * опционален. У своей службы в контуре каталога нет и быть не может,
+ * поэтому правило кончается на внешнем размещении — то же самое правило,
+ * которым окружение выключало порт при пустом `CAIRN_TRANSCRIBER_FOLDER_ID`.
+ */
+function needsFolder(kind: ModelServiceKind, placement: ModelServicePlacement): boolean {
+  return kind === ModelServiceKind.Transcriber && placement === ModelServicePlacement.External;
 }
 
 /** Настройка из строки базы: источник `database` и ничего из окружения. */
@@ -146,6 +202,8 @@ function fromRecord(kind: ModelServiceKind, record: ModelServiceRecord): Resolve
     baseUrl: record.baseUrl,
     authScheme: record.authScheme,
     secret: record.secret,
+    folder: record.folder,
+    needsFolder: needsFolder(kind, record.placement),
     isSecretBroken: record.isSecretBroken,
     isEnabled: record.isEnabled,
   });
@@ -184,7 +242,12 @@ function fromEnvironment(
 ): ResolvedModelService {
   // Неполнота считается так, как если бы узел был включён: «чего не
   // хватает» и «выключено вами» — разные ответы, и первый важнее.
-  const missing = blockerOf({ ...environment, isSecretBroken: false, isEnabled: true });
+  const missing = blockerOf({
+    ...environment,
+    needsFolder: needsFolder(kind, environment.placement),
+    isSecretBroken: false,
+    isEnabled: true,
+  });
   const blockedBy = missing ?? (environment.isOff ? MODEL_SERVICE_DISABLED : null);
 
   return {
@@ -220,6 +283,8 @@ function blockerOf(input: {
   baseUrl: string;
   authScheme: ModelAuthScheme;
   secret: string | null;
+  folder: string | null;
+  needsFolder: boolean;
   isSecretBroken: boolean;
   isEnabled: boolean;
 }): string | null {
@@ -233,6 +298,12 @@ function blockerOf(input: {
 
   if (input.authScheme !== ModelAuthScheme.None && input.secret === null) {
     return MODEL_SERVICE_SECRET_MISSING;
+  }
+
+  // После ключа, а не прежде: ключ и каталог берут в одной консоли, и
+  // спрашивать второе, пока нет первого, значит вести по кругу.
+  if (input.needsFolder && input.folder === null) {
+    return MODEL_SERVICE_FOLDER_MISSING;
   }
 
   return input.isEnabled ? null : MODEL_SERVICE_DISABLED;

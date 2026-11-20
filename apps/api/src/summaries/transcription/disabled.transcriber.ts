@@ -3,6 +3,7 @@ import {
   SERVICE_AUDIO_TYPES,
   TRANSCRIBER_DISABLED,
   TranscriberKind,
+  type ModelProbeResult,
 } from '@cairn/shared';
 
 import {
@@ -52,6 +53,18 @@ export class DisabledTranscriber implements Transcriber {
    */
   async forget(_externalId: string): Promise<void> {
     return undefined;
+  }
+
+  /**
+   * Проверять связь нечем: узла нет.
+   *
+   * Отказ, а не исход «не ответил»: исход означал бы, что мы спросили, —
+   * а выключенный порт в сеть не ходит ни при каких условиях. Ручка
+   * администрирования до него и не доходит: она сама отвечает `409` на
+   * ненастроенный узел, и этот отказ — вторая стена, не первая.
+   */
+  async probe(_signal: AbortSignal): Promise<ModelProbeResult> {
+    throw this.disabled();
   }
 
   /** Один и тот же отказ на оба обмена: причина у них одна. */

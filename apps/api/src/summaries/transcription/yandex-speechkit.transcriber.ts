@@ -1,14 +1,17 @@
 import {
   ModelAuthScheme,
+  ModelProbeOutcome,
   RECORDING_TYPE_NOT_ACCEPTED,
   SERVICE_AUDIO_TYPES,
   TRANSCRIBER_UNAVAILABLE,
   TRANSCRIPTION_EMPTY,
+  type ModelProbeResult,
   type TranscriberKind,
   TranscriptionState,
 } from '@cairn/shared';
 import { Logger } from '@nestjs/common';
 
+import { probeOutcomeOf } from '../suggester/probe-outcome';
 import type { RecordingStore } from './recording-store';
 import type { TranscriberSettings } from './settings';
 import {
@@ -28,6 +31,25 @@ import { transcriptOf } from './transcript';
  * администратору настроить то, что он настроить не может.
  */
 export const OPERATIONS_BASE_URL = 'https://operation.api.cloud.yandex.net';
+
+/**
+ * Идентификатор операции, которой нет и не будет.
+ *
+ * Нагрузка проверки связи — и вся нагрузка целиком: **ни байта записи и
+ * ни байта данных проекта наружу не уходит**. Это то же требование, что у
+ * проверки предложителя, только исполненное иначе: там наружу уходит
+ * фраза-константа и модель на неё отвечает, здесь настоящий вызов означал
+ * бы отправку аудио и оплату, поэтому спрашивается судьба работы, которой
+ * не существует.
+ *
+ * Что проверка **выясняет**: дошли ли мы до настроенного адреса, принял ли
+ * узел ключ и каталог. Что она **не** выясняет: возьмёт ли служба нашу
+ * дорожку и хватит ли квоты, — об этом честно знает только расшифровка.
+ *
+ * Строка узнаваемая, а не случайная: она попадает в чужой лог, и человек
+ * по ту сторону вправе понять, что это проверка, а не поломанный клиент.
+ */
+export const PROBE_OPERATION_ID = 'cairn-probe-nonexistent-operation';
 
 /**
  * Как служба называет контейнеры (страница форматов SpeechKit).
@@ -51,6 +73,19 @@ const CONTAINER_BY_TYPE: Readonly<Record<string, string>> = {
  * нормализованный).
  */
 const MAX_RESPONSE_CHARS = 8_000_000;
+
+/**
+ * Код ответа на проверку в исход — с одной поправкой к общему правилу.
+ *
+ * Общая {@link probeOutcomeOf} читает `404` как «узла или модели нет», и
+ * для предложителя это верно: он спрашивает ручку, которая обязана быть.
+ * Здесь спрашивается операция, которой **не должно** быть, и «не найдено»
+ * — единственный ожидаемый успешный ответ. Поправка стоит здесь, а не в
+ * общей функции: там она сломала бы смысл для предложителя.
+ */
+function outcomeOfProbe(status: number): ModelProbeOutcome {
+  return status === 404 ? ModelProbeOutcome.Ok : probeOutcomeOf(status);
+}
 
 /** Ответ ручки операций в части, которая нас касается. */
 interface OperationResponse {
@@ -236,6 +271,57 @@ export class YandexSpeechKitTranscriber implements Transcriber {
       // неубранных результатов незачем.
       this.logger.warn(`Результаты операции ${externalId} у службы остались`);
     }
+  }
+
+  /**
+   * Спрашивает узел о несуществующей операции и называет исход.
+   *
+   * Адрес — **настроенный**, а не узел операций: проверять надо то, что
+   * вписал человек, а узел операций один на всё облако и о настройке не
+   * сказал бы ничего.
+   *
+   * `404` — это **успех**: операции с таким идентификатором у провайдера
+   * нет никогда, и ответ «не найдено» означает ровно то, что проверка
+   * выясняет — до узла дошли, ключ приняли, каталог приняли. Точный код
+   * ответа на несуществующую операцию живым вызовом **не проверен**:
+   * ответит узел `400` — исход будет `bad_request`, и это не ложь, он
+   * действительно не принял наш запрос; ответит `401` или `403` — исход
+   * назовёт ключ. Ни один из этих ответов не выдумывается: показывается
+   * то, что сказал узел, вместе с его кодом.
+   *
+   * Тело чужого ответа не читается вовсе: в нём бывает и ключ в строке
+   * запроса, и подробности чужой настройки, а исходу довольно кода.
+   */
+  async probe(signal: AbortSignal): Promise<ModelProbeResult> {
+    const startedAt = Date.now();
+    let response: Response;
+
+    try {
+      response = await this.send(
+        `${this.base()}/stt/v3/getRecognition?operationId=${PROBE_OPERATION_ID}`,
+        { signal },
+      );
+    } catch {
+      // Ни текста чужой ошибки, ни причины: исход — это код и время.
+      return this.probeResult(ModelProbeOutcome.Unavailable, null, startedAt);
+    }
+
+    return this.probeResult(outcomeOfProbe(response.status), response.status, startedAt);
+  }
+
+  /** Исход проверки: узел и модель называются, ключ — никогда. */
+  private probeResult(
+    outcome: ModelProbeOutcome,
+    status: number | null,
+    startedAt: number,
+  ): ModelProbeResult {
+    return {
+      outcome,
+      status,
+      host: this.#settings.host,
+      model: this.#settings.model,
+      durationMs: Date.now() - startedAt,
+    };
   }
 
   /** Тело ответа как объект; любая неудача — один и тот же отказ. */

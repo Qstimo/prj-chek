@@ -20,7 +20,12 @@ import { RoadmapRepository } from '../../roadmap/roadmap.repository';
 import { startTestDatabase, type TestDatabase } from '../../../test/db-fixture';
 import { SummariesRepository } from '../summaries.repository';
 import { RecordingStore, type AcceptedRecording } from './recording-store';
-import type { Transcriber, TranscriptionAnswer, TranscriptionInput } from './transcriber';
+import type {
+  Transcriber,
+  TranscriberSource,
+  TranscriptionAnswer,
+  TranscriptionInput,
+} from './transcriber';
 import { TranscriptionRepository } from './transcription.repository';
 import { TranscriptionService } from './transcription.service';
 import { UnavailableExtractor } from './unavailable.extractor';
@@ -97,6 +102,22 @@ class StubTranscriber implements Transcriber {
   }
 
   async forget(_externalId: string): Promise<void> {}
+
+  /** Проверка связи этих тестов не касается: она живёт в администрировании. */
+  async probe(): Promise<never> {
+    throw new Error('проверка связи в этом тесте не вызывается');
+  }
+}
+
+/**
+ * Источник-константа из заглушки.
+ *
+ * Тесты подменяют **адаптер**, а не настройку узла: что настройка
+ * доезжает из базы, проверяет `transcriber.source.ts` со своей стороны, а
+ * здесь важно поведение шагов на известном порту.
+ */
+function sourceOf(transcriber: Transcriber): TranscriberSource {
+  return { current: async () => transcriber };
 }
 
 describe('установка без ffmpeg', () => {
@@ -128,7 +149,7 @@ describe('установка без ffmpeg', () => {
       chronicle,
       new AuditService(),
       store,
-      new StubTranscriber(),
+      sourceOf(new StubTranscriber()),
       new UnavailableExtractor(),
     );
   });

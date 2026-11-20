@@ -5,7 +5,7 @@ import { useState, type FormEvent } from 'react';
 
 import { ConfirmDialog } from '../ConfirmDialog';
 import { FormActions } from '../FormActions';
-import { PRESETS, UNVERIFIED_PRESET_NOTE, URL_ERROR_MESSAGES } from './constants';
+import { PRESETS_BY_KIND, UNVERIFIED_PRESET_NOTE, URL_ERROR_MESSAGES } from './constants';
 import { LimitFields } from './LimitFields';
 import { NodeFields } from './NodeFields';
 import { SecretField } from './SecretField';
@@ -23,6 +23,11 @@ import type { IProps, ModelServiceFormValues, Preset } from './types';
  *
  * Пресет не свойство настройки, а действие: он не хранится, при открытии
  * не восстанавливается и заполненные поля затирает только с согласия.
+ *
+ * Набор заготовок, выбор вида и подпись у каталога зависят от **узла**:
+ * у разбивки и распознавания провайдеры разные, и один перечень на оба
+ * предлагал бы узлу распознавания адрес чат-модели — настройку, которая
+ * сохранится и не заработает.
  */
 export function ModelServiceForm({
   settings,
@@ -35,6 +40,7 @@ export function ModelServiceForm({
   const [preset, setPreset] = useState<Preset | null>(null);
   const [pending, setPending] = useState<Preset | null>(null);
   const [urlError, setUrlError] = useState<string | undefined>(undefined);
+  const presets = PRESETS_BY_KIND[settings.kind];
 
   function change<K extends keyof ModelServiceFormValues>(
     key: K,
@@ -56,7 +62,7 @@ export function ModelServiceForm({
 
   /** Выбор заготовки: заполненный адрес затирается только с согласия. */
   function choose(value: string): void {
-    const chosen = PRESETS.find((candidate) => candidate.value === value);
+    const chosen = presets.find((candidate) => candidate.value === value);
 
     if (!chosen) {
       return;
@@ -93,7 +99,7 @@ export function ModelServiceForm({
         label="Пресет"
         value={preset?.value ?? ''}
         onChange={choose}
-        options={[{ value: '', label: 'Не выбран' }, ...PRESETS]}
+        options={[{ value: '', label: 'Не выбран' }, ...presets]}
         hint={preset?.isUnverified ? UNVERIFIED_PRESET_NOTE : undefined}
       />
 
@@ -109,9 +115,14 @@ export function ModelServiceForm({
         </ConfirmDialog>
       )}
 
-      <NodeFields values={values} onChange={change} modelHint={preset?.modelHint} />
+      <NodeFields
+        values={values}
+        onChange={change}
+        kind={settings.kind}
+        modelHint={preset?.modelHint}
+      />
 
-      <LimitFields values={values} onChange={change} />
+      <LimitFields values={values} onChange={change} kind={settings.kind} />
 
       <SecretField
         hasSecret={settings.hasSecret}

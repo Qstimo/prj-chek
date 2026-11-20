@@ -2,7 +2,7 @@
 
 import type { ModelServicePlacement } from '@cairn/shared';
 
-import { PLACEMENT_OPTIONS } from './constants';
+import { PLACEMENT_OPTIONS_BY_KIND } from './constants';
 import { SelectField } from './SelectField';
 import type { ILimitFieldsProps } from './types';
 
@@ -12,8 +12,12 @@ import type { ILimitFieldsProps } from './types';
  * Три поля вместе, потому что отвечают на один вопрос — «как мы с этим
  * узлом обходимся», — а не описывают сам узел. Вид среди них не случайно:
  * он знает только человек, и он же решает, допустим ли `http`.
+ *
+ * Выбор вида — по узлу: у распознавания он один, потому что своей службы
+ * распознавания в сборке нет, и предлагать вид «в вашем контуре» значило
+ * бы предложить настройку, которая сохранится и не заработает.
  */
-export function LimitFields({ values, onChange }: ILimitFieldsProps) {
+export function LimitFields({ values, onChange, kind }: ILimitFieldsProps) {
   return (
     <>
       <SelectField
@@ -21,7 +25,7 @@ export function LimitFields({ values, onChange }: ILimitFieldsProps) {
         label="Вид"
         value={values.placement}
         onChange={(value) => onChange('placement', value as ModelServicePlacement)}
-        options={PLACEMENT_OPTIONS}
+        options={PLACEMENT_OPTIONS_BY_KIND[kind]}
       />
 
       <div className="space-y-1">

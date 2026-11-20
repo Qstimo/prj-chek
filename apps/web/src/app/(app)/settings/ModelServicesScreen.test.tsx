@@ -34,6 +34,23 @@ const SETTINGS: ModelServiceSettings = {
   updatedByLabel: 'админ@cairn.local',
 };
 
+/** Узел расшифровки: ненастроенный, как на свежей установке. */
+const TRANSCRIBER: ModelServiceSettings = {
+  ...SETTINGS,
+  kind: ModelServiceKind.Transcriber,
+  source: ModelServiceSource.None,
+  baseUrl: 'https://stt.api.cloud.yandex.net',
+  host: 'stt.api.cloud.yandex.net',
+  authScheme: ModelAuthScheme.ApiKey,
+  model: 'general',
+  folder: null,
+  hasSecret: false,
+  isOperational: false,
+  blockedBy: 'secret_missing',
+  updatedAt: null,
+  updatedByLabel: null,
+};
+
 /** Успешный query-результат для мока. */
 function query<T>(data: T) {
   return { data, isPending: false, isError: false } as never;
@@ -162,5 +179,44 @@ describe('ModelServicesScreen', () => {
     render(<ModelServicesScreen />);
 
     expect(screen.getByRole('alert')).toHaveTextContent(/Не удалось загрузить/);
+  });
+});
+
+describe('экран настроек: узел расшифровки', () => {
+  it('показывает оба узла, и расшифровку — своей карточкой', () => {
+    // Карточка ненастроенного узла обязана быть: пустой экран выглядел
+    // бы как «настраивать нечего», а человек ищет именно её.
+    vi.mocked(hooks.useQueryModelServices).mockReturnValue(query([SETTINGS, TRANSCRIBER]));
+
+    render(<ModelServicesScreen />);
+
+    expect(screen.getByText('Разбивка саммари на задачи')).toBeInTheDocument();
+    expect(screen.getByText('Расшифровка записи созвона')).toBeInTheDocument();
+    expect(screen.getByText('Не настроено')).toBeInTheDocument();
+  });
+
+  it('правка расшифровки отправляет настройку её узла', async () => {
+    vi.mocked(hooks.useQueryModelServices).mockReturnValue(query([SETTINGS, TRANSCRIBER]));
+
+    render(<ModelServicesScreen />);
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Править' })[1]!);
+    await userEvent.type(screen.getByLabelText('Каталог'), 'каталог');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(save).toHaveBeenCalledWith({
+      kind: ModelServiceKind.Transcriber,
+      input: expect.objectContaining({ folder: 'каталог' }),
+    });
+  });
+
+  it('у ненастроенного узла проверять связь нечем', () => {
+    // Кнопка выключена, а не отвечает отказом: в сеть при ненастроенном
+    // узле не идёт ни один байт, и выяснять это нажатием незачем.
+    vi.mocked(hooks.useQueryModelServices).mockReturnValue(query([TRANSCRIBER]));
+
+    render(<ModelServicesScreen />);
+
+    expect(screen.getByRole('button', { name: 'Проверить связь' })).toBeDisabled();
   });
 });

@@ -28,7 +28,7 @@ import {
 import { AUDIO_EXTRACTOR, type AudioExtractor } from '../src/summaries/transcription/extractor';
 import { RECORDINGS_DIR_ENV } from '../src/summaries/transcription/recording-store';
 import {
-  TRANSCRIBER,
+  TRANSCRIBER_SOURCE,
   type Transcriber,
   type TranscriptionAnswer,
 } from '../src/summaries/transcription/transcriber';
@@ -60,6 +60,11 @@ class FixtureTranscriber implements Transcriber {
 
   async forget(): Promise<void> {
     return undefined;
+  }
+
+  /** Проверка связи этих маршрутов не касается: она в администрировании. */
+  async probe(): Promise<never> {
+    throw new Error('проверка связи в HTTP-тестах не вызывается');
   }
 }
 
@@ -116,7 +121,9 @@ export function summariesHttpFixture() {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE).useValue(db.db)
       .overrideProvider(TASK_SUGGESTER_SOURCE).useValue(suggesterSource)
-      .overrideProvider(TRANSCRIBER).useValue(transcriber)
+      // Подменяется источник, а не адаптер: порт берётся на вызов, и
+      // источник-константа отдаёт один и тот же адаптер всем шагам.
+      .overrideProvider(TRANSCRIBER_SOURCE).useValue({ current: async () => transcriber })
       .overrideProvider(AUDIO_EXTRACTOR).useValue(extractor).compile();
     app = module.createNestApplication();
     app.use(cookieParser());

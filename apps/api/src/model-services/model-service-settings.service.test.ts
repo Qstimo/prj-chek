@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   MODEL_SERVICE_BASE_URL_MISSING,
   MODEL_SERVICE_DISABLED,
+  MODEL_SERVICE_FOLDER_MISSING,
   MODEL_SERVICE_SECRET_MISSING,
   MODEL_SERVICE_SECRET_UNDECRYPTABLE,
   ModelAuthScheme,
@@ -25,8 +26,23 @@ import {
   SUGGESTER_MODEL_ENV,
   SUGGESTER_NODE_ENV_NAMES,
 } from '../summaries/suggester/settings';
+import {
+  TRANSCRIBER_API_KEY_ENV,
+  TRANSCRIBER_FOLDER_ENV,
+  TRANSCRIBER_KIND_ENV,
+  TRANSCRIBER_NODE_ENV_NAMES,
+} from '../summaries/transcription/settings';
 import { ModelServiceSettingsService } from './model-service-settings.service';
 import { ModelServicesRepository } from './model-services.repository';
+
+/**
+ * Переменные узлов обоих видов: чистится окружение **целиком**.
+ *
+ * Ключ, оставленный соседней проверкой или оболочкой разработчика, включал
+ * бы узел там, где проверяется ненастроенный, — и проверка проходила бы по
+ * чужой настройке.
+ */
+const NODE_ENV_NAMES = [...SUGGESTER_NODE_ENV_NAMES, ...TRANSCRIBER_NODE_ENV_NAMES];
 
 describe('ModelServiceSettingsService', () => {
   let testDb: TestDatabase;
@@ -71,14 +87,14 @@ describe('ModelServiceSettingsService', () => {
 
     // Чистое окружение на каждую проверку: ключ, оставленный в оболочке
     // разработчика, включал бы узел там, где проверяется ненастроенный.
-    saved = Object.fromEntries(SUGGESTER_NODE_ENV_NAMES.map((name) => [name, process.env[name]]));
-    for (const name of SUGGESTER_NODE_ENV_NAMES) {
+    saved = Object.fromEntries(NODE_ENV_NAMES.map((name) => [name, process.env[name]]));
+    for (const name of NODE_ENV_NAMES) {
       delete process.env[name];
     }
   });
 
   afterEach(() => {
-    for (const name of SUGGESTER_NODE_ENV_NAMES) {
+    for (const name of NODE_ENV_NAMES) {
       if (saved[name] === undefined) {
         delete process.env[name];
       } else {
@@ -251,5 +267,115 @@ describe('ModelServiceSettingsService', () => {
 
     expect(all.map((settings) => settings.kind)).toEqual(Object.values(ModelServiceKind));
     expect(all[0]?.source).toBe(ModelServiceSource.None);
+  });
+
+  describe('узел расшифровки', () => {
+    const transcriber = ModelServiceKind.Transcriber;
+
+    /** Полная настройка узла распознавания: каталог у внешнего обязателен. */
+    const speechKit: ModelServiceUpdate = {
+      baseUrl: 'https://stt.iz-bazy.example',
+      authScheme: ModelAuthScheme.ApiKey,
+      model: 'general',
+      folder: 'каталог-из-базы',
+      placement: ModelServicePlacement.External,
+      timeoutSeconds: 180,
+      isEnabled: true,
+    };
+
+    it('без строки берёт настройку из окружения целиком', async () => {
+      // Установки, собранные по прежнему README, продолжают работать без
+      // единой правки: окружение остаётся запасным источником.
+      process.env[TRANSCRIBER_KIND_ENV] = 'external';
+      process.env[TRANSCRIBER_API_KEY_ENV] = 'ключ-из-окружения';
+      process.env[TRANSCRIBER_FOLDER_ENV] = 'каталог-из-окружения';
+
+      const resolved = await service.resolve(transcriber);
+
+      expect(resolved.source).toBe(ModelServiceSource.Environment);
+      expect(resolved.secret).toBe('ключ-из-окружения');
+      expect(resolved.folder).toBe('каталог-из-окружения');
+      expect(resolved.authScheme).toBe(ModelAuthScheme.ApiKey);
+      expect(resolved.isOperational).toBe(true);
+    });
+
+    it('строка перебивает окружение целиком', async () => {
+      process.env[TRANSCRIBER_API_KEY_ENV] = 'ключ-из-окружения';
+      process.env[TRANSCRIBER_FOLDER_ENV] = 'каталог-из-окружения';
+      await repository.save(testDb.db, transcriber, subjectId, {
+        ...speechKit,
+        secret: 'ключ-из-базы',
+      });
+
+      const resolved = await service.resolve(transcriber);
+
+      expect(resolved.source).toBe(ModelServiceSource.Database);
+      expect(resolved.secret).toBe('ключ-из-базы');
+      expect(resolved.folder).toBe('каталог-из-базы');
+      expect(resolved.host).toBe('stt.iz-bazy.example');
+    });
+
+    it('внешний узел без каталога не работает и называет каталог', async () => {
+      // То же правило, которым окружение выключало порт при пустом
+      // `CAIRN_TRANSCRIBER_FOLDER_ID`: `x-folder-id` у SpeechKit не
+      // опционален, и узел, включённый наполовину, отказывал бы на каждой
+      // расшифровке вместо того, чтобы честно показать, чего не хватает.
+      await repository.save(testDb.db, transcriber, subjectId, {
+        ...speechKit,
+        folder: null,
+        secret: 'ключ-есть',
+      });
+
+      const resolved = await service.resolve(transcriber);
+
+      expect(resolved.isOperational).toBe(false);
+      expect(resolved.blockedBy).toBe(MODEL_SERVICE_FOLDER_MISSING);
+    });
+
+    it('узлу в контуре каталог не нужен', async () => {
+      // Каталог — свойство провайдера, а не узла: своей службе
+      // распознавания в контуре его неоткуда взять, и требовать его
+      // значило бы запретить ровно тот путь, где запись не покидает контур.
+      await repository.save(testDb.db, transcriber, subjectId, {
+        ...speechKit,
+        baseUrl: 'http://whisper.internal:9000',
+        authScheme: ModelAuthScheme.None,
+        placement: ModelServicePlacement.Local,
+        folder: null,
+      });
+
+      const resolved = await service.resolve(transcriber);
+
+      expect(resolved.isOperational).toBe(true);
+    });
+
+    it('выключатель окружения остаётся решением человека', async () => {
+      process.env[TRANSCRIBER_KIND_ENV] = 'off';
+      process.env[TRANSCRIBER_API_KEY_ENV] = 'ключ-из-окружения';
+      process.env[TRANSCRIBER_FOLDER_ENV] = 'каталог-из-окружения';
+
+      const resolved = await service.resolve(transcriber);
+
+      expect(resolved.source).toBe(ModelServiceSource.Environment);
+      expect(resolved.isEnabled).toBe(false);
+      expect(resolved.blockedBy).toBe(MODEL_SERVICE_DISABLED);
+    });
+
+    it('ни строки, ни ключа в окружении — узел не настроен', async () => {
+      const resolved = await service.resolve(transcriber);
+
+      expect(resolved.source).toBe(ModelServiceSource.None);
+      expect(resolved.blockedBy).toBe(MODEL_SERVICE_SECRET_MISSING);
+    });
+
+    it('настройка одного узла не трогает другой', async () => {
+      // Выбор источника — целиком на узел: строка расшифровки не делает
+      // базу источником для разбивки, и наоборот (дизайн, 2.1).
+      await repository.save(testDb.db, transcriber, subjectId, { ...speechKit, secret: 'ключ' });
+
+      expect((await service.resolve(ModelServiceKind.TaskSuggester)).source).toBe(
+        ModelServiceSource.None,
+      );
+    });
   });
 });

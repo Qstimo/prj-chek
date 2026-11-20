@@ -351,6 +351,13 @@
       "when": 1795102304280,
       "tag": "0049_incident_probe",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795172351386,
+      "tag": "0050_model_service_transcriber",
+      "breakpoints": true
     }
   ]
 }

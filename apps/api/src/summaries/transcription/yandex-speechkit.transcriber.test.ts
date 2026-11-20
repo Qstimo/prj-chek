@@ -1,6 +1,7 @@
 import {
   DEFAULT_MAX_SEND_BYTES,
   ModelAuthScheme,
+  ModelProbeOutcome,
   RECORDING_TYPE_NOT_ACCEPTED,
   TRANSCRIBER_DISABLED,
   TRANSCRIBER_UNAVAILABLE,
@@ -16,6 +17,7 @@ import type { TranscriberSettings } from './settings';
 import { TranscriberFailure, type TranscriptionInput } from './transcriber';
 import {
   OPERATIONS_BASE_URL,
+  PROBE_OPERATION_ID,
   YandexSpeechKitTranscriber,
   containerTypeOf,
 } from './yandex-speechkit.transcriber';
@@ -312,6 +314,78 @@ describe('адаптер Yandex SpeechKit', () => {
     await expect(transcriber.forget('операция-1')).resolves.toBeUndefined();
   });
 
+  describe('проверка связи', () => {
+    /** Адрес, по которому ушла проверка. */
+    function probedUrl(): string {
+      return String(fetchMock.mock.calls[0]![0]);
+    }
+
+    it('спрашивает о несуществующей операции и не отправляет ни байта записи', async () => {
+      // Главное свойство этой проверки: она **бесплатна**. Живая
+      // расшифровка стоит денег у провайдера, и кнопка «Проверить связь»,
+      // которая их тратит, нажималась бы один раз в жизни.
+      fetchMock.mockResolvedValue(new Response('{}', { status: 404 }));
+
+      await transcriber.probe(AbortSignal.timeout(1000));
+
+      expect(probedUrl()).toContain(PROBE_OPERATION_ID);
+      expect(fetchMock.mock.calls[0]![1]).not.toHaveProperty('body');
+      expect(store.read).not.toHaveBeenCalled();
+    });
+
+    it('спрашивает настроенный узел, а не узел операций', async () => {
+      // Проверять надо тот адрес, который вписал человек: узел операций
+      // один на всё облако, и его ответ ничего не сказал бы о настройке.
+      fetchMock.mockResolvedValue(new Response('{}', { status: 404 }));
+
+      await transcriber.probe(AbortSignal.timeout(1000));
+
+      expect(probedUrl().startsWith(SETTINGS.baseUrl)).toBe(true);
+      expect(probedUrl().startsWith(OPERATIONS_BASE_URL)).toBe(false);
+    });
+
+    it('«операции нет» — это успех: ключ и каталог приняты', async () => {
+      // Операции с таким идентификатором у провайдера нет никогда, и
+      // `404` на неё означает ровно то, что проверка и выясняет: до узла
+      // дошли, ключ приняли, каталог приняли.
+      fetchMock.mockResolvedValue(new Response('{}', { status: 404 }));
+
+      const result = await transcriber.probe(AbortSignal.timeout(1000));
+
+      expect(result.outcome).toBe(ModelProbeOutcome.Ok);
+      expect(result.status).toBe(404);
+      expect(result.host).toBe('stt.api.cloud.yandex.net');
+      expect(result.model).toBe('general');
+    });
+
+    it('негодный ключ отличается от негодного адреса', async () => {
+      fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+
+      expect((await transcriber.probe(AbortSignal.timeout(1000))).outcome).toBe(
+        ModelProbeOutcome.Unauthorized,
+      );
+    });
+
+    it('молчание узла — исход проверки, а не исключение', async () => {
+      // Ручка администрирования отвечает `200` с исходом: она справилась,
+      // когда выяснила, что чужой узел не отвечает.
+      fetchMock.mockRejectedValue(new Error('сеть'));
+
+      const result = await transcriber.probe(AbortSignal.timeout(1000));
+
+      expect(result.outcome).toBe(ModelProbeOutcome.Unavailable);
+      expect(result.status).toBeNull();
+    });
+
+    it('тела чужого ответа в исходе нет', async () => {
+      fetchMock.mockResolvedValue(new Response('ключ sk-утечка негоден', { status: 403 }));
+
+      const result = await transcriber.probe(AbortSignal.timeout(1000));
+
+      expect(JSON.stringify(result)).not.toContain('sk-утечка');
+    });
+  });
+
   it('называет узел, модель, предел и принимаемое службой', () => {
     expect(transcriber.host).toBe('stt.api.cloud.yandex.net');
     expect(transcriber.model).toBe('general');
@@ -347,6 +421,14 @@ describe('выключенный порт', () => {
 
   it('узла не называет: врать подписью над кнопкой нельзя', () => {
     expect(disabled.host).toBeNull();
+  });
+
+  it('проверять связь выключенному нечем, и он отказывает', async () => {
+    // Отказ, а не исход `unavailable`: «узел не ответил» сказало бы, что
+    // мы спрашивали, — а мы не спрашивали и не вправе спрашивать.
+    await expect(disabled.probe(signal)).rejects.toMatchObject({
+      code: TRANSCRIBER_DISABLED,
+    });
   });
 
   it('забыть у службы нечего, и это не отказ', async () => {

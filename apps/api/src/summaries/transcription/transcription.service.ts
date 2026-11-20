@@ -39,7 +39,7 @@ import { mediaPathsOf } from './media-paths';
 import { PrepareAction, prepareDecision } from './prepare-decision';
 import { RecordingStore, RecordingStoreFailure } from './recording-store';
 import { transcriberSettings } from './settings';
-import { TRANSCRIBER, type Transcriber } from './transcriber';
+import { TRANSCRIBER_SOURCE, type TranscriberSource } from './transcriber';
 import { TranscriptionRepository } from './transcription.repository';
 
 /**
@@ -71,7 +71,10 @@ export class TranscriptionService implements OnModuleInit {
     private readonly chronicle: ChronicleRepository,
     private readonly audit: AuditService,
     private readonly store: RecordingStore,
-    @Inject(TRANSCRIBER) private readonly transcriber: Transcriber,
+    // Источник, а не адаптер: настройка узла правится на экране и
+    // действует без перезапуска, поэтому порт берётся на каждую
+    // операцию (`transcriber.source.ts`).
+    @Inject(TRANSCRIBER_SOURCE) private readonly transcribers: TranscriberSource,
     @Inject(AUDIO_EXTRACTOR) private readonly extractor: AudioExtractor,
   ) {}
 
@@ -115,8 +118,12 @@ export class TranscriptionService implements OnModuleInit {
     body: Readable,
   ): Promise<TranscriptionJob> {
     const settings = transcriberSettings();
+    // Порт берётся один раз на приём: решение «можно ли принимать» и
+    // паспорт задачи обязаны описывать **одну** настройку, иначе задача
+    // уехала бы с именем узла, которого в ней уже нет.
+    const transcriber = await this.transcribers.current();
 
-    if (!this.transcriber.isEnabled) {
+    if (!transcriber.isEnabled) {
       throw new ConflictException({
         code: TRANSCRIBER_DISABLED,
         message: 'Расшифровка записи не настроена: обратитесь к администратору.',
@@ -127,7 +134,7 @@ export class TranscriptionService implements OnModuleInit {
     // вопрос задаётся один, про контейнер. Соврать здесь в сторону «можно»
     // безопасно — настоящее решение принимает второй вызов ниже, когда
     // известны и размер, и содержимое.
-    this.requirePrepared(request.uploadType, 0, true);
+    this.requirePrepared(request.uploadType, 0, true, transcriber.maxSendBytes);
 
     const jobId = randomUUID();
     const accepted = await this.accepting(() =>
@@ -139,6 +146,7 @@ export class TranscriptionService implements OnModuleInit {
         request.uploadType,
         accepted.bytes,
         accepted.isOpus,
+        transcriber.maxSendBytes,
       );
 
       return await this.db.transaction(async (tx) => {
@@ -149,8 +157,8 @@ export class TranscriptionService implements OnModuleInit {
           uploadPath: accepted.path,
           uploadBytes: accepted.bytes,
           uploadType: request.uploadType,
-          transcriber: this.transcriber.kind,
-          model: this.transcriber.model,
+          transcriber: transcriber.kind,
+          model: transcriber.model,
           // `Pass` означает «загруженный файл и есть дорожка»: та же
           // строка пути, а не копия файла.
           audio:
@@ -167,7 +175,7 @@ export class TranscriptionService implements OnModuleInit {
           metadata: {
             uploadBytes: accepted.bytes,
             uploadType: request.uploadType,
-            transcriber: this.transcriber.kind,
+            transcriber: transcriber.kind,
             occurredOn: request.occurredOn,
             title: request.title,
           },
@@ -199,15 +207,16 @@ export class TranscriptionService implements OnModuleInit {
    */
   async transcriberInfo(): Promise<TranscriberInfo> {
     const settings = transcriberSettings();
-    const isEnabled = this.transcriber.isEnabled;
+    const transcriber = await this.transcribers.current();
+    const isEnabled = transcriber.isEnabled;
 
     return {
       isEnabled,
-      kind: this.transcriber.kind,
-      host: isEnabled ? this.transcriber.host : null,
-      model: isEnabled ? this.transcriber.model || null : null,
+      kind: transcriber.kind,
+      host: isEnabled ? transcriber.host : null,
+      model: isEnabled ? transcriber.model || null : null,
       maxUploadBytes: settings.maxUploadBytes,
-      maxSendBytes: this.transcriber.maxSendBytes,
+      maxSendBytes: transcriber.maxSendBytes,
       canExtract: this.extractor.isAvailable,
       acceptedTypes: isEnabled ? this.extractor.acceptedTypes : [],
       audioBitrate: this.extractor.bitrate,
@@ -285,7 +294,9 @@ export class TranscriptionService implements OnModuleInit {
     projectId: string,
     summaryId: string,
   ): Promise<TranscriptionJob> {
-    if (!this.transcriber.isEnabled) {
+    const transcriber = await this.transcribers.current();
+
+    if (!transcriber.isEnabled) {
       throw new ConflictException({
         code: TRANSCRIBER_DISABLED,
         message: 'Расшифровка записи не настроена: обратитесь к администратору.',
@@ -295,8 +306,8 @@ export class TranscriptionService implements OnModuleInit {
     try {
       return await this.db.transaction((tx) =>
         this.repository.createForSummary(subject, tx, projectId, summaryId, {
-          transcriber: this.transcriber.kind,
-          model: this.transcriber.model,
+          transcriber: transcriber.kind,
+          model: transcriber.model,
         }),
       );
     } catch (cause) {
@@ -444,7 +455,7 @@ export class TranscriptionService implements OnModuleInit {
 
     if (row.externalId) {
       try {
-        await this.transcriber.forget(row.externalId);
+        await (await this.transcribers.current()).forget(row.externalId);
       } catch (cause) {
         this.logger.warn(`Служба не забыла результаты ${row.externalId}: ${String(cause)}`);
       }
@@ -610,12 +621,17 @@ export class TranscriptionService implements OnModuleInit {
    * сказал бы «такого формата не бывает», и человек пошёл бы искать другой
    * файл вместо того, чтобы попросить администратора (дизайн, 5.3).
    */
-  private requirePrepared(uploadType: string, uploadBytes: number, isOpus: boolean): PrepareAction {
+  private requirePrepared(
+    uploadType: string,
+    uploadBytes: number,
+    isOpus: boolean,
+    maxSendBytes: number,
+  ): PrepareAction {
     const decision = prepareDecision({
       uploadType,
       uploadBytes,
       isOpus,
-      maxSendBytes: this.transcriber.maxSendBytes,
+      maxSendBytes,
       canExtract: this.extractor.isAvailable,
     });
 

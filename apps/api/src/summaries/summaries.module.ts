@@ -1,4 +1,3 @@
-import { TranscriberKind } from '@cairn/shared';
 import { Logger, Module } from '@nestjs/common';
 
 import { AccessModule } from '../access/access.module';
@@ -12,12 +11,10 @@ import { SummariesController } from './summaries.controller';
 import { SummariesOverviewController } from './summaries-overview.controller';
 import { SummariesRepository } from './summaries.repository';
 import { SummariesService } from './summaries.service';
-import { DisabledTranscriber } from './transcription/disabled.transcriber';
 import { AUDIO_EXTRACTOR, type AudioExtractor } from './transcription/extractor';
 import { FfmpegExtractor, ffmpegCommandsOf } from './transcription/ffmpeg.extractor';
 import { RecordingStore } from './transcription/recording-store';
 import { transcriberSettings } from './transcription/settings';
-import { TRANSCRIBER, type Transcriber } from './transcription/transcriber';
 import {
   TRANSCRIPTION_RUN_LOCK_DB,
   TranscriptionRunnerService,
@@ -26,7 +23,6 @@ import { TranscriptionsController } from './transcription/transcriptions.control
 import { TranscriptionRepository } from './transcription/transcription.repository';
 import { TranscriptionService } from './transcription/transcription.service';
 import { UnavailableExtractor } from './transcription/unavailable.extractor';
-import { YandexSpeechKitTranscriber } from './transcription/yandex-speechkit.transcriber';
 
 /**
  * Модуль конструктора задач из саммари созвона.
@@ -52,7 +48,6 @@ import { YandexSpeechKitTranscriber } from './transcription/yandex-speechkit.tra
   providers: [
     SummariesRepository,
     SummariesService,
-    RecordingStore,
     // Расшифровка живёт в **том же** модуле: это вторая итерация того же
     // потока, а второй модуль рядом означал бы второй токен порта, вторую
     // регистрацию и вторую точку, где можно забыть проверку права
@@ -66,17 +61,14 @@ import { YandexSpeechKitTranscriber } from './transcription/yandex-speechkit.tra
     // пул состоит из единственного соединения — занять его значило бы
     // запереть сам прогон.
     { provide: TRANSCRIPTION_RUN_LOCK_DB, useExisting: DATABASE },
-    // Две фабрики, и **ни одна не читает настройку другой**: порты
-    // выключаются независимо, потому что различны по природе — расшифровка
-    // уходит наружу и стоит денег, извлечение идёт на нашей машине
-    // бесплатно. Установка с `ffmpeg` и без ключа принимает видео,
-    // извлекает дорожку и честно говорит, что отправлять её некуда
-    // (дизайн, 7.6).
-    {
-      provide: TRANSCRIBER,
-      useFactory: transcriberOf,
-      inject: [RecordingStore],
-    },
+    // Порт расшифровки здесь не строится вовсе: его источник живёт в
+    // `ModelServicesModule` и строит адаптер на вызов, потому что узел
+    // настраивается на экране. Извлечение остаётся фабрикой при старте, и
+    // это не недоделка: «есть ли `ffmpeg` в системе» — вопрос к файловой
+    // системе, он за время жизни процесса не меняется и экраном не
+    // правится. Порты по-прежнему **не читают настройку друг друга**:
+    // установка с `ffmpeg` и без ключа принимает видео, извлекает дорожку
+    // и честно говорит, что отправлять её некуда (дизайн, 7.6).
     {
       provide: AUDIO_EXTRACTOR,
       useFactory: audioExtractorOf,
@@ -92,46 +84,6 @@ import { YandexSpeechKitTranscriber } from './transcription/yandex-speechkit.tra
   exports: [SummariesRepository, SummariesService],
 })
 export class SummariesModule {}
-
-/**
- * Адаптер расшифровки по действующей настройке.
- *
- * Строится один раз при старте — и это названная граница, а не образец:
- * узел расшифровки пока настраивается **только окружением**, а переключение
- * адаптера есть правка `.env` и перезапуск, то есть действие суперадмина
- * (дизайн, 7.3).
- *
- * Когда в перечне `ModelServiceKind` появится значение `transcriber`
- * (одна строка перечня и одна миграция `ALTER TYPE` — дизайн настройки
- * служб модели, 7.3), эта фабрика станет **источником** по образцу
- * `ModelServiceTaskSuggesterSource`: адаптер начнёт рождаться на вызов, а
- * настройка — приходить из `ModelServiceSettingsService`, где база главнее
- * окружения. Сам адаптер при этом не изменится: он уже принимает настройку
- * в конструктор, а не читает её сам.
- *
- * Место под `local` — ветка с выключенным портом: обещать `local`,
- * которого нет, хуже, чем честно выключить (дизайн, 7.3).
- */
-function transcriberOf(store: RecordingStore): Transcriber {
-  const logger = new Logger('Transcriber');
-  const settings = transcriberSettings();
-
-  if (!settings.isEnabled || settings.kind === TranscriberKind.Local) {
-    logger.log(
-      settings.kind === TranscriberKind.Local
-        ? 'Расшифровка: локальная служба не реализована, порт выключен'
-        : 'Расшифровка не настроена: порт выключен',
-    );
-
-    return new DisabledTranscriber();
-  }
-
-  // Безопасное сообщение при старте: узел и модель, как у предложителя.
-  // Ключа в нём нет ни при каких условиях.
-  logger.log(`Расшифровка: ${settings.host ?? 'узел не назван'}, модель ${settings.model}`);
-
-  return new YandexSpeechKitTranscriber(settings, store);
-}
 
 /**
  * Порт извлечения по тому, что нашлось в системе.

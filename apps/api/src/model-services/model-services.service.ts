@@ -17,9 +17,12 @@ import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import {
   TASK_SUGGESTER_SOURCE,
-  type TaskSuggester,
   type TaskSuggesterSource,
 } from '../summaries/suggester/task-suggester';
+import {
+  TRANSCRIBER_SOURCE,
+  type TranscriberSource,
+} from '../summaries/transcription/transcriber';
 import { ModelServiceSettingsService } from './model-service-settings.service';
 import { ModelServicesRepository } from './model-services.repository';
 
@@ -43,6 +46,7 @@ export class ModelServicesService {
     private readonly settings: ModelServiceSettingsService,
     private readonly audit: AuditService,
     @Inject(TASK_SUGGESTER_SOURCE) private readonly suggesters: TaskSuggesterSource,
+    @Inject(TRANSCRIBER_SOURCE) private readonly transcribers: TranscriberSource,
   ) {}
 
   /** Настройки всех узлов перечня, включая ненастроенные. */
@@ -163,14 +167,14 @@ export class ModelServicesService {
       });
     }
 
-    const suggester = await this.sourceOf(kind).current();
+    const port = await this.sourceOf(kind).current();
     // Сигнал принадлежит службе: обрыв в `finally` не даёт запросу
     // пережить вызов, а свой предел ожидания ставит адаптер.
     const controller = new AbortController();
     let result: ModelProbeResult;
 
     try {
-      result = await suggester.probe(controller.signal);
+      result = await port.probe(controller.signal);
     } finally {
       controller.abort();
     }
@@ -195,17 +199,30 @@ export class ModelServicesService {
   }
 
   /**
-   * Порт узла. Второй узел добавит здесь свою ветку, а не свой механизм.
+   * Порт узла — ветка на узел, а не свой механизм у каждого.
    *
    * Выбор ветвится по значению перечня, а не по провайдеру: ветвление по
    * имени провайдера этот дизайн запрещает целиком (раздел 10.2).
+   *
+   * Тип возврата — то общее, что ручке проверки и нужно: источник чего-то,
+   * что умеет `probe`. Обоим портам она объявлена, и ни одного другого
+   * метода администрированию от них не требуется — знать здесь про
+   * расшифровку текста или про разбивку задач было бы знанием сверх дела.
    */
-  private sourceOf(kind: ModelServiceKind): { current(): Promise<TaskSuggester> } {
+  private sourceOf(kind: ModelServiceKind): { current(): Promise<ProbeablePort> } {
     switch (kind) {
       case ModelServiceKind.TaskSuggester:
         return this.suggesters;
+
+      case ModelServiceKind.Transcriber:
+        return this.transcribers;
     }
   }
+}
+
+/** Порт в той части, которая нужна проверке связи, и ни в какой другой. */
+interface ProbeablePort {
+  probe(signal: AbortSignal): Promise<ModelProbeResult>;
 }
 
 /**
