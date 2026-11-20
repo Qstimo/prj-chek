@@ -68,6 +68,22 @@ describe('HTTP: саммари проекта', () => {
     await agent.post(`${base()}/${created.body.id}/tasks/release`).send({ taskIds: [created.body.id], target: { kind: 'new', version: { label: '' } } }).expect(400);
   });
 
+  it('принимает расшифровку четырёхчасового созвона целиком', async () => {
+    // Сторож отменённого предела: прежние 65 536 знаков — это полчаса
+    // созвона по-русски, и человек получал `400` ровно на том, для чего
+    // поток и сделан. Проверяется по HTTP, а не схемой: отказ мог прийти
+    // и от разборщика тела, который считает байты, а не знаки.
+    const text = 'я'.repeat(120_000);
+    const agent = await fixture.signIn();
+
+    const created = await agent
+      .post(base())
+      .send({ ...SUMMARY_BODY, text })
+      .expect(201);
+
+    expect(created.body.text).toHaveLength(text.length);
+  });
+
   it('управляющие символы в тексте — 400 с кодом, а не 500 от драйвера', async () => {
     // Нормализация идёт на сервере тоже (дизайн, 3.1): `NUL` до колонки
     // `text` в PostgreSQL не доходит вовсе, и без проверки запрос падал
