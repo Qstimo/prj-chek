@@ -22,6 +22,7 @@ import { RoadmapModule } from './roadmap/roadmap.module';
 import { SummariesModule } from './summaries/summaries.module';
 import { StatusModule } from './status/status.module';
 import { TagsModule } from './tags/tags.module';
+import { TasksModule } from './tasks/tasks.module';
 import { DomainsModule } from './domains/domains.module';
 import { ServersModule } from './servers/servers.module';
 import { UsersModule } from './users/users.module';
@@ -39,6 +40,7 @@ import { VariablesModule } from './variables/variables.module';
     ProjectsModule,
     PlatformsModule,
     TagsModule,
+    TasksModule,
     EnvironmentsModule,
     ChronicleModule,
     SummariesModule,

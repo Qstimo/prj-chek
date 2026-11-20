@@ -1,6 +1,6 @@
 'use client';
 
-import type { Platform, RoadmapCheckpoint, RoadmapCheckpointCreate } from '@cairn/shared';
+import type { Platform, ProjectTaskUpdate, RoadmapCheckpoint } from '@cairn/shared';
 import { useState } from 'react';
 
 import { CheckpointForm } from '../CheckpointForm';
@@ -17,7 +17,8 @@ interface IProps {
   onToggle: (checkpointId: string, isDone: boolean) => void;
   onDelete: (checkpointId: string) => void;
   /** Сохранение правки. Отсутствие — правка недоступна. */
-  onEdit?: (checkpointId: string, input: RoadmapCheckpointCreate) => void;
+  /** Правка идёт в задачу: первый аргумент — её идентификатор. */
+  onEdit?: (taskId: string, input: ProjectTaskUpdate) => void;
   /** Чтение заголовка задачи по ссылке. */
   onReadTitle?: (url: string) => Promise<string | null>;
   /** Перенос в другую версию. Отсутствие — переносить нечем. */
@@ -71,7 +72,7 @@ export function CheckpointList({
               idPrefix={`checkpoint-${checkpoint.id}`}
               onCancel={() => setEditingId(null)}
               onSubmit={(input) => {
-                onEdit(checkpoint.id, input);
+                onEdit(checkpoint.taskId, input);
                 setEditingId(null);
               }}
             />

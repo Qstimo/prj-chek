@@ -7,6 +7,7 @@ import { CheckpointList } from './CheckpointList';
 
 const plain: RoadmapCheckpoint = {
   id: '11111111-1111-4111-8111-111111111111',
+  taskId: 't-11111111-1111-4111-8111-111111111111',
   title: 'Без ссылки',
   url: null,
   isDone: false,
@@ -16,6 +17,7 @@ const plain: RoadmapCheckpoint = {
 
 const withUrl: RoadmapCheckpoint = {
   id: '22222222-2222-4222-8222-222222222222',
+  taskId: 't-22222222-2222-4222-8222-222222222222',
   title: 'Перевести биллинг',
   url: 'https://tracker.example.com/TASK-17',
   isDone: false,
@@ -136,7 +138,9 @@ describe('CheckpointList', () => {
     await userEvent.click(screen.getByLabelText('App Store'));
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-    expect(onEdit).toHaveBeenCalledWith(plain.id, {
+    // Правка уходит в **задачу**: формулировка живёт у неё, и у поля
+    // одно место записи.
+    expect(onEdit).toHaveBeenCalledWith(plain.taskId, {
       title: 'Вход по телефону',
       url: null,
       platformIds: ['p2'],

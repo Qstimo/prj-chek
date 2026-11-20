@@ -35,10 +35,10 @@ const report: PublicReleaseReport = {
   ],
   summary: [],
   checkpoints: [
-    { id: 'c1', title: 'Оплата', isDone: true, position: 1, platformIds: ['pl1'], carriedFrom: null },
+    { id: 'c1', taskId: 't-c1', title: 'Оплата', isDone: true, position: 1, platformIds: ['pl1'], carriedFrom: null },
   ],
   carriedOut: [
-    { id: 'c2', title: 'Экспорт', isDone: false, position: 2, platformIds: [], carriedTo: 'v1.3' },
+    { id: 'c2', taskId: 't-c2', title: 'Экспорт', isDone: false, position: 2, platformIds: [], carriedTo: 'v1.3' },
   ],
   markdown: '# Отчёт по релизу v1.2',
   text: 'Отчёт по релизу v1.2',

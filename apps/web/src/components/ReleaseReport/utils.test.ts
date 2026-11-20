@@ -65,6 +65,7 @@ describe('checkpointUrlOf', () => {
     expect(
       checkpointUrlOf({
         id: 'c1',
+        taskId: 't-c1',
         title: 'Оплата',
         isDone: true,
         position: 1,
@@ -79,6 +80,7 @@ describe('checkpointUrlOf', () => {
     expect(
       checkpointUrlOf({
         id: 'c1',
+        taskId: 't-c1',
         title: 'Оплата',
         isDone: true,
         position: 1,

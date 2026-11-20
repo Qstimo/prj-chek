@@ -8,7 +8,8 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { versionProjection } from './roadmap.projection';
-import type { RoadmapCheckpointRow, RoadmapVersionRow } from '../db/schema';
+import type { RoadmapVersionRow } from '../db/schema';
+import type { LoadedCheckpointRow } from './roadmap.repository';
 
 const version: RoadmapVersionRow = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -22,10 +23,13 @@ const version: RoadmapVersionRow = {
   updatedAt: new Date('2026-08-28T10:00:00Z'),
 };
 
-const checkpoints: RoadmapCheckpointRow[] = [
+const checkpoints: LoadedCheckpointRow[] = [
   {
     id: '33333333-3333-3333-3333-333333333333',
     versionId: version.id,
+    // Формулировка и ссылка приходят из задачи join'ом: размещение их не
+    // хранит, а проекция читает их у строки, которую отдал репозиторий.
+    taskId: '33333333-3333-3333-3333-333333333330',
     title: 'Готов вход',
     url: 'https://tracker.example.com/TASK-17',
     isDone: true,
@@ -37,6 +41,7 @@ const checkpoints: RoadmapCheckpointRow[] = [
   {
     id: '44444444-4444-4444-4444-444444444444',
     versionId: version.id,
+    taskId: '44444444-4444-4444-4444-444444444440',
     title: 'Готовы проекты',
     url: null,
     isDone: false,
@@ -250,7 +255,10 @@ describe('выпуски и дата в проекции версии', () => {
         buildLabel: null,
       },
     ];
-    const tags = new Map([[checkpoints[0]!.id, ['p1']]]);
+    // Ключ карты — **задача**: теги принадлежат ей, и размещение их
+    // только показывает. Карта по идентификатору размещения отдала бы
+    // пустой набор — именно это и проверяет равенство ниже.
+    const tags = new Map([[checkpoints[0]!.taskId, ['p1']]]);
 
     const metadata = versionProjection(version, checkpoints, releases, AccessLevel.Metadata);
     const read = versionProjection(version, checkpoints, releases, AccessLevel.Read, {

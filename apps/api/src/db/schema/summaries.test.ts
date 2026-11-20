@@ -4,6 +4,7 @@ import type { PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
 import { roadmapCheckpoints } from './roadmap';
+import { projectTasks } from './tasks';
 import { summaries, summaryTaskDrafts, summaryTaskOriginEnum, summaryTaskPlatforms } from './summaries';
 
 /** Имена колонок таблицы: проверки состава читают именно их. */
@@ -95,14 +96,18 @@ describe('черновик задач', () => {
 
   it('дополнительные поля задачи описывают только черновик', () => {
     // ТЗ 1.4 остаётся в силе, а дизайн 2.1 отменён только в части двух
-    // полей, которые у чекпоинта есть. Сторож считает разницу составов,
+    // полей, которые у задачи есть. Сторож считает разницу составов,
     // а не перечисляет запреты: перечисление пропустило бы поле, которое
     // никому не пришло в голову запретить.
-    const own = columnNames(summaryTaskDrafts).filter(
-      (column) => !columnNames(roadmapCheckpoints).includes(column),
-    );
+    //
+    // Сравнение идёт с **двумя** таблицами, куда строка черновика
+    // приезжает на релизе: задачей реестра и её размещением в версии.
+    // Сравнение с одним размещением объявило бы «своими» формулировку и
+    // ссылку, которые у задачи есть, — то есть соврало бы.
+    const landing = [...columnNames(projectTasks), ...columnNames(roadmapCheckpoints)];
+    const own = columnNames(summaryTaskDrafts).filter((column) => !landing.includes(column));
 
-    expect(own.sort()).toEqual(['summary_id', 'origin', 'state', 'released_version_id'].sort());
+    expect(own.sort()).toEqual(['summary_id', 'state', 'released_version_id'].sort());
   });
 
   it('ссылка на задачу во внешнем трекере есть и необязательна', () => {

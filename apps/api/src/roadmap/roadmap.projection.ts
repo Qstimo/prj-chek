@@ -8,7 +8,8 @@ import {
 } from '@cairn/shared';
 
 import { projectByLevel } from '../access/projection';
-import type { RoadmapCheckpointRow, RoadmapVersionRow } from '../db/schema';
+import type { RoadmapVersionRow } from '../db/schema';
+import type { LoadedCheckpointRow } from './roadmap.repository';
 
 /** Настройки проекции, которые легко перепутать позициями. */
 interface VersionProjectionOptions {
@@ -44,7 +45,7 @@ interface VersionProjectionOptions {
  */
 export function versionProjection(
   version: RoadmapVersionRow,
-  checkpoints: RoadmapCheckpointRow[],
+  checkpoints: LoadedCheckpointRow[],
   releases: PlatformRelease[],
   level: AccessLevel,
   { withLinks = true, platformsByCheckpoint }: VersionProjectionOptions = {},
@@ -76,7 +77,8 @@ export function versionProjection(
         position: checkpoint.position,
         // Поле добавляется всегда, в отличие от `url`: публичная схема
         // строгая и теги ждёт.
-        platformIds: platformsByCheckpoint?.get(checkpoint.id) ?? [],
+        // Ключ карты — задача: теги принадлежат ей, а не размещению.
+        platformIds: platformsByCheckpoint?.get(checkpoint.taskId) ?? [],
         // Поле добавляется, а не обнуляется: публичная схема строгая,
         // и `url: null` был бы для неё такой же ошибкой, как и адрес.
         ...(withLinks ? { url: checkpoint.url } : {}),

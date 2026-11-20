@@ -1,4 +1,18 @@
-import type { Platform, RoadmapCheckpointCreate } from '@cairn/shared';
+import type { Platform } from '@cairn/shared';
+
+/**
+ * Что форма отдаёт на отправке: поля **задачи**, а не тело ручки.
+ *
+ * Своя форма, а не `RoadmapCheckpointCreate`: то тело стало выбором из
+ * двух («существующая задача» либо «новая»), и форма знает только о
+ * второй ветви. Этот же объект годится и телом правки задачи — там все
+ * поля необязательны, и заполненный подходит.
+ */
+export interface CheckpointFormPayload {
+  title: string;
+  url: string | null;
+  platformIds?: string[];
+}
 
 /** Начальные значения: формулировка, ссылка и теги. */
 export interface CheckpointFormValues {
@@ -16,7 +30,7 @@ export interface IProps {
   initial?: Partial<CheckpointFormValues>;
   /** Подпись кнопки. По умолчанию форма создаёт. */
   submitLabel?: string;
-  onSubmit: (input: RoadmapCheckpointCreate) => void;
+  onSubmit: (input: CheckpointFormPayload) => void;
   /**
    * Возврат из правки без сохранения.
    *

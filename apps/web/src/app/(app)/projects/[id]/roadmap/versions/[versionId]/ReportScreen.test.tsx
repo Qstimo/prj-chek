@@ -43,6 +43,7 @@ const report: ReleaseReport = {
   checkpoints: [
     {
       id: 'c1',
+      taskId: 't-c1',
       title: 'Оплата',
       isDone: true,
       position: 1,

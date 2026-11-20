@@ -217,8 +217,29 @@ describe('права роли приложения на окружения', () 
     await expect(
       testDb.appDb.execute(sql`SELECT count(*) FROM version_platform_releases`),
     ).resolves.toBeDefined();
+    // `checkpoint_platforms` не стало: теги переехали на задачу вместе с
+    // формулировкой. Проверяются обе новые таблицы — права на них выданы
+    // своей миграцией (`0054`), и забытый GRANT ломает не чтение, а
+    // создание чекпоинта, то есть обычную правку роадмапа.
     await expect(
-      testDb.appDb.execute(sql`SELECT count(*) FROM checkpoint_platforms`),
+      testDb.appDb.execute(sql`SELECT count(*) FROM project_tasks`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`SELECT count(*) FROM project_task_platforms`),
+    ).resolves.toBeDefined();
+  });
+
+  it('роль приложения правит и уносит задачи реестра', async () => {
+    // Сторож `0054` целиком: `SELECT` проходит и без части прав, а
+    // замена набора тегов и удаление вынутой задачи — нет.
+    await expect(
+      testDb.appDb.execute(sql`DELETE FROM project_task_platforms WHERE false`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`DELETE FROM project_tasks WHERE false`),
+    ).resolves.toBeDefined();
+    await expect(
+      testDb.appDb.execute(sql`UPDATE project_tasks SET title = title WHERE false`),
     ).resolves.toBeDefined();
   });
 

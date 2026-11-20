@@ -7,6 +7,7 @@ import { ChronicleModule } from '../chronicle/chronicle.module';
 import { DATABASE, DbModule } from '../db/db.module';
 import { ModelServicesModule } from '../model-services/model-services.module';
 import { RoadmapModule } from '../roadmap/roadmap.module';
+import { TasksModule } from '../tasks/tasks.module';
 import { SummariesController } from './summaries.controller';
 import { SummariesOverviewController } from './summaries-overview.controller';
 import { SummariesRepository } from './summaries.repository';
@@ -38,6 +39,7 @@ import { UnavailableExtractor } from './transcription/unavailable.extractor';
     AuthModule,
     ChronicleModule,
     RoadmapModule,
+    TasksModule,
     ModelServicesModule,
   ],
   // Порядок значим: `GET …/summaries/transcriptions` и

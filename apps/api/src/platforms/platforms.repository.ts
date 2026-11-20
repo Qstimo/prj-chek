@@ -15,7 +15,7 @@ import type { RequestSubject } from '../access/access.types';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
 import {
-  checkpointPlatforms,
+  projectTaskPlatforms,
   environmentPlatforms,
   environments,
   projectPlatforms,
@@ -194,7 +194,10 @@ export class PlatformsRepository {
 
     const platform = await this.requireInProject(tx, projectId, platformId);
 
-    await tx.delete(checkpointPlatforms).where(eq(checkpointPlatforms.platformId, platformId));
+    // Теги задач реестра и теги строк черновика — две таблицы, и обе
+    // ссылаются на платформу с `restrict`: без уборки платформа стала бы
+    // неудаляемой из-за чужой строки.
+    await tx.delete(projectTaskPlatforms).where(eq(projectTaskPlatforms.platformId, platformId));
     await tx.delete(summaryTaskPlatforms).where(eq(summaryTaskPlatforms.platformId, platformId));
     const releases = await tx
       .delete(versionPlatformReleases)

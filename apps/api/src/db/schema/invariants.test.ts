@@ -9,9 +9,9 @@ import { domains } from './domains';
 import { environmentDomains, environments } from './environments';
 import { grants } from './grants';
 import { addressIncidents } from './incidents';
+import { projectTaskPlatforms } from './tasks';
 import { invitations } from './invitations';
 import {
-  checkpointPlatforms,
   environmentPlatforms,
   projectPlatforms,
   versionPlatformReleases,
@@ -52,7 +52,7 @@ const ALL_TABLES = [
   { name: 'project_platforms', table: projectPlatforms },
   { name: 'environment_platforms', table: environmentPlatforms },
   { name: 'version_platform_releases', table: versionPlatformReleases },
-  { name: 'checkpoint_platforms', table: checkpointPlatforms },
+  { name: 'project_task_platforms', table: projectTaskPlatforms },
   { name: 'chronicle_entries', table: chronicleEntries },
   { name: 'summaries', table: summaries },
   { name: 'summary_task_drafts', table: summaryTaskDrafts },

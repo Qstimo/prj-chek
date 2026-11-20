@@ -17,6 +17,7 @@ import {
   SUMMARY_TEXT_TOO_LONG,
   SubjectKind,
   SummaryTaskOrigin,
+  TaskOrigin,
   TranscriberKind,
   TranscriptionState,
   ModelServicePlacement,
@@ -42,7 +43,9 @@ import {
   projects,
   roadmapVersions,
   roadmapCheckpoints,
-  checkpointPlatforms,
+  projectTaskPlatforms,
+  projectTasks,
+  summaryTaskDrafts,
   projectPlatforms,
   grants,
   subjects,
@@ -51,6 +54,7 @@ import {
   users,
 } from '../db/schema';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
+import { TasksRepository } from '../tasks/tasks.repository';
 import { DisabledSuggester } from './suggester/disabled.suggester';
 import { SUGGESTER_NODE_ENV_NAMES } from './suggester/settings';
 import { ModelServiceTaskSuggesterSource } from './suggester/task-suggester.source';
@@ -159,7 +163,15 @@ describe('служба саммари', () => {
     );
     audit = new AuditService();
     store = new StubStore(async () => (await testDb.appDb.select({ id: summaries.id }).from(summaries)).length);
-    service = new SummariesService(testDb.db, repository, audit, stubSource, new RoadmapRepository(testDb.db, access), store);
+    service = new SummariesService(
+      testDb.db,
+      repository,
+      audit,
+      stubSource,
+      new RoadmapRepository(testDb.db, access),
+      new TasksRepository(testDb.db, access),
+      store,
+    );
     // Вторая служба на выключенном порте: источник отдаёт выключенный
     // адаптер на каждом вызове — так же, как в боевом коде.
     disabledService = new SummariesService(
@@ -168,6 +180,7 @@ describe('служба саммари', () => {
       audit,
       disabledSource,
       new RoadmapRepository(testDb.db, access),
+      new TasksRepository(testDb.db, access),
       store,
     );
   });
@@ -233,7 +246,15 @@ describe('служба саммари', () => {
 
     return {
       repository: own,
-      service: new SummariesService(db, own, audit, stubSource, roadmap, store),
+      service: new SummariesService(
+        db,
+        own,
+        audit,
+        stubSource,
+        roadmap,
+        new TasksRepository(db, access),
+        store,
+      ),
     };
   }
 
@@ -349,6 +370,7 @@ describe('служба саммари', () => {
           new ModelServiceSettingsService(testDb.db, settingsRepository),
         ),
         new RoadmapRepository(testDb.db, access),
+        new TasksRepository(testDb.db, access),
         store,
       );
 
@@ -463,6 +485,26 @@ describe('служба саммари', () => {
       });
     });
 
+    /**
+     * Размещения версии вместе с полями их задач, по позиции.
+     *
+     * Join, а не чтение одной таблицы: формулировка и ссылка живут у
+     * задачи, и проверять их по строке размещения больше нечем.
+     */
+    async function placedTasks() {
+      return testDb.db
+        .select({
+          position: roadmapCheckpoints.position,
+          isDone: roadmapCheckpoints.isDone,
+          taskId: roadmapCheckpoints.taskId,
+          title: projectTasks.title,
+          url: projectTasks.url,
+        })
+        .from(roadmapCheckpoints)
+        .innerJoin(projectTasks, eq(projectTasks.id, roadmapCheckpoints.taskId))
+        .orderBy(asc(roadmapCheckpoints.position));
+    }
+
     async function releaseInput(version: RoadmapVersionCreate): Promise<SummaryRelease> {
       const detail = await service.findById(writer(), projectId, summaryId);
       return {
@@ -474,11 +516,11 @@ describe('служба саммари', () => {
     it('создаёт версию, упорядоченные незакрытые чекпоинты и полный журнал', async () => {
       const result = await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }));
       expect(result).toEqual({ versionId: expect.any(String), label: 'v1.3', checkpointCount: 3 });
-      const rows = await testDb.db.select().from(roadmapCheckpoints).orderBy(asc(roadmapCheckpoints.position));
+      const rows = await placedTasks();
       expect(rows.map(({ position, title, isDone, url }) => [position, title, isDone, url])).toEqual([
         [1, 'раз', false, null], [2, 'два', false, null], [3, 'три', false, null],
       ]);
-      expect(await testDb.db.select().from(checkpointPlatforms)).toEqual([]);
+      expect(await testDb.db.select().from(projectTaskPlatforms)).toEqual([]);
       expect((await testDb.db.select().from(summaries))[0]?.releasedVersionId).toBe(result.versionId);
       expect((await auditRecords(AuditAction.SummaryReleased))[0]?.metadata).toEqual({ versionId: result.versionId, label: 'v1.3', tasks: 3, fromModel: 2, target: 'new' });
       expect(await auditRecords(AuditAction.RoadmapVersionCreated)).toHaveLength(1);
@@ -487,13 +529,61 @@ describe('служба саммари', () => {
       ]);
     });
 
+    it('релиз заводит задачи реестра с происхождением «из саммари»', async () => {
+      // Задача живёт в реестре проекта, а не внутри версии: признак
+      // происхождения и ссылка на саммари — единственный след того, что
+      // формулировка приехала с созвона.
+      const result = await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }));
+
+      const tasks = await testDb.db.select().from(projectTasks);
+
+      expect(tasks).toHaveLength(3);
+      expect(tasks.every((task) => task.origin === TaskOrigin.Summary)).toBe(true);
+      expect(tasks.every((task) => task.sourceSummaryId === summaryId)).toBe(true);
+      expect(tasks.every((task) => task.projectId === projectId)).toBe(true);
+      expect(result.checkpointCount).toBe(3);
+    });
+
+    it('уехавшая строка черновика помнит свою задачу', async () => {
+      // Без этой связи экран саммари знал бы, что строка уехала, но не
+      // мог бы довести человека до задачи в реестре.
+      await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.3' }));
+
+      const drafts = await testDb.db
+        .select({ title: summaryTaskDrafts.title, taskId: summaryTaskDrafts.taskId })
+        .from(summaryTaskDrafts);
+      const tasks = await testDb.db.select().from(projectTasks);
+      const byId = new Map(tasks.map((task) => [task.id, task.title]));
+
+      expect(drafts.every((draft) => draft.taskId !== null)).toBe(true);
+      // Связь не просто заполнена, а указывает на задачу **с той же**
+      // формулировкой: перепутанные пары заполнением тоже выглядели бы.
+      for (const draft of drafts) {
+        expect(byId.get(draft.taskId!)).toBe(draft.title);
+      }
+    });
+
+    it('второй релиз остальных строк не задваивает задачи уже уехавших', async () => {
+      const [first, , third] = (await service.findById(writer(), projectId, summaryId)).tasks;
+
+      await service.release(writer(), projectId, summaryId, {
+        taskIds: [first!.id],
+        target: { kind: 'new', version: { label: 'v1.3' } },
+      });
+      await service.release(writer(), projectId, summaryId, {
+        taskIds: [third!.id],
+        target: { kind: 'new', version: { label: 'v1.4' } },
+      });
+
+      expect(await testDb.db.select().from(projectTasks)).toHaveLength(2);
+    });
+
     it('выборочный релиз соблюдает позиции, а возвращённая задача уезжает во вторую версию', async () => {
       const [first, second, third] = (await service.findById(writer(), projectId, summaryId)).tasks;
       const input = { taskIds: [third!.id, first!.id], target: { kind: 'new', version: { label: 'v1.3' } } } as const;
       const result = await service.release(writer(), projectId, summaryId, { ...input, taskIds: [...input.taskIds] });
       expect(result.checkpointCount).toBe(2);
-      const checkpoints = await testDb.db.select().from(roadmapCheckpoints).orderBy(asc(roadmapCheckpoints.position));
-      expect(checkpoints.map((task) => task.title)).toEqual(['раз', 'три']);
+      expect((await placedTasks()).map((task) => task.title)).toEqual(['раз', 'три']);
       const detail = await service.findById(writer(), projectId, summaryId);
       expect(detail).toMatchObject({ taskCount: 1, archivedCount: 0, releasedCount: 2 });
       expect(detail.tasks).toEqual([
@@ -667,7 +757,7 @@ describe('служба саммари', () => {
       }
       expect(await outcome).toBeNull();
       const detail = await service.findById(writer(), projectId, summaryId);
-      const checkpoints = await testDb.db.select().from(roadmapCheckpoints).orderBy(asc(roadmapCheckpoints.position));
+      const checkpoints = await placedTasks();
       expect(detail.tasks.filter((task) => task.state === SummaryTaskState.Released).map((task) => task.title))
         .toEqual(checkpoints.map((checkpoint) => checkpoint.title));
       expect(detail.tasks.filter((task) => task.state === SummaryTaskState.Active).map((task) => task.title))
@@ -737,24 +827,22 @@ describe('служба саммари', () => {
 
         await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.4' }));
 
-        const rows = await testDb.db
-          .select()
-          .from(roadmapCheckpoints)
-          .orderBy(asc(roadmapCheckpoints.position));
+        const rows = await placedTasks();
 
         expect(rows.map((row) => row.url)).toEqual(['https://tracker.example/1', null, null]);
-        expect(await testDb.rowsOf(checkpointPlatforms)).toEqual([
-          { checkpointId: rows[0]!.id, platformId: apiPlatformId },
+        // Теги уехали на **задачу**: размещение их не держит вовсе.
+        expect(await testDb.rowsOf(projectTaskPlatforms)).toEqual([
+          { taskId: rows[0]!.taskId, platformId: apiPlatformId },
         ]);
       });
 
       it('задача без ссылки и тегов даёт чекпоинт без них', async () => {
         await service.release(writer(), projectId, summaryId, await releaseInput({ label: 'v1.5' }));
 
-        const rows = await testDb.rowsOf(roadmapCheckpoints);
+        const rows = await placedTasks();
 
         expect(rows.map((row) => row.url)).toEqual([null, null, null]);
-        expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+        expect(await testDb.rowsOf(projectTaskPlatforms)).toHaveLength(0);
       });
 
       it('журнал чекпоинта не меняется: только формулировка', async () => {

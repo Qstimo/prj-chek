@@ -132,6 +132,7 @@ export class RoadmapController {
 
     return {
       id: created.id,
+      taskId: created.taskId,
       title: created.title,
       url: created.url,
       isDone: created.isDone,
@@ -159,6 +160,7 @@ export class RoadmapController {
 
     return {
       id: updated.id,
+      taskId: updated.taskId,
       title: updated.title,
       url: updated.url,
       isDone: updated.isDone,
@@ -195,6 +197,7 @@ export class RoadmapController {
     return {
       checkpoint: {
         id: carried.checkpoint.id,
+        taskId: carried.checkpoint.taskId,
         title: carried.checkpoint.title,
         url: carried.checkpoint.url,
         isDone: carried.checkpoint.isDone,

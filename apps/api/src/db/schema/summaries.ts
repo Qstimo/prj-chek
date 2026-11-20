@@ -2,6 +2,7 @@ import { SummaryTaskOrigin, SummaryTaskState } from '@cairn/shared';
 import { sql } from 'drizzle-orm';
 import {
   check,
+  foreignKey,
   index,
   integer,
   pgEnum,
@@ -17,6 +18,7 @@ import { projectPlatforms } from './platforms';
 import { projects } from './projects';
 import { roadmapVersions } from './roadmap';
 import { subjects } from './subjects';
+import { projectTasks } from './tasks';
 
 /** Кем предложена задача черновика. Значения совпадают с контрактом. */
 export const summaryTaskOriginEnum = pgEnum('summary_task_origin', [
@@ -125,9 +127,29 @@ export const summaryTaskDrafts = pgTable(
     releasedVersionId: uuid('released_version_id').references(() => roadmapVersions.id, {
       onDelete: 'set null',
     }),
+    /**
+     * Задача реестра, в которую строка превратилась на релизе.
+     *
+     * `set null`: задачу удалили из реестра — строка остаётся в состоянии
+     * `released` и помнит, что уехала, но назвать куда больше не может.
+     * Пусто и у строк, уехавших до появления реестра: неизвестное не
+     * выдумывается.
+     *
+     * Ссылка объявлена ниже с явным именем: имя по соглашению drizzle
+     * вышло бы за предел 63 байтов, PostgreSQL молча обрезал бы его, и
+     * снапшот разошёлся бы с базой.
+     */
+    taskId: uuid('task_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('summary_task_drafts_summary_state_idx').on(table.summaryId, table.state, table.position)],
+  (table) => [
+    index('summary_task_drafts_summary_state_idx').on(table.summaryId, table.state, table.position),
+    foreignKey({
+      columns: [table.taskId],
+      foreignColumns: [projectTasks.id],
+      name: 'summary_task_drafts_task_fk',
+    }).onDelete('set null'),
+  ],
 );
 
 /**

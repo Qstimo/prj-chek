@@ -10,7 +10,7 @@ import { VersionDrawer } from './VersionDrawer';
 import { TimelineHrefProvider } from '../RoadmapTimeline/href';
 
 const description = /Версия выпущена.*следующую версию/;
-const checkpoint = { id: 'c', title: 'ОченьДлиннаяФормулировка'.repeat(20), isDone: false, url: null, position: 1, platformIds: [] };
+const checkpoint = { id: 'c', taskId: 't-c', title: 'ОченьДлиннаяФормулировка'.repeat(20), isDone: false, url: null, position: 1, platformIds: [] };
 const props = { checkpoint, canWrite: false, onToggle: vi.fn(), onDelete: vi.fn() };
 
 describe('предупреждения и длинные подписи роадмапа', () => {

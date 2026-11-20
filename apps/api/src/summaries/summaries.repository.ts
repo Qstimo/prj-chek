@@ -503,13 +503,20 @@ export class SummariesRepository {
     projectId: string,
     summaryId: string,
     versionId: string,
-    taskIds: string[],
+    released: { draftId: string; taskId: string }[],
   ): Promise<void> {
     await this.requireForWrite(subject, tx, projectId, summaryId);
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
-    await tx.update(summaryTaskDrafts)
-      .set({ state: SummaryTaskState.Released, releasedVersionId: versionId })
-      .where(and(eq(summaryTaskDrafts.summaryId, summaryId), inArray(summaryTaskDrafts.id, taskIds)));
+
+    // По одной строке, а не одним `IN`: у каждой свой `task_id`, и
+    // «уехала вот в эту задачу» — единственная связь, по которой экран
+    // саммари потом доберётся до задачи в реестре.
+    for (const { draftId, taskId } of released) {
+      await tx
+        .update(summaryTaskDrafts)
+        .set({ state: SummaryTaskState.Released, releasedVersionId: versionId, taskId })
+        .where(and(eq(summaryTaskDrafts.summaryId, summaryId), eq(summaryTaskDrafts.id, draftId)));
+    }
     await tx.update(summaries).set({ releasedVersionId: versionId, updatedAt: new Date() })
       .where(eq(summaries.id, summaryId));
   }

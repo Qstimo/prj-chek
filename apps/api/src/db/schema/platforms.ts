@@ -14,7 +14,7 @@ import {
 
 import { environments } from './environments';
 import { projects } from './projects';
-import { roadmapCheckpoints, roadmapVersions } from './roadmap';
+import { roadmapVersions } from './roadmap';
 
 /** Вид платформы. Значения совпадают с контрактом. */
 export const platformKindEnum = pgEnum('platform_kind', [
@@ -115,28 +115,6 @@ export const versionPlatformReleases = pgTable(
   (table) => [
     unique('version_platform_releases_version_platform').on(table.versionId, table.platformId),
     index('version_platform_releases_platform_idx').on(table.platformId),
-  ],
-);
-
-/**
- * Теги платформ у чекпоинта: куда едет результат.
- *
- * Не исполнитель, не оценка, не дата и не вложенность — ограничение ТЗ 1.4
- * остаётся в силе.
- */
-export const checkpointPlatforms = pgTable(
-  'checkpoint_platforms',
-  {
-    checkpointId: uuid('checkpoint_id')
-      .notNull()
-      .references(() => roadmapCheckpoints.id, { onDelete: 'restrict' }),
-    platformId: uuid('platform_id')
-      .notNull()
-      .references(() => projectPlatforms.id, { onDelete: 'restrict' }),
-  },
-  (table) => [
-    primaryKey({ columns: [table.checkpointId, table.platformId] }),
-    index('checkpoint_platforms_platform_idx').on(table.platformId),
   ],
 );
 

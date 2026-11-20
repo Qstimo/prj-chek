@@ -16,6 +16,7 @@ import {
   useMutationReadLinkTitle,
   useMutationSaveVersion,
   useMutationUpdateCheckpoint,
+  useMutationUpdatePlacedTask,
   useQueryRoadmap,
 } from '@/api/hooks';
 import { reportHrefOf } from '@/components/ReleaseReport';
@@ -51,6 +52,8 @@ export function RoadmapVersionPanel({
   const deleteVersion = useMutationDeleteVersion(projectId);
   const createCheckpoint = useMutationCreateCheckpoint(projectId);
   const updateCheckpoint = useMutationUpdateCheckpoint(projectId);
+  // Формулировку правит ручка задачи: у поля одно место записи.
+  const updatePlacedTask = useMutationUpdatePlacedTask(projectId);
   const deleteCheckpoint = useMutationDeleteCheckpoint(projectId);
   const readLinkTitle = useMutationReadLinkTitle(projectId);
   const carryOverCheckpoint = useMutationCarryOverCheckpoint(projectId);
@@ -121,8 +124,7 @@ export function RoadmapVersionPanel({
                 updateCheckpoint.mutate({ versionId: version.id, checkpointId, input: { isDone } }),
               onAddCheckpoint: (input) =>
                 createCheckpoint.mutate({ versionId: version.id, input }),
-              onEditCheckpoint: (checkpointId, input) =>
-                updateCheckpoint.mutate({ versionId: version.id, checkpointId, input }),
+              onEditCheckpoint: (taskId, input) => updatePlacedTask.mutate({ taskId, input }),
               onReadCheckpointTitle: (url) => readLinkTitle.mutateAsync(url),
               onDeleteCheckpoint: (checkpointId) =>
                 deleteCheckpoint.mutate({ versionId: version.id, checkpointId }),

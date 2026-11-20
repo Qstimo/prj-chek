@@ -18,6 +18,7 @@ export * from './status';
 export * from './subjects';
 export * from './summaries';
 export * from './tags';
+export * from './tasks';
 export * from './totp-challenges';
 export * from './transcription';
 export * from './users';

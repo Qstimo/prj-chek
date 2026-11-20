@@ -1,4 +1,5 @@
 import type {
+  ProjectTaskUpdate,
   Platform,
   PlatformReleaseSet,
   PlatformReleaseState,
@@ -64,7 +65,15 @@ export interface IVersionActions {
    * Необязательно, как и чтение заголовка по ссылке: фабрики действий
    * в тестах не обязаны знать о каждой возможности панели.
    */
-  onEditCheckpoint?: (checkpointId: string, input: RoadmapCheckpointCreate) => void;
+  /**
+   * Правка формулировки, ссылки и тегов — у **задачи**, не у размещения.
+   *
+   * Поэтому первый аргумент — `taskId`: формулировка живёт в реестре
+   * задач, и у поля одно место записи. Пока она правилась ручкой
+   * чекпоинта, одна и та же задача в версии и в реестре могла
+   * называться по-разному.
+   */
+  onEditCheckpoint?: (taskId: string, input: ProjectTaskUpdate) => void;
   /** Чтение заголовка задачи по ссылке: подставляется в пустую формулировку. */
   onReadCheckpointTitle?: (url: string) => Promise<string | null>;
   /**

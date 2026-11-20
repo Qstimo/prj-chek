@@ -4,6 +4,7 @@ import type {
   CheckpointCarryOver,
   CheckpointCarryOverResult,
   LinkTitleResponse,
+  ProjectTaskUpdate,
   RoadmapCheckpointCreate,
   RoadmapCheckpointUpdate,
   RoadmapVersionCreate,
@@ -58,7 +59,24 @@ export function useMutationCreateCheckpoint(projectId: string) {
   });
 }
 
-/** Правка чекпоинта: формулировка, признак «закрыт», позиция. */
+/**
+ * Правка задачи, стоящей в версии: формулировка, ссылка, теги.
+ *
+ * Ручка **задачи**, а не чекпоинта: формулировка живёт у задачи, и у поля
+ * одно место записи. Инвалидация роадмапа при этом та же — на экране
+ * версии показана именно эта формулировка.
+ */
+export function useMutationUpdatePlacedTask(projectId: string) {
+  const invalidate = useRoadmapInvalidation(projectId);
+
+  return useMutation({
+    mutationFn: ({ taskId, input }: { taskId: string; input: ProjectTaskUpdate }) =>
+      apiClient(`/projects/${projectId}/tasks/${taskId}`, { method: 'PUT', body: input }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Правка размещения: признак «закрыт» и позиция. */
 export function useMutationUpdateCheckpoint(projectId: string) {
   const invalidate = useRoadmapInvalidation(projectId);
 

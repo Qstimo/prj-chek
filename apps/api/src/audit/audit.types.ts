@@ -92,6 +92,20 @@ export enum AuditAction {
   RoadmapVersionCreated = 'roadmap_version.created',
   RoadmapVersionUpdated = 'roadmap_version.updated',
   RoadmapVersionDeleted = 'roadmap_version.deleted',
+  /**
+   * Задача реестра проекта. Три действия, а не два: удаление уносит
+   * формулировку целиком, и отличить его от правки по журналу обязано
+   * быть можно — метаданные на экране журнала не показываются.
+   */
+  TaskCreated = 'task.created',
+  TaskUpdated = 'task.updated',
+  TaskDeleted = 'task.deleted',
+  /**
+   * Задачу вынули из версии. Своё действие, а не `task.updated`: это
+   * правка **роадмапа** (прогресс версии меняется), а не правка задачи,
+   * и в журнале одно от другого отличаться обязано.
+   */
+  TaskDetached = 'task.detached',
   CheckpointCreated = 'checkpoint.created',
   CheckpointUpdated = 'checkpoint.updated',
   CheckpointDeleted = 'checkpoint.deleted',
