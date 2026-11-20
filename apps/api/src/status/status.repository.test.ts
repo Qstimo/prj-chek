@@ -2,6 +2,7 @@ import {
   AccessLevel,
   EnvironmentKind,
   HealthState,
+  ObservationGapReason,
   ProjectLifecycle,
   Section,
   StatusCheckCode,
@@ -23,6 +24,7 @@ import {
   grants,
   projects,
   servers,
+  statusObservationGaps,
   subjects,
   users,
 } from '../db/schema';
@@ -147,6 +149,75 @@ describe('репозиторий статусов', () => {
       ...overrides,
     };
   }
+
+  describe('пропуски наблюдения', () => {
+    it('без проверок последнего наблюдения нет', async () => {
+      // Свежая установка не наблюдала никогда: отсутствие знания и
+      // «наблюдали в начале времён» — разные ответы.
+      expect(await repository.lastObservedAt()).toBeNull();
+    });
+
+    it('последнее наблюдение — время самой свежей записи проверки', async () => {
+      await repository.upsertAddressStatus(domainId, checked());
+
+      const observed = await repository.lastObservedAt();
+      const [status] = await testDb.db.select().from(domainStatuses);
+
+      expect(observed?.getTime()).toBe(status?.checkedAt.getTime());
+    });
+
+    it('записывает закрытый пропуск', async () => {
+      const from = new Date('2026-11-19T09:00:00Z');
+      const to = new Date('2026-11-19T12:00:00Z');
+
+      await repository.recordObservationGap(from, to, ObservationGapReason.Silence);
+
+      const [gap] = await testDb.rowsOf(statusObservationGaps);
+
+      expect(gap).toMatchObject({ reason: ObservationGapReason.Silence });
+      expect(gap?.startedAt.toISOString()).toBe(from.toISOString());
+      expect(gap?.endedAt?.toISOString()).toBe(to.toISOString());
+    });
+
+    it('открытый пропуск второй раз не открывается', async () => {
+      // Слепота длится прогонами, и каждый из них видит её заново. Два
+      // открытых отрезка были бы двумя ответами на вопрос «с какого
+      // момента мы ничего не знаем» — это запрещено индексом в базе.
+      const first = new Date('2026-11-19T09:00:00Z');
+
+      const opened = await repository.openObservationGap(first, ObservationGapReason.Blind);
+      const again = await repository.openObservationGap(
+        new Date('2026-11-19T09:15:00Z'),
+        ObservationGapReason.Blind,
+      );
+
+      expect(opened).toBe(true);
+      expect(again).toBe(false);
+
+      const rows = await testDb.rowsOf(statusObservationGaps);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.startedAt.toISOString()).toBe(first.toISOString());
+    });
+
+    it('закрывает открытый пропуск и говорит, был ли он', async () => {
+      await repository.openObservationGap(
+        new Date('2026-11-19T09:00:00Z'),
+        ObservationGapReason.Blind,
+      );
+
+      const closedAt = new Date('2026-11-19T12:00:00Z');
+
+      expect(await repository.closeObservationGap(closedAt)).toBe(true);
+      // Второй раз закрывать нечего — и это не отказ, а ответ: по нему
+      // прогон решает, проверять ли тишину.
+      expect(await repository.closeObservationGap(closedAt)).toBe(false);
+
+      const [gap] = await testDb.rowsOf(statusObservationGaps);
+
+      expect(gap?.endedAt?.toISOString()).toBe(closedAt.toISOString());
+    });
+  });
 
   it('повторная запись статуса обновляет строку, а не плодит', async () => {
     await repository.upsertAddressStatus(

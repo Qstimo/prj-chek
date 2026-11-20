@@ -57,12 +57,18 @@ export function ChronicleForm({ initial, onSubmit, error, isSubmitting = false }
         value={values.title}
         onChange={(value) => change('title', value)}
       />
+      {/*
+        Поле на двенадцать строк: этой же формой правят текст саммари, а
+        текст созвона — это страницы. Три строки заставляли прокручивать
+        в щель то, что человек правит целиком.
+      */}
       <TextField
         id="content"
         label={FIELD_LABELS.content}
         value={values.content}
         onChange={(value) => change('content', value)}
         multiline
+        rows={12}
       />
 
       <FormError message={error} />

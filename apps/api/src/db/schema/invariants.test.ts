@@ -26,7 +26,7 @@ import {
 } from './roadmap';
 import { servers } from './servers';
 import { sessions } from './sessions';
-import { domainStatuses } from './status';
+import { domainStatuses, statusObservationGaps } from './status';
 import { subjects } from './subjects';
 import { summaries, summaryTaskDrafts, summaryTaskPlatforms } from './summaries';
 import { projectTags, tags } from './tags';
@@ -68,6 +68,7 @@ const ALL_TABLES = [
   { name: 'roadmap_report_public_links', table: roadmapReportPublicLinks },
   { name: 'domain_statuses', table: domainStatuses },
   { name: 'address_incidents', table: addressIncidents },
+  { name: 'status_observation_gaps', table: statusObservationGaps },
   { name: 'push_subscriptions', table: pushSubscriptions },
   { name: 'grants', table: grants },
   { name: 'sessions', table: sessions },

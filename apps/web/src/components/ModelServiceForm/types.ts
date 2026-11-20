@@ -1,5 +1,6 @@
 import type {
   ModelAuthScheme,
+  ModelServiceKind,
   ModelServicePlacement,
   ModelServiceSettings,
   ModelServiceUpdate,
@@ -78,6 +79,14 @@ export interface ILimitFieldsProps {
     key: K,
     value: ModelServiceFormValues[K],
   ) => void;
+  /**
+   * Узел, который правят.
+   *
+   * Нужен полям, а не только форме: выбор вида и подпись у каталога
+   * зависят от узла, и собрать их в форме значило бы протащить два
+   * пропса там, где довольно одного — того, что уже есть в настройке.
+   */
+  kind: ModelServiceKind;
 }
 
 /** Пропсы полей самого узла. */

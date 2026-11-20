@@ -66,6 +66,7 @@ const FALL: AddressIncidents = {
     lastCause: 'HTTP 500',
     lastDownAt: '2026-09-17T09:45:00.000Z',
     checks: 4,
+    probe: null,
   },
   past: [],
   fallsInWindow: 1,

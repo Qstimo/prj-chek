@@ -28,6 +28,16 @@ export const MODEL_SERVICE_NOT_CONFIGURED = 'model_service_not_configured';
 export const MODEL_SERVICE_SECRET_MISSING = 'secret_missing';
 /** Адреса узла нет: отправлять некуда. */
 export const MODEL_SERVICE_BASE_URL_MISSING = 'base_url_missing';
+/**
+ * Внешнему узлу нужен каталог, а каталога нет.
+ *
+ * Отдельная причина, а не «не хватает ключа»: каталог берут в консоли
+ * провайдера рядом с ключом, но это **другое поле**, и назвать его ключом
+ * значило бы послать администратора менять то, что у него уже верно.
+ * Требуется он не всем узлам — у `x-folder-id` SpeechKit опциональности
+ * нет, а своей службе в контуре каталог неоткуда взять.
+ */
+export const MODEL_SERVICE_FOLDER_MISSING = 'folder_missing';
 /** Ключ есть, но расшифровать его нечем: подменён `CAIRN_ENCRYPTION_KEY`. */
 export const MODEL_SERVICE_SECRET_UNDECRYPTABLE = 'secret_undecryptable';
 /** Настройка полна, но человек снял галочку. */

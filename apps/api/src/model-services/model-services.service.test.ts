@@ -24,6 +24,7 @@ import { CryptoService } from '../crypto/crypto.service';
 import { auditLog, subjects } from '../db/schema';
 import { SUGGESTER_NODE_ENV_NAMES } from '../summaries/suggester/settings';
 import type { TaskSuggester, TaskSuggesterSource } from '../summaries/suggester/task-suggester';
+import type { Transcriber, TranscriberSource } from '../summaries/transcription/transcriber';
 import { ModelServiceSettingsService } from './model-service-settings.service';
 import { ModelServicesRepository } from './model-services.repository';
 import { ModelServicesService } from './model-services.service';
@@ -76,6 +77,15 @@ describe('ModelServicesService', () => {
     },
   };
 
+  const transcriberProbe = vi.fn<Transcriber['probe']>();
+  /**
+   * Источник расшифровки: ручке проверки от порта нужен один `probe`, и
+   * заглушка объявляет ровно его — остальное этих проверок не касается.
+   */
+  const transcribers = {
+    current: async () => ({ probe: transcriberProbe }) as unknown as Transcriber,
+  } satisfies TranscriberSource;
+
   /**
    * Записи журнала, старые сверху.
    *
@@ -108,6 +118,7 @@ describe('ModelServicesService', () => {
       settings,
       new AuditService(),
       source,
+      transcribers,
     );
   });
 
@@ -119,6 +130,8 @@ describe('ModelServicesService', () => {
     await testDb.truncate();
     probe.mockReset();
     probe.mockResolvedValue(probeResult);
+    transcriberProbe.mockReset();
+    transcriberProbe.mockResolvedValue({ ...probeResult, host: 'stt.api.cloud.yandex.net' });
 
     const [subject] = await testDb.db
       .insert(subjects)
@@ -278,6 +291,31 @@ describe('ModelServicesService', () => {
       outcome: ModelProbeOutcome.Unauthorized,
       status: 401,
       durationMs: 12,
+    });
+  });
+
+  it('проверка узла расшифровки идёт в его порт, а не в порт разбивки', async () => {
+    // Ветка на узел, а не механизм на узел: ручка одна, журнал один,
+    // отличается только то, у кого спрашивают (дизайн, 10.2).
+    await service.save(admin, ModelServiceKind.Transcriber, {
+      baseUrl: 'https://stt.api.cloud.yandex.net',
+      authScheme: ModelAuthScheme.ApiKey,
+      model: 'general',
+      folder: 'каталог',
+      placement: ModelServicePlacement.External,
+      timeoutSeconds: 180,
+      isEnabled: true,
+      secret: 'ключ',
+    });
+
+    const result = await service.probe(admin, ModelServiceKind.Transcriber);
+
+    expect(transcriberProbe).toHaveBeenCalledOnce();
+    expect(probe).not.toHaveBeenCalled();
+    expect(result.host).toBe('stt.api.cloud.yandex.net');
+    expect((await auditRows()).at(-1)).toMatchObject({
+      action: AuditAction.ModelServiceProbed,
+      entityId: 'transcriber',
     });
   });
 

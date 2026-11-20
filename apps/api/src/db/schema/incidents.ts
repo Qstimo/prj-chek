@@ -1,5 +1,15 @@
+import type { IncidentProbe } from '@cairn/shared';
 import { sql } from 'drizzle-orm';
-import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { environmentDomains } from './environments';
 
@@ -48,6 +58,22 @@ export const addressIncidents = pgTable(
     lastDownAt: timestamp('last_down_at', { withTimezone: true }),
     /** Сколько проверок подтвердили падение, считая открывшую. */
     checks: integer('checks').notNull().default(1),
+    /**
+     * Слепок момента падения: куда смотрело имя и что с портами машины.
+     *
+     * `jsonb`, а не своя таблица и не набор колонок. Таблица потребовала
+     * бы ещё одной ссылки и ещё одного места, где строки уносят руками:
+     * инциденты удаляет репозиторий окружений явно, в той же транзакции,
+     * и забытый ребёнок запретил бы снятие адреса. Колонки же пришлось бы
+     * заводить парами на каждый порт. Разбирать слепок по частям в
+     * запросах не нужно никогда: он снимается один раз, читается целиком
+     * и не меняется — как метаданные журнала действий.
+     *
+     * Форму держит zod на входе и на выходе; обнуляемый, потому что у
+     * строк до его появления слепка нет, и выдумывать его задним числом
+     * нельзя — он описывал бы сегодняшнюю сеть, а не ту, что была тогда.
+     */
+    probe: jsonb('probe').$type<IncidentProbe>(),
   },
   (table) => [
     uniqueIndex('address_incidents_open')

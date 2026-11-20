@@ -1,0 +1,1 @@
+ALTER TYPE "public"."model_service_kind" ADD VALUE 'transcriber';

@@ -6,7 +6,7 @@ import { IncidentCharts } from './IncidentCharts';
 vi.mock('@/api/hooks');
 const history: AddressIncidentHistory = {
   domainId: 'a', name: 'example.com', window: { days: 1, from: '2026-11-01T00:00:00Z', to: '2026-11-02T00:00:00Z' },
-  summary: { falls: 0, downSeconds: 0, uptime: 1 }, open: null, incidents: [], offset: 0, limit: 200, nextOffset: null,
+  summary: { falls: 0, downSeconds: 0, unobservedSeconds: 0, uptime: 1 }, open: null, incidents: [], offset: 0, limit: 200, nextOffset: null,
 };
 const fetchNextPage = vi.fn();
 function query(overrides = {}) {

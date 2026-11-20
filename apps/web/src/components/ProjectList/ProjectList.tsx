@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { ProjectCard } from '../ProjectCard';
-import { ProjectRow } from '../ProjectRow';
+import { PROJECT_COLUMNS, ProjectRow } from '../ProjectRow';
 import { TagFilterBar } from './TagFilterBar';
 import { collectTagFacets, filterByTags } from './tagFilter';
 import type { IProps } from './types';
@@ -93,20 +93,18 @@ export function ProjectList({ projects, createSlot, indicators }: IProps) {
           ))}
         </ul>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          {/* Шире прежнего: с колонкой тегов восьми колонкам в 56rem
-              тесно, и домен с сервером начинали ломаться по словам. */}
-          <table className="w-full min-w-[64rem] text-left text-sm">
+        <div className="overflow-hidden rounded-lg border border-border">
+          {/* Доли ширины вместо прежних 64rem: столько не влезало в
+              контейнер сводки, и таблица уезжала вправо на любом экране.
+              Ширины и видимость колонок заданы в PROJECT_COLUMNS. */}
+          <table className="w-full table-fixed text-left text-sm">
             <thead className="border-b border-border bg-surface text-xs text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-medium">Название</th>
-                <th className="px-3 py-2 font-medium">Теги</th>
-                <th className="px-3 py-2 font-medium">Состояние</th>
-                <th className="px-3 py-2 font-medium">Платформы</th>
-                <th className="px-3 py-2 font-medium">Домен</th>
-                <th className="px-3 py-2 font-medium">Сервер</th>
-                <th className="px-3 py-2 font-medium">Статус</th>
-                <th className="px-3 py-2 font-medium">Обновлён</th>
+                {PROJECT_COLUMNS.map((column) => (
+                  <th key={column.key} className={`px-3 py-2 font-medium ${column.className}`}>
+                    {column.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>

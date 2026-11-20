@@ -44,6 +44,13 @@ services:
       # настройку как рабочую.
       CAIRN_STATUS_CHECK_INTERVAL_MINUTES: ${CAIRN_STATUS_CHECK_INTERVAL_MINUTES:-15}
       CAIRN_HEALTH_RECHECK_DELAY_SECONDS: ${CAIRN_HEALTH_RECHECK_DELAY_SECONDS:-30}
+      CAIRN_STATUS_DOWN_POLL_SECONDS: ${CAIRN_STATUS_DOWN_POLL_SECONDS:-60}
+      # `-`, а не `:-`: пустое значение у этой переменной — выключатель
+      # проверки (закрытый контур), и подстановка умолчания вместо него
+      # снимала бы выключатель, который человек поставил нарочно.
+      CAIRN_STATUS_CONTROL_URLS: ${CAIRN_STATUS_CONTROL_URLS-https://ya.ru/robots.txt,https://www.cloudflare.com/cdn-cgi/trace}
+      CAIRN_STATUS_CONTROL_TIMEOUT_SECONDS: ${CAIRN_STATUS_CONTROL_TIMEOUT_SECONDS:-5}
+      CAIRN_PORT_PROBE_TIMEOUT_SECONDS: ${CAIRN_PORT_PROBE_TIMEOUT_SECONDS:-3}
       CAIRN_HEALTH_CHECK_TIMEOUT_SECONDS: ${CAIRN_HEALTH_CHECK_TIMEOUT_SECONDS:-10}
       CAIRN_TLS_CHECK_TIMEOUT_SECONDS: ${CAIRN_TLS_CHECK_TIMEOUT_SECONDS:-10}
       CAIRN_DNS_TIMEOUT_SECONDS: ${CAIRN_DNS_TIMEOUT_SECONDS:-10}
@@ -66,8 +73,8 @@ services:
       # переменной нет вовсе, а compose всегда передаёт её — пустой.
       #
       # И главное про все семь переменных узла: они — **запасной
-      # источник**. Настройка с экрана «Модели» лежит в базе и перебивает
-      # их целиком, пока запись не удалят кнопкой «Вернуть настройку
+      # источник**. Настройка с экрана «Настройки» (/settings) лежит в
+      # базе и перебивает их целиком, пока запись не удалят кнопкой «Вернуть настройку
       # окружения». Правка этого файла на установке, настроенной с
       # экрана, не даст ничего — и экран прямо об этом говорит.
       CAIRN_TASK_SUGGESTER: ${CAIRN_TASK_SUGGESTER:-external}
@@ -100,8 +107,9 @@ services:
       # передаёт её — пустой.
       #
       # Шесть первых переменных (вид, адрес, ключ, каталог, модель, предел
-      # ожидания) — **запасной источник**: настройка с экрана «Модели»
-      # лежит в базе и перебивает их целиком. Остальные восемь — пределы,
+      # ожидания) — **запасной источник**: настройка с экрана «Настройки»
+      # (/settings) лежит в базе и перебивает их целиком, и у этого узла
+      # она тоже действует без перезапуска. Остальные восемь — пределы,
       # каталог тома, частота тика, битрейт, терпение к `ffmpeg` — остаются
       # единственным источником: это настройка нашего поведения.
       CAIRN_TRANSCRIBER: ${CAIRN_TRANSCRIBER:-off}

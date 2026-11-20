@@ -20,3 +20,22 @@ export function fallsTextOf(falls: number, windowDays: number): string {
 export function uptimeSummaryTextOf(uptime: number, windowDays: number): string {
   return `${uptimeTextOf(uptime)} времени за ${pluralize(windowDays, 'день', 'дня', 'дней')}`;
 }
+
+/**
+ * Чем объяснить время без наблюдения.
+ *
+ * Названо не «аптайм 100%», а «за это время мы не знаем ничего»: пустой
+ * журнал падений означает и «адрес отвечал», и «никто не спрашивал», и
+ * выдавать второе за первое — та самая ложь в плюс, из-за которой три
+ * часа лежащего наблюдателя выглядели тремя часами исправной работы.
+ *
+ * Весь период без наблюдения назван особо: доли там нет вовсе, и
+ * показывать её рядом было бы нечестно.
+ */
+export function unobservedNoteOf(seconds: number, windowDays: number): string {
+  const windowSeconds = windowDays * 24 * 60 * 60;
+
+  return seconds >= windowSeconds
+    ? 'Проверок за это окно не было ни одной: судить не о чем.'
+    : 'Проверок за это время не было: ни падений, ни работы.';
+}

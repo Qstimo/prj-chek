@@ -1,7 +1,7 @@
 'use client';
 
 import { Loader } from '@/components/Loader';
-import type { AddressIncidentHistory, Incident } from '@cairn/shared';
+import type { AddressIncidentHistory, Incident, IncidentProbe } from '@cairn/shared';
 
 import { useQueryAddressIncidents } from '@/api/hooks';
 import {
@@ -10,6 +10,9 @@ import {
   downtimeTextOf,
   exactDurationTextOf,
   incidentRangeTextOf,
+  probePlacementTextOf,
+  probePortsTextOf,
+  probeVerdictTextOf,
   recoveryTextOf,
 } from '@/components/AddressIncidents';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
@@ -24,7 +27,7 @@ import {
 import { WarningsPanel } from '@/components/WarningsPanel';
 
 import type { IProps } from './types';
-import { fallsTextOf, uptimeSummaryTextOf } from './utils';
+import { fallsTextOf, unobservedNoteOf, uptimeSummaryTextOf } from './utils';
 import { registryExplanationOf } from '@/components/StatusByEnvironment/utils';
 
 /**
@@ -114,7 +117,33 @@ function IncidentRow({ incident }: { incident: Incident }) {
         {checksTextOf(incident.checks)}
         {recovery && ` · ${recovery}`}
       </p>
+
+      {/* Слепок — под раскрытием: он отвечает на вопрос «к кому идти», а
+          его задают не к каждой строке истории. У падений, заведённых до
+          его появления, слепка нет, и выдумывать его нельзя. */}
+      {incident.probe && <Probe probe={incident.probe} />}
     </li>
+  );
+}
+
+/**
+ * Слепок момента падения: вывод одной фразой, под ним — чем он измерен.
+ *
+ * Вывод сверху намеренно: он и есть то, зачем слепок снимался, а адреса
+ * с портами под ним — основание, по которому его можно оспорить.
+ */
+function Probe({ probe }: { probe: IncidentProbe }) {
+  const verdict = probeVerdictTextOf(probe);
+  const ports = probePortsTextOf(probe);
+
+  return (
+    <details className="mt-1 text-xs text-muted-foreground">
+      <summary className="cursor-pointer">Слепок момента падения</summary>
+      {verdict && <p className="mt-1 text-foreground">{verdict}</p>}
+      <p className="mt-1">{probePlacementTextOf(probe)}</p>
+      {ports && <p className="[overflow-wrap:anywhere]">{ports}</p>}
+      <p className="mt-1">снят {checkedAtTextOf(probe.at)}</p>
+    </details>
   );
 }
 
@@ -187,11 +216,20 @@ function History({
       )}
 
       <dl className="grid gap-2 sm:grid-cols-3">
-        <Check label="По журналу инцидентов" value={summary.falls === 0 ? 'Инцидентов нет; аптайм не измерен' : uptimeSummaryTextOf(summary.uptime, window.days)} />
+        <Check label="По журналу инцидентов" value={summary.falls === 0 ? 'Инцидентов нет; аптайм не измерен' : uptimeSummaryTextOf(summary.uptime, window.days)} note={summary.unobservedSeconds > 0 ? 'Доля посчитана по наблюдавшемуся времени.' : null} />
         {summary.downSeconds > 0 && (
           <Check label="Не отвечал" value={downtimeTextOf(summary.downSeconds)} />
         )}
         <Check label="Падений" value={fallsTextOf(summary.falls, window.days)} />
+        {/* Только при пропусках: «без наблюдения: 0» заставляло бы
+            вчитываться в строку, которая ничего не сообщает. */}
+        {summary.unobservedSeconds > 0 && (
+          <Check
+            label="Без наблюдения"
+            value={downtimeTextOf(summary.unobservedSeconds)}
+            note={unobservedNoteOf(summary.unobservedSeconds, window.days)}
+          />
+        )}
       </dl>
 
       {history.incidents.length > 0 && (

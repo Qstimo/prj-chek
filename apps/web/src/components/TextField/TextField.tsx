@@ -3,7 +3,15 @@
 import type { IProps } from './types';
 
 /** Поле ввода с подписью, связанной с полем по идентификатору. */
-export function TextField({ id, label, value, onChange, multiline = false, type = 'text' }: IProps) {
+export function TextField({
+  id,
+  label,
+  value,
+  onChange,
+  multiline = false,
+  rows = 3,
+  type = 'text',
+}: IProps) {
   const className =
     'w-full rounded-md border border-border bg-surface px-3 py-2 transition focus:border-border-strong';
 
@@ -16,9 +24,11 @@ export function TextField({ id, label, value, onChange, multiline = false, type 
         <textarea
           id={id}
           value={value}
-          rows={3}
+          rows={rows}
           onChange={(event) => onChange(event.target.value)}
-          className={className}
+          // Тянуть поле за угол человек вправе: сколько строк ему нужно,
+          // знает он, а не мы.
+          className={`${className} resize-y`}
         />
       ) : (
         <input

@@ -23,6 +23,7 @@ const OPEN_INCIDENT: Incident = {
   lastCause: 'HTTP 500',
   lastDownAt: '2026-10-20T14:35:00.000Z',
   checks: 2,
+  probe: null,
 };
 
 const PAST_INCIDENT: Incident = {

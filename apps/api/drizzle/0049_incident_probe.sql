@@ -1,0 +1,1 @@
+ALTER TABLE "address_incidents" ADD COLUMN "probe" jsonb;

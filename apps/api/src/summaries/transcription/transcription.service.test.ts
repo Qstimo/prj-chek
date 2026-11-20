@@ -39,7 +39,12 @@ import { SummariesRepository } from '../summaries.repository';
 import { DisabledTranscriber } from './disabled.transcriber';
 import type { AudioExtractor, ExtractedAudio, MediaProbe } from './extractor';
 import { RecordingStore, RecordingStoreFailure, type AcceptedRecording } from './recording-store';
-import type { Transcriber, TranscriptionAnswer, TranscriptionInput } from './transcriber';
+import type {
+  Transcriber,
+  TranscriberSource,
+  TranscriptionAnswer,
+  TranscriptionInput,
+} from './transcriber';
 import { TranscriptionRepository } from './transcription.repository';
 import { TranscriptionService } from './transcription.service';
 import { UnavailableExtractor } from './unavailable.extractor';
@@ -144,6 +149,11 @@ class StubTranscriber implements Transcriber {
   async forget(externalId: string): Promise<void> {
     this.forgotten.push(externalId);
   }
+
+  /** Проверка связи этих тестов не касается: она живёт в администрировании. */
+  async probe(): Promise<never> {
+    throw new Error('проверка связи в этом тесте не вызывается');
+  }
 }
 
 /** Заглушка порта извлечения: ни один тест не запускает `ffmpeg`. */
@@ -159,6 +169,17 @@ class StubExtractor implements AudioExtractor {
   async extract(_uploadPath: string, _jobId: string, _signal: AbortSignal): Promise<ExtractedAudio> {
     throw new Error('извлечение в этом тесте не вызывается');
   }
+}
+
+/**
+ * Источник-константа из заглушки.
+ *
+ * Тесты подменяют **адаптер**, а не настройку узла: что настройка
+ * доезжает из базы, проверяет `transcriber.source.ts` со своей стороны, а
+ * здесь важно поведение шагов на известном порту.
+ */
+function sourceOf(transcriber: Transcriber): TranscriberSource {
+  return { current: async () => transcriber };
 }
 
 describe('служба расшифровки', () => {
@@ -201,7 +222,7 @@ describe('служба расшифровки', () => {
         chronicle,
         new AuditService(),
         store,
-        port,
+        sourceOf(port),
         extractor,
       );
 

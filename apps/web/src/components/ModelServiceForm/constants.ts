@@ -2,6 +2,7 @@ import {
   MODEL_SERVICE_BAD_URL,
   MODEL_SERVICE_INSECURE_URL,
   ModelAuthScheme,
+  ModelServiceKind,
   ModelServicePlacement,
 } from '@cairn/shared';
 
@@ -30,7 +31,7 @@ import type { Preset } from './types';
  * `isUnverified`, и форма говорит об этом словами: заготовка, которая
  * врёт о чужом API, хуже пустого поля.
  */
-export const PRESETS: Preset[] = [
+const SUGGESTER_PRESETS: Preset[] = [
   {
     value: 'proxyapi',
     label: 'ProxyAPI',
@@ -64,6 +65,41 @@ export const PRESETS: Preset[] = [
     modelHint: 'Как называет модель ваш endpoint.',
   },
 ];
+
+/**
+ * Заготовки распознавания речи — снимок на 2026-11-20.
+ *
+ * Одна, и это не недоделка: адаптер распознавания в сборке один —
+ * SpeechKit v3, — а заготовка провайдера, которого нечем вызвать,
+ * предлагала бы настроить то, что не заработает. `isUnverified` здесь не
+ * нужен: адрес подтверждён документацией v3 и совпадает с умолчанием
+ * `CAIRN_TRANSCRIBER_BASE_URL`, по которому собраны действующие установки.
+ *
+ * Пресета «свой узел в контуре» нет по той же причине: локальной службы
+ * распознавания в сборке нет, и сохранённая настройка с видом «в вашем
+ * контуре» оставила бы порт выключенным — об этом форма говорит словами
+ * (`PLACEMENT_NOTE`), а предлагать это пресетом значило бы вести туда.
+ */
+const TRANSCRIBER_PRESETS: Preset[] = [
+  {
+    value: 'speechkit',
+    label: 'Yandex SpeechKit',
+    baseUrl: 'https://stt.api.cloud.yandex.net',
+    authScheme: ModelAuthScheme.ApiKey,
+    modelHint: 'Имя модели распознавания, например general.',
+  },
+];
+
+/**
+ * Заготовки по узлу: у разбивки и распознавания провайдеры разные.
+ *
+ * Один перечень на оба узла предлагал бы узлу распознавания адрес
+ * чат-модели — настройку, которая сохранится и не заработает.
+ */
+export const PRESETS_BY_KIND: Record<ModelServiceKind, Preset[]> = {
+  [ModelServiceKind.TaskSuggester]: SUGGESTER_PRESETS,
+  [ModelServiceKind.Transcriber]: TRANSCRIBER_PRESETS,
+};
 
 /** Адрес, который сам провайдер пока не подтвердил, назван прямо. */
 export const UNVERIFIED_PRESET_NOTE =
@@ -99,3 +135,34 @@ export const PLACEMENT_OPTIONS: { value: ModelServicePlacement; label: string }[
 /** Подпись у поля каталога — честная, как велит дизайн (6.3). */
 export const FOLDER_HINT =
   'Каталог нужен службам Yandex; OpenAI-совместимому узлу Yandex каталог задаётся внутри имени модели (gpt://<каталог>/…).';
+
+/**
+ * Вид узла в выборе — по узлу.
+ *
+ * У распознавания вид один: своей службы в контуре в сборке нет, и
+ * предлагать её значило бы предложить настройку, которая сохранится и не
+ * заработает. У разбивки оба вида настоящие: `OpenAI`-совместимый
+ * endpoint в контуре — обычный способ держать модель у себя.
+ */
+export const PLACEMENT_OPTIONS_BY_KIND: Record<
+  ModelServiceKind,
+  { value: ModelServicePlacement; label: string }[]
+> = {
+  [ModelServiceKind.TaskSuggester]: PLACEMENT_OPTIONS,
+  [ModelServiceKind.Transcriber]: PLACEMENT_OPTIONS.filter(
+    (option) => option.value === ModelServicePlacement.External,
+  ),
+};
+
+/**
+ * Подпись у каталога — по узлу, потому что правило разное.
+ *
+ * У распознавания каталог **обязателен**: `x-folder-id` у SpeechKit не
+ * опционален, и без него узел не работает — ровно это и показывает бирка
+ * «Нет каталога». У разбивки он нужен не всем, и подпись говорит, кому.
+ */
+export const FOLDER_HINTS: Record<ModelServiceKind, string> = {
+  [ModelServiceKind.TaskSuggester]: FOLDER_HINT,
+  [ModelServiceKind.Transcriber]:
+    'Каталог Yandex Cloud обязателен: без него SpeechKit отвергнет каждый вызов, и узел остаётся выключенным.',
+};

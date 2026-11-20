@@ -22,7 +22,12 @@ import { AUDIO_EXTRACTOR, ExtractionFailure, type AudioExtractor } from './extra
 import { JobAction, decide } from './job-decision';
 import { RecordingStore } from './recording-store';
 import { transcriberSettings } from './settings';
-import { TRANSCRIBER, TranscriberFailure, type Transcriber } from './transcriber';
+import {
+  TRANSCRIBER_SOURCE,
+  TranscriberFailure,
+  type Transcriber,
+  type TranscriberSource,
+} from './transcriber';
 import { TranscriptionRepository } from './transcription.repository';
 import { TranscriptionService, actorOf } from './transcription.service';
 
@@ -135,7 +140,9 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
     private readonly service: TranscriptionService,
     private readonly audit: AuditService,
     private readonly store: RecordingStore,
-    @Inject(TRANSCRIBER) private readonly transcriber: Transcriber,
+    // Источник, а не адаптер: настройка узла правится на экране, и порт
+    // берётся **один раз на тик** (см. `sweep`).
+    @Inject(TRANSCRIBER_SOURCE) private readonly transcribers: TranscriberSource,
     @Inject(AUDIO_EXTRACTOR) private readonly extractor: AudioExtractor,
   ) {}
 
@@ -279,22 +286,28 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
   private async sweep(): Promise<void> {
     const jobs = await this.repository.pending(this.db);
     const settings = transcriberSettings();
+    // Порт — один на тик, а не на шаг. Решение о задаче спрашивает у него
+    // «включено ли», а отправка — куда и чем: увидь они разные настройки,
+    // задача, пропущенная решением как включённая, уехала бы на узел,
+    // которого в настройке уже нет. Цена — один `SELECT` по первичному
+    // ключу на тик.
+    const transcriber = await this.transcribers.current();
     const now = new Date();
 
     for (const job of jobs) {
       // Решение считается с нулевым бюджетом: так из него выходит только
       // то, что бюджета не требует, — опрос.
-      if (this.decisionOf(job, now, settings, 0).action !== JobAction.Poll) {
+      if (this.decisionOf(job, now, settings, 0, transcriber).action !== JobAction.Poll) {
         continue;
       }
 
-      await this.guarded(job, () => this.poll(job));
+      await this.guarded(job, () => this.poll(job, transcriber));
     }
 
     let heavyLeft = MAX_HEAVY_PER_TICK;
 
     for (const job of jobs) {
-      const decision = this.decisionOf(job, now, settings, heavyLeft);
+      const decision = this.decisionOf(job, now, settings, heavyLeft, transcriber);
 
       // Закрытие неудачей бюджета не занимает: оно не стоит ни ядра, ни
       // памяти, и держать его до следующего тика незачем.
@@ -311,7 +324,7 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
 
       if (decision.action === JobAction.Send) {
         heavyLeft -= 1;
-        await this.guarded(job, () => this.send(job));
+        await this.guarded(job, () => this.send(job, transcriber));
       }
     }
   }
@@ -322,6 +335,7 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
     now: Date,
     settings: ReturnType<typeof transcriberSettings>,
     heavyLeft: number,
+    transcriber: Transcriber,
   ): ReturnType<typeof decide> {
     return decide({
       state: job.state,
@@ -333,7 +347,7 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
       now,
       heavyLeft,
       maxMinutes: settings.maxMinutes,
-      isEnabled: this.transcriber.isEnabled,
+      isEnabled: transcriber.isEnabled,
     });
   }
 
@@ -346,7 +360,7 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
    * ожидания. Это отличие от отказа передачи, где повтор означал бы вторую
    * передачу и вторую оплату: опрос бесплатен и ничего не раскрывает.
    */
-  private async poll(job: TranscriptionJobRow): Promise<void> {
+  private async poll(job: TranscriptionJobRow, transcriber: Transcriber): Promise<void> {
     if (!job.externalId) {
       // Строка `running` без идентификатора операции — строка, которую
       // нечем опросить; переход в `running` её и не допускает.
@@ -358,9 +372,9 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
     const controller = new AbortController();
 
     try {
-      const answer = await this.transcriber.poll(job.externalId, controller.signal);
+      const answer = await transcriber.poll(job.externalId, controller.signal);
 
-      await this.apply(job, answer);
+      await this.apply(job, answer, transcriber);
     } finally {
       // Сигнал принадлежит прогону: обрыв в `finally` не даёт запросу
       // пережить вызов.
@@ -450,14 +464,14 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
    * Сам вызов идёт **вне транзакции**: держать её открытой, пока отвечает
    * чужой узел, нельзя — это занятое соединение из пула и замок на строке.
    */
-  private async send(job: TranscriptionJobRow): Promise<void> {
+  private async send(job: TranscriptionJobRow, transcriber: Transcriber): Promise<void> {
     const controller = new AbortController();
     const startedAt = Date.now();
     const actor = await this.actorFor(job);
 
     try {
       await this.db.transaction(async (tx) => {
-        await this.repository.markSending(tx, job.id, { host: this.transcriber.host });
+        await this.repository.markSending(tx, job.id, { host: transcriber.host });
 
         if (actor) {
           await this.audit.record(tx, actor, {
@@ -466,9 +480,9 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
             entityId: job.id,
             projectId: job.projectId,
             metadata: {
-              transcriber: this.transcriber.kind,
-              host: this.transcriber.host,
-              model: this.transcriber.model,
+              transcriber: transcriber.kind,
+              host: transcriber.host,
+              model: transcriber.model,
               // Наружу уходит дорожка: на вопрос «что покинуло машину»
               // отвечает только эта пара.
               audioBytes: job.audioBytes,
@@ -486,7 +500,7 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
         }
       });
 
-      const answer = await this.transcriber.start(
+      const answer = await transcriber.start(
         {
           audioPath: job.audioPath!,
           audioType: job.audioType ?? 'audio/ogg',
@@ -494,7 +508,7 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
         controller.signal,
       );
 
-      await this.apply(job, answer);
+      await this.apply(job, answer, transcriber);
     } catch (cause) {
       await this.service.fail(job, transcriberCodeOf(cause), Date.now() - startedAt);
     } finally {
@@ -510,7 +524,11 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
    * Синхронная служба (локальный `faster-whisper`) отвечает `done` сразу, и
    * текст укладывается тем же тиком — под это порт и расширен.
    */
-  private async apply(job: TranscriptionJobRow, answer: Awaited<ReturnType<Transcriber['poll']>>): Promise<void> {
+  private async apply(
+    job: TranscriptionJobRow,
+    answer: Awaited<ReturnType<Transcriber['poll']>>,
+    transcriber: Transcriber,
+  ): Promise<void> {
     if (answer.state === TranscriptionState.Done) {
       const text = (answer.text ?? '').trim();
 
@@ -524,7 +542,7 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
       }
 
       await this.service.settle(job, answer.text!);
-      await this.forget(job, answer.externalId ?? job.externalId);
+      await this.forget(job, answer.externalId ?? job.externalId, transcriber);
 
       return;
     }
@@ -562,13 +580,17 @@ export class TranscriptionRunnerService implements OnModuleInit, OnModuleDestroy
    * исхода не меняет: текст уже у нас, повторять расшифровку из-за
    * неубранных результатов незачем, а через три суток они истекут сами.
    */
-  private async forget(job: TranscriptionJobRow, externalId: string | null): Promise<void> {
+  private async forget(
+    job: TranscriptionJobRow,
+    externalId: string | null,
+    transcriber: Transcriber,
+  ): Promise<void> {
     if (!externalId) {
       return;
     }
 
     try {
-      await this.transcriber.forget(externalId);
+      await transcriber.forget(externalId);
     } catch (cause) {
       this.logger.warn(`Служба не забыла результаты ${externalId}: ${String(cause)}`);
     }

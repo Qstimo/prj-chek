@@ -330,6 +330,34 @@
       "when": 1795085598777,
       "tag": "0046_summary_task_states",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1795099821128,
+      "tag": "0047_observation_gaps",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1795099822128,
+      "tag": "0048_observation_gap_privileges",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795102304280,
+      "tag": "0049_incident_probe",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795172351386,
+      "tag": "0050_model_service_transcriber",
+      "breakpoints": true
     }
   ]
 }

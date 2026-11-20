@@ -5,6 +5,7 @@ import {
   type AddressIncidentHistory,
   type AddressIncidentsQuery,
   type Incident,
+  type IncidentProbe,
   type IncidentWindow,
   type ProjectIncidents,
 } from '@cairn/shared';
@@ -33,6 +34,7 @@ import {
   addressIncidents,
   environmentDomains,
   environments,
+  statusObservationGaps,
   type AddressIncidentRow,
 } from '../db/schema';
 import { PAST_INCIDENTS_LIMIT } from './constants';
@@ -70,10 +72,11 @@ export class IncidentsRepository {
     domainId: string,
     cause: string | null,
     at: Date = new Date(),
+    probe: IncidentProbe | null = null,
   ): Promise<AddressIncidentRow> {
     const [incident] = await this.db
       .insert(addressIncidents)
-      .values({ domainId, cause, lastCause: cause, lastDownAt: at, checks: 1 })
+      .values({ domainId, cause, lastCause: cause, lastDownAt: at, checks: 1, probe })
       .returning();
 
     return incident!;
@@ -240,6 +243,27 @@ export class IncidentsRepository {
       .from(addressIncidents)
       .where(touching);
 
+    // Пропуски наблюдения — такие же отрезки, и считаются тем же
+    // выражением: открытый идёт до конца окна, начавшийся раньше входит
+    // частью внутри окна.
+    const [blindness] = await this.db
+      .select({
+        seconds: sql<string>`coalesce(sum(greatest(0, extract(epoch from (
+          least(coalesce(${statusObservationGaps.endedAt}, ${to}), ${to})
+          - greatest(${statusObservationGaps.startedAt}, ${from})
+        )))), 0)`,
+      })
+      .from(statusObservationGaps)
+      .where(
+        and(
+          lte(statusObservationGaps.startedAt, new Date(window.to)),
+          or(
+            isNull(statusObservationGaps.endedAt),
+            gte(statusObservationGaps.endedAt, new Date(window.from)),
+          ),
+        ),
+      );
+
     const page = await this.db
       .select()
       .from(addressIncidents)
@@ -257,6 +281,14 @@ export class IncidentsRepository {
     const falls = totals?.falls ?? 0;
     const downSeconds = Math.round(Number(totals?.downSeconds ?? 0));
     const windowSeconds = (window.days * DAY_MS) / 1000;
+    const unobservedSeconds = Math.min(
+      windowSeconds,
+      Math.round(Number(blindness?.seconds ?? 0)),
+    );
+    // Знаменатель доли — наблюдавшееся время, а не окно: прежде три часа
+    // без проверок попадали в долю исправной работой, и аптайм врал в
+    // плюс ровно тогда, когда система не видела ничего.
+    const observedSeconds = windowSeconds - unobservedSeconds;
 
     return {
       domainId,
@@ -265,9 +297,15 @@ export class IncidentsRepository {
       summary: {
         falls,
         downSeconds,
+        unobservedSeconds,
         // Доля округляется до шести знаков: доли процента здесь уже не
-        // смысл, а шум двоичной дроби.
-        uptime: round(Math.min(1, Math.max(0, 1 - downSeconds / windowSeconds))),
+        // смысл, а шум двоичной дроби. Наблюдения не было вовсе — доля
+        // равна единице и не утверждает ничего: об этом говорит
+        // `unobservedSeconds`, равный длине окна.
+        uptime:
+          observedSeconds <= 0
+            ? 1
+            : round(Math.min(1, Math.max(0, 1 - downSeconds / observedSeconds))),
       },
       open: open ? viewOf(open) : null,
       incidents: page.map(viewOf),
@@ -345,5 +383,6 @@ function viewOf(row: AddressIncidentRow): Incident {
     lastCause: row.lastCause,
     lastDownAt: row.lastDownAt?.toISOString() ?? null,
     checks: row.checks,
+    probe: row.probe ?? null,
   };
 }

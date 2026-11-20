@@ -1,6 +1,7 @@
 import {
   MODEL_SERVICE_BASE_URL_MISSING,
   MODEL_SERVICE_DISABLED,
+  MODEL_SERVICE_FOLDER_MISSING,
   MODEL_SERVICE_SECRET_MISSING,
   MODEL_SERVICE_SECRET_UNDECRYPTABLE,
   ModelAuthScheme,
@@ -12,6 +13,7 @@ import {
 /** Названия узлов: человек правит разбивку, а не `task_suggester`. */
 export const KIND_LABELS: Record<ModelServiceKind, string> = {
   [ModelServiceKind.TaskSuggester]: 'Разбивка саммари на задачи',
+  [ModelServiceKind.Transcriber]: 'Расшифровка записи созвона',
 };
 
 /**
@@ -37,6 +39,9 @@ export const SOURCE_LABELS: Record<ModelServiceSource, string> = {
 export const BLOCKED_LABELS: Record<string, string> = {
   [MODEL_SERVICE_SECRET_MISSING]: 'Нет ключа',
   [MODEL_SERVICE_BASE_URL_MISSING]: 'Нет адреса',
+  // Отдельно от ключа: каталог берут в той же консоли, но это другое
+  // поле, и «нет ключа» отправило бы менять то, что уже верно.
+  [MODEL_SERVICE_FOLDER_MISSING]: 'Нет каталога',
   [MODEL_SERVICE_SECRET_UNDECRYPTABLE]:
     'Ключ не расшифровывается: проверьте CAIRN_ENCRYPTION_KEY. Впишите ключ заново или сбросьте настройку к окружению',
   [MODEL_SERVICE_DISABLED]: 'Выключено',

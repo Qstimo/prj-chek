@@ -5,7 +5,10 @@ import { boolean, check, integer, pgEnum, pgTable, text, timestamp, uuid } from 
 import { subjects } from './subjects';
 
 /** Узел настройки. Значения совпадают с контрактом. */
-export const modelServiceKindEnum = pgEnum('model_service_kind', [ModelServiceKind.TaskSuggester]);
+export const modelServiceKindEnum = pgEnum('model_service_kind', [
+  ModelServiceKind.TaskSuggester,
+  ModelServiceKind.Transcriber,
+]);
 
 /** Как ключ предъявляется службе. Значения совпадают с контрактом. */
 export const modelAuthSchemeEnum = pgEnum('model_auth_scheme', [

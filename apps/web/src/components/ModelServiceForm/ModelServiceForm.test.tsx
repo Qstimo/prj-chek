@@ -44,6 +44,17 @@ const empty: ModelServiceSettings = {
   updatedByLabel: null,
 };
 
+/** Узел распознавания: тот же тип настройки, другой узел. */
+const transcriber: ModelServiceSettings = {
+  ...fromDatabase,
+  kind: ModelServiceKind.Transcriber,
+  baseUrl: 'https://stt.api.cloud.yandex.net',
+  host: 'stt.api.cloud.yandex.net',
+  authScheme: ModelAuthScheme.ApiKey,
+  model: 'general',
+  folder: 'каталог',
+};
+
 const onSave = vi.fn();
 
 describe('ModelServiceForm', () => {
@@ -181,5 +192,70 @@ describe('ModelServiceForm', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent(/строки запроса/);
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('ModelServiceForm: узел расшифровки', () => {
+  beforeEach(() => {
+    onSave.mockReset();
+  });
+
+  it('предлагает заготовки распознавания, а не чат-моделей', async () => {
+    // Один перечень на оба узла предлагал бы распознаванию адрес
+    // чат-модели — настройку, которая сохранится и не заработает.
+    render(
+      <ModelServiceForm settings={{ ...transcriber, baseUrl: '' }} onSave={onSave} onClose={vi.fn()} />,
+    );
+
+    const presets = screen.getByLabelText('Пресет');
+
+    expect(presets).toHaveTextContent('Yandex SpeechKit');
+    expect(presets).not.toHaveTextContent('ProxyAPI');
+    expect(presets).not.toHaveTextContent('OpenAI');
+  });
+
+  it('заготовка распознавания заполняет адрес службы и схему ключа', async () => {
+    render(
+      <ModelServiceForm settings={{ ...transcriber, baseUrl: '' }} onSave={onSave} onClose={vi.fn()} />,
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText('Пресет'), 'speechkit');
+
+    expect(screen.getByLabelText('Адрес')).toHaveValue('https://stt.api.cloud.yandex.net');
+    expect(screen.getByLabelText('Схема авторизации')).toHaveValue(ModelAuthScheme.ApiKey);
+  });
+
+  it('вида «в вашем контуре» не предлагает: такой службы в сборке нет', () => {
+    // Предложить вид, с которым узел сохранится и не заработает, значит
+    // предложить впустую — то же правило, что у кнопки загрузки записи.
+    render(<ModelServiceForm settings={transcriber} onSave={onSave} onClose={vi.fn()} />);
+
+    const placement = screen.getByLabelText('Вид');
+
+    expect(placement).toHaveTextContent('Внешний узел');
+    expect(placement).not.toHaveTextContent('контуре');
+  });
+
+  it('у каталога сказано, что он обязателен', async () => {
+    render(<ModelServiceForm settings={transcriber} onSave={onSave} onClose={vi.fn()} />);
+
+    expect(screen.getByText(/Каталог Yandex Cloud обязателен/)).toBeInTheDocument();
+  });
+
+  it('сохраняет настройку узла целиком, включая каталог', async () => {
+    render(<ModelServiceForm settings={transcriber} onSave={onSave} onClose={vi.fn()} />);
+
+    await userEvent.clear(screen.getByLabelText('Модель'));
+    await userEvent.type(screen.getByLabelText('Модель'), 'general:rc');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: 'https://stt.api.cloud.yandex.net',
+        model: 'general:rc',
+        folder: 'каталог',
+        authScheme: ModelAuthScheme.ApiKey,
+      }),
+    );
   });
 });

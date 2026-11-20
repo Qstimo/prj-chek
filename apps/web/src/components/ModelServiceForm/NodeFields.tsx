@@ -3,7 +3,7 @@
 import type { ModelAuthScheme } from '@cairn/shared';
 
 import { TextField } from '../TextField';
-import { AUTH_SCHEME_OPTIONS, FOLDER_HINT } from './constants';
+import { AUTH_SCHEME_OPTIONS, FOLDER_HINTS } from './constants';
 import { SelectField } from './SelectField';
 import type { INodeFieldsProps } from './types';
 
@@ -17,7 +17,7 @@ import type { INodeFieldsProps } from './types';
  * само имя: подставленное имя выглядело бы настроенным и отвечало бы
  * `400`.
  */
-export function NodeFields({ values, onChange, modelHint }: INodeFieldsProps) {
+export function NodeFields({ values, onChange, kind, modelHint }: INodeFieldsProps) {
   return (
     <>
       <TextField
@@ -52,7 +52,7 @@ export function NodeFields({ values, onChange, modelHint }: INodeFieldsProps) {
           value={values.folder}
           onChange={(value) => onChange('folder', value)}
         />
-        <p className="text-sm text-muted-foreground">{FOLDER_HINT}</p>
+        <p className="text-sm text-muted-foreground">{FOLDER_HINTS[kind]}</p>
       </div>
     </>
   );

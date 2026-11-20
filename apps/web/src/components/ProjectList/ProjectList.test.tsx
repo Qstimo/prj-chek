@@ -88,6 +88,27 @@ describe('ProjectList', () => {
     expect(screen.getByRole('columnheader', { name: 'Название' })).toBeInTheDocument();
   });
 
+  it('ссылка проекта растянута на всю строку', () => {
+    // Человек целит в строку, а не в клетку названия: в состояние, в
+    // статус, в дату. Ссылка остаётся одна и настоящая — работают и
+    // клавиатура, и «открыть в новой вкладке».
+    render(<ProjectList projects={[project]} />);
+
+    expect(screen.getByRole('link', { name: 'Проект' }).className).toMatch(/after:inset-0/);
+  });
+
+  it('таблица укладывается в своё место, а не прокручивается боком', () => {
+    // Таблица требовала 64rem в контейнере на 61rem, поэтому сводка
+    // ехала вправо на любом экране. Ширины задаются долями, а длинные
+    // значения обрезаются.
+    render(<ProjectList projects={[project]} />);
+
+    const table = screen.getByRole('table');
+
+    expect(table.className).toMatch(/table-fixed/);
+    expect(table.className).not.toMatch(/min-w-/);
+  });
+
   it('переключает на карточки и запоминает выбор', async () => {
     const user = userEvent.setup();
     render(<ProjectList projects={[project]} />);

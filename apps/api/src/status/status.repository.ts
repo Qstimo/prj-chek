@@ -1,6 +1,7 @@
 import {
   AccessLevel,
   HealthState,
+  ObservationGapReason,
   ProjectLifecycle,
   Section,
   StatusCheckCode,
@@ -12,7 +13,7 @@ import {
   type StatusWarning,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { asc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
@@ -25,8 +26,10 @@ import {
   environments,
   projects,
   servers,
+  statusObservationGaps,
 } from '../db/schema';
 import { machineWarningsOf } from '../servers/server-discovery';
+import { canonicalIpOf } from './canonical-ip';
 import { domainRenewalWarningsOf, indicatorOf, serverWarningsOf, warningsOf } from './indicator';
 import { environmentStatusesOf } from './status.projection';
 
@@ -187,6 +190,71 @@ export class StatusRepository {
       .returning({ id: domainStatuses.id });
 
     return updated.length > 0;
+  }
+
+  /**
+   * Время самой свежей записи любой проверки.
+   *
+   * Это и есть «когда система наблюдала в последний раз»: строка статуса
+   * пишется каждым прогоном, и отдельной отметки для этого не завели —
+   * второе место хранения того же факта разошлось бы с первым.
+   *
+   * @returns `null`, если проверок не было ни одной: свежая установка
+   * ничего не теряла, и пропуска у неё быть не может.
+   */
+  async lastObservedAt(): Promise<Date | null> {
+    const [row] = await this.db
+      .select({ checkedAt: domainStatuses.checkedAt })
+      .from(domainStatuses)
+      .orderBy(desc(domainStatuses.checkedAt))
+      .limit(1);
+
+    return row?.checkedAt ?? null;
+  }
+
+  /** Записывает закрытый пропуск наблюдения: тишину видно только задним числом. */
+  async recordObservationGap(
+    startedAt: Date,
+    endedAt: Date,
+    reason: ObservationGapReason,
+  ): Promise<void> {
+    await this.db.insert(statusObservationGaps).values({ startedAt, endedAt, reason });
+  }
+
+  /**
+   * Открывает пропуск наблюдения, если открытого ещё нет.
+   *
+   * Слепота длится прогонами, и каждый из них видит её заново; отрезок
+   * при этом один. Повтор отбивает частичный уникум в базе, а не проверка
+   * в памяти: прогонов может быть два, по одному на экземпляр API.
+   *
+   * @returns открыл ли пропуск именно этот вызов.
+   */
+  async openObservationGap(startedAt: Date, reason: ObservationGapReason): Promise<boolean> {
+    const opened = await this.db
+      .insert(statusObservationGaps)
+      .values({ startedAt, endedAt: null, reason })
+      .onConflictDoNothing()
+      .returning({ id: statusObservationGaps.id });
+
+    return opened.length > 0;
+  }
+
+  /**
+   * Закрывает открытый пропуск наблюдения.
+   *
+   * @returns был ли открытый пропуск. По этому ответу прогон и решает,
+   * проверять ли тишину: закрытый только что отрезок уже покрыл её весь,
+   * и вторая запись о том же времени задвоила бы счёт.
+   */
+  async closeObservationGap(endedAt: Date): Promise<boolean> {
+    const closed = await this.db
+      .update(statusObservationGaps)
+      .set({ endedAt })
+      .where(isNull(statusObservationGaps.endedAt))
+      .returning({ id: statusObservationGaps.id });
+
+    return closed.length > 0;
   }
 
   /**
@@ -568,15 +636,4 @@ function addressWarningsOf(
  */
 function observedOf(lifecycle: ProjectLifecycle, domains: DomainStatus[]): DomainStatus[] {
   return lifecycle === ProjectLifecycle.Archived ? [] : domains;
-}
-
-/**
- * Какой из адресов имени считать тем самым.
- *
- * Наименьший: привязка у окружения одна, а резолверы ротируют порядок
- * ответа — пока бралась первая запись, привязка плясала от прогона к
- * прогону вместе с ней. Правило живёт здесь одно на запись и на чтение.
- */
-function canonicalIpOf(ips: string[]): string | null {
-  return [...ips].sort()[0] ?? null;
 }

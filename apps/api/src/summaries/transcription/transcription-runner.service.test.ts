@@ -45,6 +45,7 @@ import { TRANSCRIPTION_POLL_ENV } from './settings';
 import {
   TranscriberFailure,
   type Transcriber,
+  type TranscriberSource,
   type TranscriptionAnswer,
   type TranscriptionInput,
 } from './transcriber';
@@ -157,6 +158,12 @@ class StubTranscriber implements Transcriber {
     this.forgotten.push(externalId);
   }
 
+  /** Проверка связи этих тестов не касается: она живёт в администрировании. */
+  async probe(): Promise<never> {
+    throw new Error('проверка связи в этом тесте не вызывается');
+  }
+
+
   /** Один и тот же ответ на передачу и на опрос: пустой текст — не успех. */
   private answer(): TranscriptionAnswer {
     if (this.emptyText) {
@@ -247,6 +254,17 @@ class StubExtractor implements AudioExtractor {
   }
 }
 
+/**
+ * Источник-константа из заглушки.
+ *
+ * Тесты подменяют **адаптер**, а не настройку узла: что настройка
+ * доезжает из базы, проверяет `transcriber.source.ts` со своей стороны, а
+ * здесь важно поведение шагов на известном порту.
+ */
+function sourceOf(transcriber: Transcriber): TranscriberSource {
+  return { current: async () => transcriber };
+}
+
 describe('прогон расшифровок', () => {
   let testDb: TestDatabase;
   let store: StubStore;
@@ -286,7 +304,7 @@ describe('прогон расшифровок', () => {
       chronicle,
       new AuditService(),
       store,
-      transcriber,
+      sourceOf(transcriber),
       extractor,
     );
 
@@ -347,7 +365,7 @@ describe('прогон расшифровок', () => {
       service,
       new AuditService(),
       store,
-      transcriber,
+      sourceOf(transcriber),
       extractor,
     );
   }

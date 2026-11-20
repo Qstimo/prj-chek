@@ -21,6 +21,7 @@ const INCIDENT: Incident = {
   lastCause: 'DNS не отвечает (EAI_AGAIN)',
   lastDownAt: '2026-11-17T09:01:00.000Z',
   checks: 3,
+  probe: null,
 };
 
 describe('счёт падений', () => {
