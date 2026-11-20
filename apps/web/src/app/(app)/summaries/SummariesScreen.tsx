@@ -22,7 +22,7 @@ import { SummaryList } from '@/components/SummaryList';
 import { TranscriptionQueue } from '@/components/TranscriptionQueue';
 import { useFileDrop } from '@/hooks/useFileDrop';
 
-import { SCREEN_TEXTS } from './constants';
+import { DROP_CLOSE_GUARD_MS, SCREEN_TEXTS } from './constants';
 
 /**
  * История саммари, очередь расшифровок и создание нового.
@@ -52,6 +52,8 @@ export function SummariesScreen() {
   const [dropped, setDropped] = useState<File>();
   const [percent, setPercent] = useState<number>();
   const upload = useRef<AbortController | undefined>(undefined);
+  /** Когда панель открыл бросок. Ноль — её открыли кнопкой. */
+  const openedByDrop = useRef(0);
   const create = useMutationCreateSummary();
   const uploadRecording = useMutationUploadRecording();
   const cancel = useMutationCancelTranscription();
@@ -62,6 +64,7 @@ export function SummariesScreen() {
   // панель на тот же файл была бы лишней.
   const isDragging = useFileDrop(
     useCallback((file: File) => {
+      openedByDrop.current = Date.now();
       setDropped(file);
       setIsCreating(true);
     }, []),
@@ -72,6 +75,21 @@ export function SummariesScreen() {
   function close(): void {
     setIsCreating(false);
     setDropped(undefined);
+  }
+
+  /**
+   * Закрытие по просьбе панели — но не отпусканием, которым её открыли.
+   *
+   * Без задержки панель, открытая броском, закрывалась бы мгновенно, будто
+   * бросок не сработал (`DROP_CLOSE_GUARD_MS`). Своё закрытие — кнопка и
+   * успех отправки — идёт мимо: оно зовёт `close` напрямую.
+   */
+  function requestClose(): void {
+    if (Date.now() - openedByDrop.current < DROP_CLOSE_GUARD_MS) {
+      return;
+    }
+
+    close();
   }
 
   if (summaries.isPending || targets.isPending) {
@@ -91,10 +109,19 @@ export function SummariesScreen() {
 
   return (
     <div className="space-y-8">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {/*
+          Подпись о броске стоит всегда и рядом с кнопкой: подсказка под
+          курсором приходит слишком поздно — её видит только тот, кто уже
+          тащит файл.
+        */}
+        <p className="text-xs text-muted-foreground">{SCREEN_TEXTS.dropInvite}</p>
         <button
           type="button"
-          onClick={() => setIsCreating(true)}
+          onClick={() => {
+            openedByDrop.current = 0;
+            setIsCreating(true);
+          }}
           className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
         >
           {SCREEN_TEXTS.create}
@@ -130,7 +157,7 @@ export function SummariesScreen() {
 
       <Drawer
         isOpen={isCreating}
-        onClose={close}
+        onClose={requestClose}
         title={SCREEN_TEXTS.create}
         width={DrawerWidth.Half}
       >

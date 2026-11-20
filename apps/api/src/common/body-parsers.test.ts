@@ -2,11 +2,13 @@ import express, { json, type RequestHandler } from 'express';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
-import { JSON_BODY_LIMIT, bodyParsers } from './body-parsers';
+import { MAX_INTAKE_CONTENT_CHARS } from '@cairn/shared';
+
+import { JSON_BODY_LIMIT, bodyParsers, intakeTextParser } from './body-parsers';
 
 /**
  * Самое длинное текстовое поле контракта: содержимое `.env` при импорте
- * (`variable.ts`, 1 Ми знаков). Текст саммари (65 536) и страница
+ * (`variable.ts`, 1 Ми знаков). Текст саммари (256 Ки) и страница
  * документации (200 000) короче и покрываются тем же пределом.
  */
 const LONGEST_FIELD_CHARS = 1_048_576;
@@ -65,5 +67,42 @@ describe('разборщики тела запроса', () => {
 
   it('предел назван в байтах, а не «на глаз»', () => {
     expect(JSON_BODY_LIMIT).toBe('4mb');
+  });
+});
+
+describe('разборщик приёмного канала', () => {
+  /** Приложение с разборщиком текста и ручкой, возвращающей длину. */
+  function app(): express.Express {
+    const instance = express();
+
+    instance.use(intakeTextParser());
+    instance.post('/', (incoming, outgoing) => {
+      outgoing.json({ chars: String(incoming.body ?? '').length });
+    });
+
+    return instance;
+  }
+
+  it('принимает поле контракта целиком по-русски', async () => {
+    // Сторож причины правки: предел стоял равным числу знаков (`64kb`), а
+    // знак кириллицы в UTF-8 занимает два байта — русский текст получал
+    // неназванное `request entity too large` вдвое раньше, чем схема
+    // сказала бы «слишком длинно».
+    const response = await request(app())
+      .post('/')
+      .set('Content-Type', 'text/plain; charset=utf-8')
+      .send('я'.repeat(MAX_INTAKE_CONTENT_CHARS));
+
+    expect(response.status).toBe(200);
+    expect(response.body.chars).toBe(MAX_INTAKE_CONTENT_CHARS);
+  });
+
+  it('тело сверх предела отвергается', async () => {
+    const response = await request(app())
+      .post('/')
+      .set('Content-Type', 'text/plain; charset=utf-8')
+      .send('я'.repeat(MAX_INTAKE_CONTENT_CHARS * 2));
+
+    expect(response.status).toBe(413);
   });
 });

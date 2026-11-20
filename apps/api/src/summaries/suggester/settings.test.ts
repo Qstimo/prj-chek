@@ -1,4 +1,8 @@
-import { ModelAuthScheme, ModelServicePlacement } from '@cairn/shared';
+import {
+  MAX_CHRONICLE_CONTENT_CHARS,
+  ModelAuthScheme,
+  ModelServicePlacement,
+} from '@cairn/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -222,7 +226,14 @@ describe('настройки предложителя', () => {
     process.env.CAIRN_TASK_SUGGESTER_MAX_CHARS = '0';
 
     expect(suggesterSettings().maxChars).toBe(DEFAULT_SUGGESTER_MAX_CHARS);
-    expect(DEFAULT_SUGGESTER_MAX_CHARS).toBe(40_000);
+  });
+
+  it('умолчание предела объёма не ниже того, что принимает саммари', () => {
+    // Прежние 40 000 знаков означали, что принятое саммари разбить
+    // нельзя: человек получал отказ на том, для чего поток и сделан.
+    // Узлу с маленьким окном число уменьшают переменной, и отказ тогда
+    // называет **его** число.
+    expect(DEFAULT_SUGGESTER_MAX_CHARS).toBe(MAX_CHRONICLE_CONTENT_CHARS);
   });
 
   it('пределы читаются из настройки', () => {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { ModelServicePlacement, SummaryTaskOrigin, SummaryTaskState } from '../enums';
+import { MAX_CHRONICLE_CONTENT_CHARS } from './chronicle';
 import { requiredDaySchema } from './day-date';
 import { platformIdsSchema, platformSchema } from './platform';
 import { HAS_NUL, isNulFree } from './plain-text';
@@ -57,7 +58,16 @@ export function normalizeSummaryText(raw: string): string {
 }
 
 /** Предел объёма текста в контракте: столько принимает запись хроники. */
-const summaryTextSchema = z.string().trim().min(1).max(65_536);
+/**
+ * Текст саммари.
+ *
+ * Предел **тот же**, что у содержимого записи хроники, и это не совпадение
+ * числа: текст саммари и есть содержимое записи хроники — второй копии
+ * текста в системе нет. Два числа здесь разошлись бы на первой же правке,
+ * и тогда саммари принималось бы, а правка его текста отвергалась — или
+ * наоборот.
+ */
+const summaryTextSchema = z.string().trim().min(1).max(MAX_CHRONICLE_CONTENT_CHARS);
 
 /** Задача черновика: формулировка, порядок, происхождение, поля чекпоинта. */
 export const summaryTaskSchema = z.object({

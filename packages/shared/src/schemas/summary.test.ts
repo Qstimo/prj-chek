@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { PlatformKind, SummaryTaskOrigin, SummaryTaskState, TranscriberKind, TranscriptionState } from '../enums';
+import { MAX_CHRONICLE_CONTENT_CHARS } from './chronicle';
 import {
   MAX_SUMMARY_TASKS,
   normalizeSummaryText,
@@ -76,6 +77,19 @@ describe('создание саммари', () => {
     ).not.toThrow();
   });
 
+  it('принимает расшифровку четырёхчасового созвона', () => {
+    // Прежние 65 536 — это полчаса созвона по-русски, то есть `400` ровно
+    // на том, для чего поток и сделан. Предел выведен из предела службы
+    // распознавания: четыре часа речи — порядка четверти миллиона знаков.
+    expect(() =>
+      summaryCreateSchema.parse({
+        occurredOn: '2026-11-16',
+        title: 'Созвон',
+        text: 'я'.repeat(200_000),
+      }),
+    ).not.toThrow();
+  });
+
   it('отвергает пустой текст', () => {
     expect(() =>
       summaryCreateSchema.parse({ occurredOn: '2026-11-16', title: 'Созвон', text: '   ' }),
@@ -83,14 +97,14 @@ describe('создание саммари', () => {
   });
 
   it('отвергает текст длиннее предела записи хроники', () => {
-    // Предел взят оттуда, куда текст поедет: 65 536 у
-    // `chronicleEntryCreate.content`. Иначе отказ пришёл бы не оттуда,
-    // где его ждут.
+    // Предел взят оттуда, куда текст поедет, и **тем же числом**: текст
+    // саммари и есть содержимое записи хроники, второй копии нет. Иначе
+    // отказ пришёл бы не оттуда, где его ждут.
     expect(() =>
       summaryCreateSchema.parse({
         occurredOn: '2026-11-16',
         title: 'Созвон',
-        text: 'я'.repeat(65_537),
+        text: 'я'.repeat(MAX_CHRONICLE_CONTENT_CHARS + 1),
       }),
     ).toThrow();
   });
