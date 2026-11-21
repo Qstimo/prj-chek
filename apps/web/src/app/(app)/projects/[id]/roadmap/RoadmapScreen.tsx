@@ -67,6 +67,17 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
 
   return (
     <div className="space-y-6">
+      {/*
+        Ссылка в реестр задач стоит здесь, а не в полосе разделов проекта:
+        состав разделов закрыт секциями, а задача принадлежит «Роадмапу» и
+        своей единицы выдачи доступа не имеет.
+      */}
+      <div className="flex justify-end">
+        <Link href={`/projects/${projectId}/roadmap/tasks`} className="text-sm underline">
+          Задачи проекта
+        </Link>
+      </div>
+
       <ReleaseSummary summary={roadmap.data.summary} />
 
       {roadmap.data.summary.length === 0 && canWrite && (
