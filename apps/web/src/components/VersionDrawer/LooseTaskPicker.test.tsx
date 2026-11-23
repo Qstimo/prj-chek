@@ -15,6 +15,7 @@ const task: ProjectTask = {
   sourceSummaryId: null,
   platformIds: [],
   placement: null,
+  export: null,
   createdAt: '2026-11-20T10:00:00.000Z',
   updatedAt: '2026-11-20T10:00:00.000Z',
 };

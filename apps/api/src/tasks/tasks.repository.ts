@@ -20,8 +20,11 @@ import {
   projectTasks,
   roadmapCheckpoints,
   roadmapVersions,
+  taskExports,
   type ProjectTaskRow,
+  type TaskExportRow,
 } from '../db/schema';
+import { taskExportOf } from '../tracker/task-export.projection';
 import { TaskAlreadyPlacedError, TaskPlacedError } from './tasks.errors';
 
 /**
@@ -44,15 +47,23 @@ export class TasksRepository {
   ) {}
 
   /**
-   * Задачи проекта вместе с размещением, одним запросом.
+   * Задачи проекта вместе с размещением и зеркалом выгрузки, одним
+   * запросом.
    *
    * Порядок: сначала задачи вне версий, затем по позиции версии и
    * позиции внутри неё. Вне версии — сверху намеренно: это то, о чём
    * человек ещё не решил, и ради чего он на этот экран и пришёл.
    *
-   * `left join` на размещение и версию, а не два запроса: «какие задачи
-   * есть у проекта» — один вопрос, и N+1 на реестре означал бы по
-   * запросу на задачу.
+   * `left join` на размещение, версию и выгрузку, а не четыре запроса:
+   * «какие задачи есть у проекта» — один вопрос, и N+1 на реестре
+   * означал бы по запросу на задачу.
+   *
+   * Условие соединения с выгрузкой — только задача, без вида трекера, и
+   * строк от этого не удваивается: ключ выгрузки это пара «задача ×
+   * трекер», а в перечне `tracker_kind` одно значение (дизайн, 10.1),
+   * то есть не больше одной строки на задачу гарантирует база. Второй вид
+   * трекера обязан переделать проекцию здесь же — `export` в контракте
+   * одиночный, и выбирать из двух зеркал придётся явно.
    */
   async findForProject(
     subject: RequestSubject,
@@ -77,10 +88,21 @@ export class TasksRepository {
         isDone: roadmapCheckpoints.isDone,
         position: roadmapCheckpoints.position,
         carriedFromVersionId: roadmapCheckpoints.carriedFromVersionId,
+        tracker: taskExports.tracker,
+        externalId: taskExports.externalId,
+        externalUrl: taskExports.externalUrl,
+        externalBoardId: taskExports.externalBoardId,
+        externalColumnId: taskExports.externalColumnId,
+        isCompleted: taskExports.isCompleted,
+        exportedAt: taskExports.exportedAt,
+        exportUpdatedAt: taskExports.updatedAt,
+        checkedAt: taskExports.checkedAt,
+        failureCode: taskExports.failureCode,
       })
       .from(projectTasks)
       .leftJoin(roadmapCheckpoints, eq(roadmapCheckpoints.taskId, projectTasks.id))
       .leftJoin(roadmapVersions, eq(roadmapVersions.id, roadmapCheckpoints.versionId))
+      .leftJoin(taskExports, eq(taskExports.taskId, projectTasks.id))
       .where(
         filter.loose === true
           ? and(eq(projectTasks.projectId, projectId), isNull(roadmapCheckpoints.id))
@@ -118,6 +140,7 @@ export class TasksRepository {
               position: row.position ?? 1,
               carriedFromVersionId: row.carriedFromVersionId ?? null,
             },
+      export: taskExportOf(row),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     }));
@@ -225,17 +248,34 @@ export class TasksRepository {
   }
 
   /**
-   * Удаляет задачу из реестра.
+   * Удаляет задачу из реестра вместе с её зеркалом выгрузки.
    *
    * Размещённую — отказ, а не каскад: удаление меняло бы прогресс версии
    * с другого экрана и молча. Сначала вынь из версии.
+   *
+   * **Зеркало уносится здесь, явно, и это не то же самое, что каскад.**
+   * Ссылка `task_exports.task_id` стоит `restrict` (дизайн, 10.5) ровно
+   * затем, чтобы распорядиться зеркалом был обязан названный путь
+   * удаления — тот, который решает, что сказать человеку. Каскад сделал бы
+   * это молча, а пропустить шаг нельзя: без него удаление выгруженной
+   * задачи приходит ошибкой драйвера, то есть `500` вместо ответа.
+   *
+   * **Задача в трекере при этом остаётся жить**: удалять чужую задачу по
+   * своей кнопке мы не вправе. Цена названа и она настоящая — ответ на
+   * вопрос «а в трекере она осталась?» уходит из реестра, и единственным
+   * его следом остаётся запись журнала: поэтому унесённое зеркало
+   * возвращается наверх, а не отбрасывается здесь (`task.deleted` называет
+   * идентификатор задачи в трекере). Показывать осиротевшую выгрузку на
+   * экране, как обещает дизайн 10.5, пока нечем: признака «осиротела» нет
+   * ни в контракте, ни в базе, и завести его без спроса — значит выбрать за
+   * владельца, где такая строка живёт после смерти задачи.
    */
   async remove(
     subject: RequestSubject,
     tx: Transaction,
     projectId: string,
     taskId: string,
-  ): Promise<ProjectTaskRow> {
+  ): Promise<{ task: ProjectTaskRow; export: TaskExportRow | null }> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
 
     const task = await this.requireInProject(tx, projectId, taskId);
@@ -245,9 +285,16 @@ export class TasksRepository {
     }
 
     await tx.delete(projectTaskPlatforms).where(eq(projectTaskPlatforms.taskId, taskId));
+    // Условие по задаче, а не по проекту: промахнись оно шире, и удаление
+    // одной задачи стёрло бы зеркала всего реестра, а повторная выгрузка
+    // завела бы в трекере вторые копии всех задач проекта.
+    const [exported] = await tx
+      .delete(taskExports)
+      .where(eq(taskExports.taskId, taskId))
+      .returning();
     await tx.delete(projectTasks).where(eq(projectTasks.id, taskId));
 
-    return task;
+    return { task, export: exported ?? null };
   }
 
   /**

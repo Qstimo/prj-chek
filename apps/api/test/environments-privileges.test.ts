@@ -1,13 +1,23 @@
-import { ChronicleSource, SubjectKind, SummaryTaskOrigin } from '@cairn/shared';
+import {
+  ChronicleSource,
+  SubjectKind,
+  SummaryTaskOrigin,
+  TaskOrigin,
+  TrackerKind,
+} from '@cairn/shared';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   chronicleEntries,
+  projectTasks,
   projects,
   subjects,
   summaries,
   summaryTaskDrafts,
+  taskExports,
+  trackerConnections,
+  trackerProjectBindings,
 } from '../src/db/schema';
 import { startTestDatabase, type TestDatabase } from './db-fixture';
 
@@ -241,6 +251,132 @@ describe('права роли приложения на окружения', () 
     await expect(
       testDb.appDb.execute(sql`UPDATE project_tasks SET title = title WHERE false`),
     ).resolves.toBeDefined();
+  });
+
+  it('роль приложения правит и уносит подключение трекера и привязки досок', async () => {
+    // Сторож `0056` целиком, и проверка именно записью: `SELECT` прошёл бы
+    // и с урезанным до чтения грантом, а ломается не чтение — подключение и
+    // привязка пишутся одним `ON CONFLICT … DO UPDATE`, то есть отказ в
+    // правах пришёл бы ошибкой драйвера на первом сохранении настройки.
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'права-трекера@cairn.local' })
+      .returning();
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'prava-trekera', name: 'Права трекера' })
+      .returning();
+
+    const [connection] = await testDb.appDb
+      .insert(trackerConnections)
+      .values({
+        kind: TrackerKind.Weeek,
+        baseUrl: 'https://api.weeek.net/public/v1',
+        updatedBySubjectId: subject!.id,
+      })
+      .returning();
+    expect(connection?.secretEncrypted).toBeNull();
+
+    // Токен ставится правкой, а не вторым путём записи: у настройки один
+    // ключ — значение перечня.
+    const [withSecret] = await testDb.appDb
+      .update(trackerConnections)
+      .set({ secretEncrypted: 'v1:nonce:ct:tag', isEnabled: false })
+      .where(eq(trackerConnections.kind, TrackerKind.Weeek))
+      .returning();
+    expect(withSecret?.isEnabled).toBe(false);
+
+    const [binding] = await testDb.appDb
+      .insert(trackerProjectBindings)
+      .values({
+        projectId: project!.id,
+        tracker: TrackerKind.Weeek,
+        externalProjectId: '7',
+        boardId: '11',
+        boardColumnId: '31',
+        updatedBySubjectId: subject!.id,
+      })
+      .returning();
+    expect(binding?.boardColumnId).toBe('31');
+
+    const [rebound] = await testDb.appDb
+      .update(trackerProjectBindings)
+      .set({ boardColumnId: '32' })
+      .where(eq(trackerProjectBindings.projectId, project!.id))
+      .returning();
+    expect(rebound?.boardColumnId).toBe('32');
+
+    // Снятие подключения уносит привязки, не трогая задачи (дизайн, 3.3):
+    // без `DELETE` это действие упало бы отказом в правах.
+    await testDb.appDb
+      .delete(trackerProjectBindings)
+      .where(eq(trackerProjectBindings.projectId, project!.id));
+    await testDb.appDb
+      .delete(trackerConnections)
+      .where(eq(trackerConnections.kind, TrackerKind.Weeek));
+    expect(await testDb.rowsOf(trackerProjectBindings)).toHaveLength(0);
+    expect(await testDb.rowsOf(trackerConnections)).toHaveLength(0);
+  });
+
+  it('роль приложения пишет, правит и уносит выгрузки задач', async () => {
+    // Сторож `0058`, и проверка именно записью: `SELECT` прошёл бы и с
+    // урезанным до чтения грантом, а ломается не чтение. Отказ в правах
+    // пришёл бы ошибкой драйвера **после** того, как запись «передали
+    // наружу» уже легла в журнал, то есть задача уехала бы в трекер, а
+    // зеркала у неё не появилось.
+    const [subject] = await testDb.db
+      .insert(subjects)
+      .values({ kind: SubjectKind.User, label: 'права-выгрузки@cairn.local' })
+      .returning();
+    const [project] = await testDb.db
+      .insert(projects)
+      .values({ slug: 'prava-vygruzki', name: 'Права выгрузки' })
+      .returning();
+    const [task] = await testDb.db
+      .insert(projectTasks)
+      .values({ projectId: project!.id, title: 'Оплата картой', origin: TaskOrigin.Manual })
+      .returning();
+
+    const [exported] = await testDb.appDb
+      .insert(taskExports)
+      .values({
+        taskId: task!.id,
+        tracker: TrackerKind.Weeek,
+        externalId: '4096',
+        externalBoardId: '11',
+        externalColumnId: '31',
+      })
+      .returning();
+    expect(exported?.checkedAt).toBeNull();
+    expect(exported?.isCompleted).toBe(false);
+
+    // Опрос пишет `checked_at` при каждом тике, даже когда ничего не
+    // изменилось: без `UPDATE` прогон падал бы отказом в правах на первом
+    // же тике — и падал бы молча, в логе фонового цикла.
+    const [checked] = await testDb.appDb
+      .update(taskExports)
+      .set({ checkedAt: new Date(), isCompleted: true, failureCode: null })
+      .where(eq(taskExports.taskId, task!.id))
+      .returning();
+    expect(checked?.checkedAt).not.toBeNull();
+
+    // Снятие подключения уносит выгрузки, не трогая задачи (дизайн, 3.3).
+    await testDb.appDb.delete(taskExports).where(eq(taskExports.taskId, task!.id));
+    expect(await testDb.rowsOf(taskExports)).toHaveLength(0);
+    expect(await testDb.rowsOf(projectTasks)).toHaveLength(1);
+
+    // Ссылка `restrict`, а не каскад: пока зеркало есть, задачу не унести
+    // молча, и ответ на вопрос «а в Weeek она осталась?» не пропадёт
+    // вместе со строкой (дизайн, 10.5).
+    await testDb.appDb.insert(taskExports).values({
+      taskId: task!.id,
+      tracker: TrackerKind.Weeek,
+      externalId: '4096',
+      externalBoardId: '11',
+    });
+    await expect(
+      testDb.appDb.delete(projectTasks).where(eq(projectTasks.id, task!.id)),
+    ).rejects.toThrow();
   });
 
   it('роль приложения не меняет схему', async () => {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { TaskOrigin } from '../enums';
 import { platformIdsSchema } from './platform';
 import { checkpointUrlSchema } from './roadmap';
+import { taskExportSchema } from './tracker';
 
 /**
  * Предел длины формулировки задачи.
@@ -80,6 +81,20 @@ export const projectTaskSchema = z.object({
   platformIds: z.array(z.string().uuid()),
   /** `null` означает «задача есть, в версии её нет». */
   placement: taskPlacementSchema.nullable(),
+  /**
+   * Зеркало выгрузки во внешний трекер; `null` — не выгружалась.
+   *
+   * Объектом, а не плоскими полями, по той же причине, что
+   * {@link taskPlacementSchema}: «не выгружалась» обязано читаться **одним**
+   * условием. Пустой `externalId` рядом с ложным `isCompleted` означал бы и
+   * «её там нет», и «выгрузили, и там открыта» — одним и тем же, а экран на
+   * этих двух состояниях показывает разное: кнопку «Выгрузить» и ссылку
+   * наружу.
+   *
+   * Зеркало ничего не закрывает (дизайн, 5): `export.isCompleted` и
+   * `placement.isDone` — два независимых поля, и их расхождение законно.
+   */
+  export: taskExportSchema.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

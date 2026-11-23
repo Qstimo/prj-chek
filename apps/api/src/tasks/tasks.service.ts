@@ -90,7 +90,7 @@ export class TasksService {
     });
   }
 
-  /** Удаляет задачу из реестра. */
+  /** Удаляет задачу из реестра вместе с её зеркалом выгрузки. */
   async remove(subject: RequestSubject, projectId: string, taskId: string): Promise<void> {
     await this.db.transaction(async (tx) => {
       const removed = await this.repository.remove(subject, tx, projectId, taskId);
@@ -100,10 +100,21 @@ export class TasksService {
         entityType: 'task',
         entityId: taskId,
         projectId,
-        // Формулировка здесь есть, в отличие от правки: удаление уносит
-        // её целиком, и запись «удалена задача такой-то uuid» не сказала
-        // бы ничего.
-        metadata: { title: removed.title },
+        metadata: {
+          // Формулировка здесь есть, в отличие от правки: удаление уносит
+          // её целиком, и запись «удалена задача такой-то uuid» не сказала
+          // бы ничего.
+          title: removed.task.title,
+          // Задача в трекере удаление в CAIRN переживает: удалять чужую
+          // задачу по своей кнопке мы не вправе (дизайн, 10.5). Поэтому
+          // идентификатор унесённого зеркала называется здесь — журнал
+          // остаётся единственным следом ответа на «а в трекере она
+          // осталась?», а из реестра этот ответ уходит вместе со строкой.
+          // `null` у невыгруженной задачи означает ровно «её там и не
+          // было», и это не то же самое, что отсутствие поля у записей,
+          // заведённых до появления выгрузки.
+          trackerExternalId: removed.export?.externalId ?? null,
+        },
       });
     });
   }

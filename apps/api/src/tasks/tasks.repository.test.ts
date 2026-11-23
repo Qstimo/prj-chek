@@ -4,6 +4,7 @@ import {
   Section,
   SubjectKind,
   TaskOrigin,
+  TrackerKind,
 } from '@cairn/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -19,6 +20,7 @@ import {
   roadmapCheckpoints,
   roadmapVersions,
   subjects,
+  taskExports,
   users,
 } from '../db/schema';
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
@@ -143,6 +145,28 @@ describe('репозиторий задач проекта', () => {
     return version!.id;
   }
 
+  /** Выгрузка задачи прямо в базе: тесты проекции не ждут ручки выгрузки. */
+  async function seedExport(
+    taskId: string,
+    overrides: Partial<{
+      externalId: string;
+      externalUrl: string | null;
+      externalColumnId: string | null;
+      isCompleted: boolean;
+      checkedAt: Date | null;
+      failureCode: string | null;
+    }> = {},
+  ): Promise<void> {
+    await testDb.db.insert(taskExports).values({
+      taskId,
+      tracker: TrackerKind.Weeek,
+      externalId: '4096',
+      externalBoardId: '11',
+      externalColumnId: '31',
+      ...overrides,
+    });
+  }
+
   describe('чтение', () => {
     it('без выдачи не раскрывает даже существования задач', async () => {
       await seedTask('Поднять предел текста');
@@ -227,6 +251,112 @@ describe('репозиторий задач проекта', () => {
       const tasks = await repository.findForProject(member(), projectId);
 
       expect(tasks.map((task) => task.title)).toEqual(['Вне версии', 'В версии v1', 'В версии v2']);
+    });
+
+    it('невыгруженная задача отдаётся с пустым зеркалом', async () => {
+      // `null`, а не пустые поля: «не выгружалась» обязано читаться одним
+      // условием — экран на этом состоянии показывает кнопку «Выгрузить».
+      await grant(AccessLevel.Read);
+      await seedTask('Поднять предел текста');
+
+      const [task] = await repository.findForProject(member(), projectId);
+
+      expect(task?.export).toBeNull();
+    });
+
+    it('выгруженная задача приносит зеркало и встречается в списке один раз', async () => {
+      await grant(AccessLevel.Read);
+      const taskId = await seedTask('Оплата');
+      await seedExport(taskId, {
+        externalUrl: 'https://app.weeek.net/ws/42/project/7/task/4096',
+        checkedAt: new Date('2026-11-21T10:05:00.000Z'),
+      });
+
+      const tasks = await repository.findForProject(member(), projectId);
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]?.export).toMatchObject({
+        tracker: TrackerKind.Weeek,
+        externalId: '4096',
+        externalUrl: 'https://app.weeek.net/ws/42/project/7/task/4096',
+        externalBoardId: '11',
+        externalColumnId: '31',
+        isCompleted: false,
+        checkedAt: '2026-11-21T10:05:00.000Z',
+        failureCode: null,
+      });
+    });
+
+    it('«ни разу не спрашивали» отдаётся пустым временем опроса', async () => {
+      // `checked_at` пишется при каждом опросе, даже когда ничего не
+      // изменилось, поэтому пусто означает ровно «опроса ещё не было».
+      // Подставить сюда время выгрузки значило бы сказать, что статус
+      // спрашивали, — та же ошибка, что аптайм без пропусков наблюдения.
+      await grant(AccessLevel.Read);
+      const taskId = await seedTask('Оплата');
+      await seedExport(taskId);
+
+      const [task] = await repository.findForProject(member(), projectId);
+
+      expect(task?.export?.checkedAt).toBeNull();
+      expect(task?.export?.exportedAt).not.toBeNull();
+    });
+
+    it('зеркало «закрыто там» размещения не закрывает', async () => {
+      // Решение владельца (дизайн, 5): внешний статус — только зеркало.
+      // Расхождение законно и показывается биркой; прогресс версии
+      // считается из чекпоинтов и только из них.
+      await grant(AccessLevel.Read);
+      const taskId = await seedTask('Оплата');
+      await placeTask(taskId, 'v1.2');
+      await seedExport(taskId, { isCompleted: true });
+
+      const [task] = await repository.findForProject(member(), projectId);
+
+      expect(task?.export?.isCompleted).toBe(true);
+      expect(task?.placement?.isDone).toBe(false);
+    });
+
+    it('ссылку человека зеркало не подменяет', async () => {
+      // `url` вписал человек, ссылка трекера живёт в выгрузке (дизайн,
+      // 3.1): одно поле на две ссылки затёрло бы заметку первой выгрузкой.
+      await grant(AccessLevel.Write);
+      const taskId = await seedTask('Оплата');
+      await testDb.db.transaction((tx) =>
+        repository.update(member(), tx, projectId, taskId, { url: 'https://notes.example/oplata' }),
+      );
+      await seedExport(taskId, { externalUrl: 'https://app.weeek.net/ws/42/project/7/task/4096' });
+
+      const [task] = await repository.findForProject(member(), projectId);
+
+      expect(task?.url).toBe('https://notes.example/oplata');
+      expect(task?.export?.externalUrl).toBe('https://app.weeek.net/ws/42/project/7/task/4096');
+    });
+
+    it('зеркало соседней задачи к этой не приклеивается', async () => {
+      await grant(AccessLevel.Read);
+      const exported = await seedTask('Выгружена');
+      await seedTask('Не выгружена');
+      await seedExport(exported, { externalId: '777' });
+
+      const tasks = await repository.findForProject(member(), projectId);
+      const byTitle = new Map(tasks.map((task) => [task.title, task.export]));
+
+      expect(byTitle.get('Выгружена')?.externalId).toBe('777');
+      expect(byTitle.get('Не выгружена')).toBeNull();
+    });
+
+    it('неудача обмена видна кодом, а зеркало остаётся прежним', async () => {
+      // Код, а не текст чужого ответа: в теле бывает и сам токен, а это
+      // поле уезжает на экран задачи.
+      await grant(AccessLevel.Read);
+      const taskId = await seedTask('Оплата');
+      await seedExport(taskId, { failureCode: 'tracker_unavailable' });
+
+      const [task] = await repository.findForProject(member(), projectId);
+
+      expect(task?.export?.failureCode).toBe('tracker_unavailable');
+      expect(task?.export?.externalId).toBe('4096');
     });
 
     it('фильтр отдаёт только задачи вне версий', async () => {
@@ -346,6 +476,40 @@ describe('репозиторий задач проекта', () => {
 
       expect(await testDb.rowsOf(projectTasks)).toHaveLength(0);
       expect(await testDb.rowsOf(projectTaskPlatforms)).toHaveLength(0);
+    });
+
+    it('удаляет выгруженную задачу, явно унося её зеркало', async () => {
+      // Ссылка зеркала на задачу стоит `restrict`, а не каскадом (дизайн,
+      // 10.5): задача в трекере остаётся жить, и унести зеркало обязан
+      // явный путь удаления — тот, который и решает, что сказать человеку.
+      // Без этого шага удаление выгруженной задачи приходило бы ошибкой
+      // драйвера, то есть `500` вместо ответа: отказ в правах и нарушение
+      // ссылки выглядят на экране одинаково — «что-то сломалось».
+      await grant(AccessLevel.Write);
+      const taskId = await seedTask('Оплата');
+      await seedExport(taskId);
+
+      await testDb.db.transaction((tx) => repository.remove(member(), tx, projectId, taskId));
+
+      expect(await testDb.rowsOf(projectTasks)).toHaveLength(0);
+      expect(await testDb.rowsOf(taskExports)).toHaveLength(0);
+    });
+
+    it('зеркало соседней задачи удаление не уносит', async () => {
+      // Сторож условия у `delete`: без `where` по задаче удаление одной
+      // выгруженной задачи стёрло бы зеркала всего реестра, и повторная
+      // выгрузка завела бы в трекере вторые копии всех задач проекта.
+      await grant(AccessLevel.Write);
+      const doomed = await seedTask('Оплата');
+      const kept = await seedTask('Возвраты');
+      await seedExport(doomed);
+      await seedExport(kept, { externalId: '777' });
+
+      await testDb.db.transaction((tx) => repository.remove(member(), tx, projectId, doomed));
+
+      const rows = await testDb.rowsOf(taskExports);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ taskId: kept, externalId: '777' });
     });
 
     it('размещённую задачу удалить отказывается', async () => {

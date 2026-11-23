@@ -20,6 +20,7 @@ export * from './summaries';
 export * from './tags';
 export * from './tasks';
 export * from './totp-challenges';
+export * from './tracker';
 export * from './transcription';
 export * from './users';
 export * from './variables';

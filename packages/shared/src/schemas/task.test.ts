@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TaskOrigin } from '../enums';
+import { TaskOrigin, TrackerKind } from '../enums';
 import {
   MAX_PROJECT_TASK_TITLE,
   projectTaskCreateSchema,
@@ -10,7 +10,7 @@ import {
 
 const ID = '11111111-1111-1111-1111-111111111111';
 
-/** Задача вне версии: размещения нет вовсе. */
+/** Задача вне версии и не выгруженная: ни размещения, ни зеркала. */
 const LOOSE = {
   id: ID,
   projectId: ID,
@@ -20,8 +20,23 @@ const LOOSE = {
   sourceSummaryId: null,
   platformIds: [],
   placement: null,
+  export: null,
   createdAt: '2026-11-20T10:00:00.000Z',
   updatedAt: '2026-11-20T10:00:00.000Z',
+};
+
+/** Зеркало выгрузки: задача в трекере есть и там не закрыта. */
+const EXPORT = {
+  tracker: TrackerKind.Weeek,
+  externalId: '4096',
+  externalUrl: 'https://app.weeek.net/ws/42/project/7/task/4096',
+  externalBoardId: '11',
+  externalColumnId: '31',
+  isCompleted: false,
+  exportedAt: '2026-11-21T10:00:00.000Z',
+  updatedAt: '2026-11-21T10:00:00.000Z',
+  checkedAt: '2026-11-21T10:05:00.000Z',
+  failureCode: null,
 };
 
 describe('задача проекта', () => {
@@ -104,6 +119,59 @@ describe('задача проекта', () => {
 
   it('пустой набор платформ в правке — «снять все»', () => {
     expect(projectTaskUpdateSchema.parse({ platformIds: [] }).platformIds).toEqual([]);
+  });
+
+  it('«не выгружалась» читается одним условием', () => {
+    // Объектом, а не плоскими полями, по той же причине, что размещение:
+    // пустой `external_id` рядом с ложным `is_completed` означал бы и «не
+    // выгружали», и «выгрузили, и там открыта» — одним и тем же.
+    expect(projectTaskSchema.parse(LOOSE).export).toBeNull();
+  });
+
+  it('выгруженная и не закрытая задача отличается от невыгруженной', () => {
+    // Два разных ответа на вопрос «что с ней в трекере»: «её там нет» и
+    // «она там есть и открыта». Сводить их нельзя — на первом экран
+    // показывает кнопку «Выгрузить», на втором ссылку наружу.
+    const exported = projectTaskSchema.parse({ ...LOOSE, export: EXPORT });
+
+    expect(exported.export).not.toBeNull();
+    expect(exported.export?.isCompleted).toBe(false);
+  });
+
+  it('ссылка человека и ссылка трекера — разные поля', () => {
+    // `url` вписал человек, и выгрузка его **не перезаписывает** (дизайн,
+    // 3.1): одно поле на две ссылки означало бы, что первая же выгрузка
+    // затёрла заметку, которую человек держал именно здесь.
+    const exported = projectTaskSchema.parse({
+      ...LOOSE,
+      url: 'https://notes.example/oplata',
+      export: EXPORT,
+    });
+
+    expect(exported.url).toBe('https://notes.example/oplata');
+    expect(exported.export?.externalUrl).toBe(
+      'https://app.weeek.net/ws/42/project/7/task/4096',
+    );
+  });
+
+  it('зеркало закрытия не закрывает размещение', () => {
+    // Решение владельца (дизайн, 5): внешний статус — только зеркало.
+    // Поэтому «закрыта там, открыта здесь» — законное состояние задачи, и
+    // контракт обязан его принимать, а не схлопывать в одно поле.
+    const diverged = projectTaskSchema.parse({
+      ...LOOSE,
+      placement: {
+        versionId: ID,
+        versionLabel: 'v1.2',
+        isDone: false,
+        position: 1,
+        carriedFromVersionId: null,
+      },
+      export: { ...EXPORT, isCompleted: true },
+    });
+
+    expect(diverged.export?.isCompleted).toBe(true);
+    expect(diverged.placement?.isDone).toBe(false);
   });
 
   it('происхождение — закрытый перечень трёх путей', () => {

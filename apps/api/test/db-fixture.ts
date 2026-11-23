@@ -23,6 +23,19 @@ export interface TestDatabase {
    * не осталось, и отказ в правах выглядел бы как пустая таблица.
    */
   rowsOf: <T extends PgTable>(table: T) => Promise<T['$inferSelect'][]>;
+  /**
+   * Ещё одно независимое подключение к той же базе, в одно соединение.
+   *
+   * Нужно проверкам гонок с замком, который держится на своём соединении:
+   * `db` и `appDb` — пулы по одному соединению, и писателей, которым нужно
+   * по два (рабочее плюс замок), с ними помещается только один. Второй ждал
+   * бы тогда не замка в базе, а свободного соединения в пуле, — и сторож
+   * остался бы зелёным даже у кода без замка.
+   *
+   * Закрывается вместе с фикстурой: открытое соединение не дало бы
+   * контейнеру остановиться.
+   */
+  pool: () => PostgresJsDatabase<typeof schema>;
 }
 
 /**
@@ -77,11 +90,28 @@ export async function startTestDatabase(beforeMigration?: {
     password: 'test_app_password',
   });
 
+  /** Открытые по запросу подключения: их закрывает `stop`. */
+  const extraClients: ReturnType<typeof postgres>[] = [];
+
   return {
     db,
     appDb: drizzle(appClient, { schema }),
     rowsOf: (table) => db.select().from(table),
+    pool: () => {
+      // Ролью приложения, как `appDb`: проверка гонки должна упираться в
+      // замок, а не в права, которых у боевой роли нет.
+      const client = postgres(container.getConnectionUri(), {
+        max: 1,
+        user: 'cairn_app',
+        password: 'test_app_password',
+      });
+
+      extraClients.push(client);
+
+      return drizzle(client, { schema });
+    },
     stop: async () => {
+      await Promise.all(extraClients.map((client) => client.end()));
       await appClient.end();
       await ownerClient.end();
       await container.stop();
@@ -91,7 +121,7 @@ export async function startTestDatabase(beforeMigration?: {
         TRUNCATE TABLE audit_log, agent_tokens, grants, sessions, invitations, totp_challenges,
                        domain_statuses, address_incidents, status_observation_gaps,
                        push_subscriptions,
-                       project_task_platforms, version_platform_releases,
+                       task_exports, project_task_platforms, version_platform_releases,
                        environment_platforms, project_platforms,
                        roadmap_report_public_links, roadmap_public_links,
                        roadmap_checkpoints, roadmap_versions,

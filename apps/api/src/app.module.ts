@@ -23,6 +23,7 @@ import { SummariesModule } from './summaries/summaries.module';
 import { StatusModule } from './status/status.module';
 import { TagsModule } from './tags/tags.module';
 import { TasksModule } from './tasks/tasks.module';
+import { TrackerModule } from './tracker/tracker.module';
 import { DomainsModule } from './domains/domains.module';
 import { ServersModule } from './servers/servers.module';
 import { UsersModule } from './users/users.module';
@@ -57,6 +58,7 @@ import { VariablesModule } from './variables/variables.module';
     DomainsModule,
     ServersModule,
     ModelServicesModule,
+    TrackerModule,
     UsersModule,
   ],
 })

@@ -23,6 +23,7 @@ export * from './schemas/tag';
 export * from './schemas/task';
 export * from './schemas/recording-type';
 export * from './schemas/totp';
+export * from './schemas/tracker';
 export * from './schemas/transcription';
 export * from './schemas/user';
 export * from './schemas/variable';
