@@ -136,6 +136,10 @@ beforeEach(() => {
   vi.mocked(hooks.useMutationSaveVersion).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationUpdateCheckpoint).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationReadLinkTitle).mockReturnValue(mutation());
+  // Реестр задач панель читает мягко, но объект результата ей нужен:
+  // автомок отдал бы `undefined` и уронил бы рендер.
+  vi.mocked(hooks.useQueryTasks).mockReturnValue(query([]));
+  vi.mocked(hooks.useMutationUpdatePlacedTask).mockReturnValue(mutation());
 });
 
 describe('RoadmapScreen', () => {

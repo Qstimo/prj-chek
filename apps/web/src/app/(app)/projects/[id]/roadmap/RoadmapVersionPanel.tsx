@@ -17,6 +17,7 @@ import {
   useMutationSaveVersion,
   useMutationUpdateCheckpoint,
   useMutationUpdatePlacedTask,
+  useQueryTasks,
   useQueryRoadmap,
 } from '@/api/hooks';
 import { reportHrefOf } from '@/components/ReleaseReport';
@@ -54,6 +55,9 @@ export function RoadmapVersionPanel({
   const updateCheckpoint = useMutationUpdateCheckpoint(projectId);
   // Формулировку правит ручка задачи: у поля одно место записи.
   const updatePlacedTask = useMutationUpdatePlacedTask(projectId);
+  // Реестр задач — мягким запросом: без него панель работает, просто
+  // взять готовую задачу будет нечем, а завести новую можно всегда.
+  const tasks = useQueryTasks(projectId, canWrite);
   const deleteCheckpoint = useMutationDeleteCheckpoint(projectId);
   const readLinkTitle = useMutationReadLinkTitle(projectId);
   const carryOverCheckpoint = useMutationCarryOverCheckpoint(projectId);
@@ -113,6 +117,7 @@ export function RoadmapVersionPanel({
       version={version}
       isCurrent={isCurrent}
       platforms={platforms}
+      looseTasks={(tasks.data ?? []).filter((task) => task.placement === null)}
       carryOverTargetLabel={carryOverTargetLabel}
       reportHref={reportHrefOf(projectId, version.id)}
       isOpen

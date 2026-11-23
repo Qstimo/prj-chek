@@ -9,6 +9,7 @@ import { Drawer, DrawerWidth } from '../Drawer';
 import { FormError } from '../FormError';
 import { VersionFields } from '../VersionFields';
 import { CheckpointList } from './CheckpointList';
+import { LooseTaskPicker } from './LooseTaskPicker';
 import { ReleaseList } from './ReleaseList';
 import { SaveButton } from './SaveButton';
 import { VersionActions } from './VersionActions';
@@ -54,6 +55,7 @@ export function VersionDrawer({
   version,
   isCurrent,
   platforms = [],
+  looseTasks = [],
   carryOverTargetLabel,
   reportHref,
   isOpen,
@@ -296,7 +298,21 @@ export function VersionDrawer({
       )}
 
       {actions && (
-        <div className={CHECKPOINT_FORM_LAYOUT_CLASSES}>
+        <div className={`space-y-3 ${CHECKPOINT_FORM_LAYOUT_CLASSES}`}>
+          {/*
+            Взять существующую задачу — **первое** из двух, и не случайно:
+            задача, уже лежащая в реестре вне версий, это то, о чём решение
+            уже принято, а заведение новой — следующий шаг. Выбора нет
+            вовсе, когда брать нечего: пустой селект обещал бы наличие.
+          */}
+          {looseTasks.length > 0 && (
+            <LooseTaskPicker
+              tasks={looseTasks}
+              isSubmitting={actions.isSubmittingCheckpoint}
+              onPick={(taskId) => actions.onAddCheckpoint({ taskId })}
+            />
+          )}
+
           <CheckpointForm
             platforms={platforms.length > 0 ? platforms : undefined}
             isSubmitting={actions.isSubmittingCheckpoint}
