@@ -140,6 +140,7 @@ export enum AuditAction {
    * задачи в чужом трекере — а её там не появилось.
    */
   TaskExportUpdated = 'task.export_updated',
+  TaskTrackerLinked = 'task.tracker_linked',
   CheckpointCreated = 'checkpoint.created',
   CheckpointUpdated = 'checkpoint.updated',
   CheckpointDeleted = 'checkpoint.deleted',

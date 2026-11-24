@@ -46,6 +46,7 @@ export interface TaskExportTarget {
   taskId: string;
   /** Формулировка — то единственное, что уходит наружу. */
   title: string;
+  url: string | null;
   export: TaskExport | null;
 }
 
@@ -146,7 +147,7 @@ export class TaskExportsRepository {
     const unique = [...new Set(taskIds)];
 
     const rows = await this.db
-      .select({ id: projectTasks.id, title: projectTasks.title, row: taskExports })
+      .select({ id: projectTasks.id, title: projectTasks.title, url: projectTasks.url, row: taskExports })
       .from(projectTasks)
       // Соединение по задаче, без вида трекера: ключ выгрузки — пара
       // «задача × трекер», а в перечне одно значение (дизайн, 10.1), то
@@ -167,6 +168,7 @@ export class TaskExportsRepository {
       return {
         taskId,
         title: row.title,
+        url: row.url,
         export: row.row === null ? null : taskExportOfRow(row.row),
       };
     });
@@ -209,7 +211,7 @@ export class TaskExportsRepository {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
 
     const [row] = await tx
-      .select({ id: projectTasks.id, title: projectTasks.title })
+      .select({ id: projectTasks.id, title: projectTasks.title, url: projectTasks.url })
       .from(projectTasks)
       .where(and(eq(projectTasks.id, taskId), eq(projectTasks.projectId, projectId)))
       // `no key update`, а не `update`: внешние ключи на задачу (размещение
@@ -232,6 +234,7 @@ export class TaskExportsRepository {
     return {
       taskId,
       title: row.title,
+      url: row.url,
       export: mirror ? taskExportOfRow(mirror) : null,
     };
   }

@@ -77,16 +77,16 @@ describe('TrackerConnectionForm', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ secret: null }));
   });
 
-  it('негодный адрес отказывает до отправки и теми же словами, что сервер', async () => {
-    // Адрес проверяется **той же** чистой функцией контракта, что на
-    // сервере: своё похожее правило разошлось бы с ним при первой правке.
+  it('подключение требует только токен: адрес Weeek уже задан', async () => {
     const onSave = renderForm(EMPTY);
 
-    await userEvent.type(screen.getByLabelText('Адрес'), 'http://api.weeek.net/public/v1');
+    expect(screen.queryByLabelText('Адрес')).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Токен'), 'weeek-token');
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-    expect(onSave).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent(/https/);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: 'https://api.weeek.net/public/v1', secret: 'weeek-token',
+    }));
   });
 
   it('пустое пространство уходит пустым значением и работу не блокирует', async () => {
@@ -94,7 +94,6 @@ describe('TrackerConnectionForm', () => {
     // нужен ни в одной из четырёх операций (контракт).
     const onSave = renderForm(EMPTY);
 
-    await userEvent.type(screen.getByLabelText('Адрес'), 'https://api.weeek.net/public/v1');
     await userEvent.type(screen.getByLabelText('Токен'), 'weeek-token');
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 

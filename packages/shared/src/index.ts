@@ -27,3 +27,5 @@ export * from './schemas/tracker';
 export * from './schemas/transcription';
 export * from './schemas/user';
 export * from './schemas/variable';
+
+export * from './schemas/weeek-task-link';

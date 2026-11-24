@@ -6,6 +6,7 @@ import {
   type ProjectTaskCreate,
   type ProjectTaskUpdate,
   type TaskExportResult,
+  type TaskExport,
 } from '@cairn/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -30,6 +31,9 @@ export function useQueryTasks(projectId: string, enabled = true) {
     queryKey: TASK_KEYS.forProject(projectId),
     enabled,
     queryFn: () => apiClient<ProjectTask[]>(`/projects/${projectId}/tasks`),
+    // Подхватываем результаты фоновой синхронизации, пока открыт экран.
+    refetchInterval: (query) =>
+      query.state.data?.some((task) => task.export !== null) ? 30_000 : false,
   });
 }
 
@@ -168,6 +172,16 @@ export function useMutationDetachTask(projectId: string) {
   return useMutation({
     mutationFn: (taskId: string) =>
       apiClient<ProjectTask>(`/projects/${projectId}/tasks/${taskId}/detach`, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Связывает задачу по уже сохранённой ссылке Weeek, без создания новой. */
+export function useMutationLinkTask(projectId: string) {
+  const invalidate = useTaskInvalidation(projectId);
+  return useMutation({
+    mutationFn: (taskId: string) => apiClient<TaskExport>(
+      `/projects/${projectId}/tasks/${taskId}/link`, { method: 'POST' }),
     onSuccess: invalidate,
   });
 }

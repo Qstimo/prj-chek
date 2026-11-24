@@ -82,6 +82,40 @@ describe('WeeekTracker', () => {
     return new WeeekTracker(SETTINGS);
   }
 
+  describe('readTaskLink', () => {
+    const url = 'https://app.weeek.net/ws/4242/task/42';
+    it('проверяет пространство и доску, читает статус без POST и PUT', async () => {
+      fetchMock.mockResolvedValueOnce(json({ success: true, workspace: { id: 4242 } }))
+        .mockResolvedValueOnce(json({ success: true, task: { id: 42, isCompleted: true,
+          locations: [{ projectId: 7, boardId: 11, boardColumnId: 32 }] } }));
+      const state = await tracker().readTaskLink(url, TARGET, AbortSignal.timeout(1000));
+      expect(state).toMatchObject({ externalId: '42', externalUrl: url, isCompleted: true,
+        boardId: '11', boardColumnId: '32' });
+      expect(fetchMock.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'GET']);
+      expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+        'https://api.weeek.net/public/v1/ws', 'https://api.weeek.net/public/v1/tm/tasks/42']);
+    });
+
+    it('одинаковый id в другом пространстве не связывается', async () => {
+      fetchMock.mockResolvedValue(json({ success: true, workspace: { id: 99 } }));
+      await expect(tracker().readTaskLink(url, TARGET, AbortSignal.timeout(1000))).rejects.toThrow();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('задача на другой доске не связывается', async () => {
+      fetchMock.mockResolvedValueOnce(json({ success: true, workspace: { id: 4242 } }))
+        .mockResolvedValueOnce(json({ success: true, task: { id: 42,
+          locations: [{ projectId: 7, boardId: 99 }] } }));
+      await expect(tracker().readTaskLink(url, TARGET, AbortSignal.timeout(1000))).rejects.toThrow();
+    });
+
+    it('по произвольному URL не делает запрос с нашим токеном', async () => {
+      await expect(tracker().readTaskLink('https://other.test/ws/4242/task/42', TARGET,
+        AbortSignal.timeout(1000))).rejects.toThrow();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   describe('createTask', () => {
     it('посылает формулировку и все три идентификатора привязки', async () => {
       fetchMock.mockResolvedValue(json({ success: true, task: { id: 42 } }));
@@ -151,8 +185,9 @@ describe('WeeekTracker', () => {
       expect(state.externalUrl).toBe('https://app.weeek.net/ws/4242/board/11/42');
     });
 
-    it('без ссылки в ответе и без пространства ссылки не выдумывает', async () => {
-      fetchMock.mockResolvedValue(json({ success: true, task: { id: 42 } }));
+    it('сам узнаёт пространство токена и создаёт ссылку, когда id не вводили', async () => {
+      fetchMock.mockResolvedValueOnce(json({ success: true, workspace: { id: 4242 } }))
+        .mockResolvedValueOnce(json({ success: true, task: { id: 42 } }));
 
       const state = await new WeeekTracker({ ...SETTINGS, workspaceId: null }).createTask(
         { title: 'Задача' },
@@ -160,7 +195,16 @@ describe('WeeekTracker', () => {
         AbortSignal.timeout(1000),
       );
 
-      expect(state.externalUrl).toBeNull();
+      expect(state.externalUrl).toBe('https://app.weeek.net/ws/4242/task/42');
+      expect(fetchMock.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'POST']);
+    });
+
+    it('отказ определения пространства не создаёт задачу без ссылки', async () => {
+      fetchMock.mockResolvedValue(json({ success: true }));
+      await expect(new WeeekTracker({ ...SETTINGS, workspaceId: null }).createTask(
+        { title: 'Задача' }, TARGET, AbortSignal.timeout(1000),
+      )).rejects.toMatchObject({ code: TRACKER_REJECTED });
+      expect(fetchMock.mock.calls.map((call) => call[1].method)).toEqual(['GET']);
     });
 
     it('401 — отказ трекера: чинится правкой настройки', async () => {

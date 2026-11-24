@@ -1,6 +1,7 @@
 import type { TrackerConnection, TrackerConnectionUpdate } from '@cairn/shared';
 
 import type { TrackerFormValues } from './types';
+import { WEEEK_API_BASE_URL } from './constants';
 
 /**
  * Черновик формы из действующего подключения.
@@ -10,7 +11,6 @@ import type { TrackerFormValues } from './types';
  */
 export function valuesOf(connection: TrackerConnection): TrackerFormValues {
   return {
-    baseUrl: connection.baseUrl,
     workspaceId: connection.workspaceId ?? '',
     isEnabled: connection.isEnabled,
     secret: '',
@@ -29,7 +29,7 @@ export function valuesOf(connection: TrackerConnection): TrackerFormValues {
 export function updateOf(values: TrackerFormValues): TrackerConnectionUpdate {
   const secret = values.secret.trim();
   const base = {
-    baseUrl: values.baseUrl.trim(),
+    baseUrl: WEEEK_API_BASE_URL,
     workspaceId: values.workspaceId.trim() === '' ? null : values.workspaceId.trim(),
     isEnabled: values.isEnabled,
   };

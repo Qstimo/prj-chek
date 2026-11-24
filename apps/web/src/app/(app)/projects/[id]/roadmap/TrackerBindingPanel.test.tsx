@@ -80,23 +80,32 @@ describe('TrackerBindingPanel', () => {
 
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
 
-    expect(screen.queryByRole('button', { name: /Куда выгружать/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Выбрать доску Weeek/ })).toBeNull();
     expect(screen.getByText(/Выключено/)).toBeInTheDocument();
     expect(screen.getByText(/Настройк/)).toBeInTheDocument();
   });
 
-  it('на установке без трекера панели нет и слов о нём тоже нет', () => {
-    // Установка без трекера полностью рабочая, задачи ведутся в CAIRN, и
-    // строка «трекер не подключён» на каждом экране задач была бы
-    // укором за решение, которого никто не принимал. Это ровно та же
-    // лестница, что у расшифровки: без ключа кнопки просто нет.
+  it('без подключения объясняет, как начать работу с Weeek', () => {
     vi.mocked(hooks.useQueryProjectTracker).mockReturnValue(
       query({ isOperational: false, blockedBy: TRACKER_BASE_URL_MISSING, binding: null }),
     );
+    render(<TrackerBindingPanel projectId={PROJECT_ID} />);
+    expect(screen.getByText(/Подключите Weeek/)).toBeInTheDocument();
+    expect(screen.getByText(/Настройки/)).toBeInTheDocument();
+    expect(vi.mocked(hooks.useQueryTrackerTargets)).toHaveBeenCalledWith(PROJECT_ID, false);
+  });
 
-    const { container } = render(<TrackerBindingPanel projectId={PROJECT_ID} />);
-
-    expect(container).toBeEmptyDOMElement();
+  it('показывает привязанную доску и колонку без открытия панели', () => {
+    vi.mocked(hooks.useQueryProjectTracker).mockReturnValue(query({
+      ...READY,
+      binding: { tracker: TrackerKind.Weeek, externalProjectId: '7', boardId: '11',
+        boardColumnId: '31', updatedAt: '2026-11-20T10:00:00.000Z', updatedByLabel: null },
+    }));
+    render(<TrackerBindingPanel projectId={PROJECT_ID} />);
+    expect(screen.getByText('Платформа → Спринт → Бэклог')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Сменить доску Weeek' })).toBeInTheDocument();
+    expect(vi.mocked(hooks.useQueryTrackerTargets)).toHaveBeenCalledWith(PROJECT_ID, true);
+    expect(screen.getByText(/Закрытие задачи в роадмапе остаётся за вами/)).toBeInTheDocument();
   });
 
   it('без токена причина названа токеном, а не общим «не настроено»', () => {
@@ -119,12 +128,12 @@ describe('TrackerBindingPanel', () => {
   it('выбор колонки отправляется идентификаторами, а показывается именами', async () => {
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Куда выгружать/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Выбрать доску Weeek/ }));
 
     const dialog = screen.getByRole('dialog');
 
     await userEvent.selectOptions(
-      screen.getByLabelText('Проект в трекере'),
+      screen.getByLabelText('Проект в Weeek'),
       screen.getByRole('option', { name: 'Платформа' }),
     );
     await userEvent.selectOptions(
@@ -152,9 +161,9 @@ describe('TrackerBindingPanel', () => {
     // позже и в другом месте.
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Куда выгружать/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Выбрать доску Weeek/ }));
     await userEvent.selectOptions(
-      screen.getByLabelText('Проект в трекере'),
+      screen.getByLabelText('Проект в Weeek'),
       screen.getByRole('option', { name: 'Платформа' }),
     );
     await userEvent.selectOptions(
@@ -171,9 +180,9 @@ describe('TrackerBindingPanel', () => {
     // спасает (контракт, `trackerBindingUpdateSchema`).
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Куда выгружать/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Выбрать доску Weeek/ }));
     await userEvent.selectOptions(
-      screen.getByLabelText('Проект в трекере'),
+      screen.getByLabelText('Проект в Weeek'),
       screen.getByRole('option', { name: 'Платформа' }),
     );
 
@@ -201,7 +210,7 @@ describe('TrackerBindingPanel', () => {
 
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Куда выгружать/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Сменить доску Weeek/ }));
     await userEvent.selectOptions(
       screen.getByLabelText('Колонка'),
       screen.getByRole('option', { name: 'В работе' }),
@@ -227,7 +236,7 @@ describe('TrackerBindingPanel', () => {
 
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Куда выгружать/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Выбрать доску Weeek/ }));
 
     const alert = screen.getByRole('alert');
 
@@ -243,7 +252,7 @@ describe('TrackerBindingPanel', () => {
 
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Куда выгружать/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Выбрать доску Weeek/ }));
 
     expect(screen.getByRole('alert')).toHaveTextContent(/не ответил/i);
   });

@@ -9,7 +9,7 @@ import {
   type TrackerTargets,
 } from '@cairn/shared';
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { vi, afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
 import { AccessService } from '../access/access.service';
@@ -74,6 +74,8 @@ class StubTracker implements Tracker {
   failureCode = TRACKER_UNAVAILABLE;
   /** Задержка ответа: по ней видно, ждёт ли остановка конца тика. */
   holdMs = 0;
+
+  readTaskLink = vi.fn<Tracker['readTaskLink']>();
 
   async readTasks(target: TrackerTarget, _signal: AbortSignal): Promise<TrackerTaskState[]> {
     this.asked.push(target);

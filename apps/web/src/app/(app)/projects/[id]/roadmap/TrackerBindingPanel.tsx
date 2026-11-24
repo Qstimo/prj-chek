@@ -24,29 +24,19 @@ interface Draft {
 }
 
 /**
- * Панель «Куда выгружать»: привязка проекта к доске трекера.
- *
- * Без подключения панели нет вовсе — ни кнопки, ни селектов, — и причина
- * названа словами: та же лестница, что у загрузки записи при выключенной
- * расшифровке. Выключенная кнопка здесь была бы хуже отсутствующей: за ней
- * стоит чужой API, и нажатие не узнало бы ничего, чего не знает ответ о
- * готовности.
- *
- * Списки целей (проекты, доски, колонки) приходят **через нашу ручку** и
- * только при открытой панели: токен не покидает сервер (дизайн, 9.3), а за
- * ответом стоит живой запрос в трекер с его пределом частоты.
- *
- * Идентификаторы чужой системы человеку не показываются нигде: он выбирает
- * имена, а в привязку уезжают идентификаторы. Имён привязка не хранит
- * намеренно — они живут в трекере, и вторая копия показывала бы доску,
- * переименованную месяц назад.
+ * Выбор доски из живых списков Weeek и текущая привязка проекта.
+ * Названия запрашиваются при открытии выбора или показе сохранённой привязки.
+ * Токен остаётся на сервере; отсутствие подключения объясняет первый шаг.
  */
 export function TrackerBindingPanel({ projectId }: { projectId: string }) {
   const tracker = useQueryProjectTracker(projectId);
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(draftOf(null));
   const [isConfirming, setIsConfirming] = useState(false);
-  const targets = useQueryTrackerTargets(projectId, isOpen);
+  const targets = useQueryTrackerTargets(
+    projectId,
+    tracker.data?.isOperational === true && (isOpen || tracker.data.binding !== null),
+  );
   const save = useMutationSaveTrackerBinding(projectId);
 
   // Пока готовность неизвестна или её не отдали, панели нет: роадмап
@@ -58,21 +48,14 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
 
   const { isOperational, blockedBy, binding } = tracker.data;
 
-  // Подключения нет вовсе — о трекере не сказано ни слова: установка без
-  // трекера полностью рабочая, задачи ведутся здесь, и строка «трекер не
-  // подключён» на каждом экране задач была бы укором за решение, которого
-  // никто не принимал. Начатую настройку (нет токена, снята галочка) —
-  // наоборот, называем: её кто-то начал и ждёт, что выгрузка работает.
-  if (blockedBy === TRACKER_BASE_URL_MISSING) {
-    return null;
-  }
-
   if (!isOperational) {
     return (
       <section className="space-y-1 rounded-md border border-border p-4">
         <h2 className="text-sm font-medium">{BINDING_TEXTS.heading}</h2>
         <p className="text-sm text-amber-600 dark:text-amber-500">
-          {(blockedBy && BINDING_BLOCKED[blockedBy]) ?? 'Трекер задач не подключён.'}
+          {blockedBy === TRACKER_BASE_URL_MISSING
+            ? 'Подключите Weeek, чтобы отправлять задачи на доску и видеть их статус здесь.'
+            : (blockedBy && BINDING_BLOCKED[blockedBy]) ?? 'Трекер задач не подключён.'}
         </p>
         <p className="text-sm text-muted-foreground">{BINDING_TEXTS.adminNote}</p>
       </section>
@@ -128,7 +111,15 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
 
       {binding && (
         <p className="text-sm text-muted-foreground">
-          {BINDING_TEXTS.namesNote}
+          {targets.data
+            ? [
+                targets.data.projects.find((item) => item.id === binding.externalProjectId)?.name ?? 'Проект недоступен',
+                targets.data.boards.find((item) => item.id === binding.boardId)?.name ?? 'Доска недоступна',
+                targets.data.columns.find((item) => item.id === binding.boardColumnId)?.name ?? 'Колонка недоступна',
+              ].join(' → ')
+            : targets.isError
+              ? 'Не удалось загрузить названия доски и колонки. Откройте выбор доски, чтобы повторить.'
+              : 'Загружаем название доски…'}
           {binding.updatedByLabel && ` Поставил ${binding.updatedByLabel}.`}
         </p>
       )}
@@ -138,8 +129,18 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
         onClick={open}
         className="rounded-md border border-border px-3 py-2 text-sm"
       >
-        {BINDING_TEXTS.open}
+        {binding ? BINDING_TEXTS.change : BINDING_TEXTS.open}
       </button>
+
+      <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+        <li>Выберите доску и колонку Weeek для новых задач этого проекта.</li>
+        <li>Отметьте задачи ниже и нажмите «Выгрузить выбранные». Ссылка и статус появятся в колонке «Выгрузка».</li>
+        <li>Статус из Weeek обновляется автоматически. Повторная выгрузка обновит формулировку в Weeek.</li>
+      </ol>
+      <p className="text-sm text-muted-foreground">
+        Синхронизация получает статус из Weeek. Закрытие задачи в роадмапе остаётся за вами;
+        различие статусов будет видно в таблице. Если ссылка Weeek уже есть, нажмите у задачи «Связать с Weeek»: новая задача не создаётся.
+      </p>
 
       <Drawer
         isOpen={isOpen}
@@ -187,6 +188,9 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                     setDraft({ externalProjectId: value, boardId: '', boardColumnId: '' })
                   }
                 />
+                {targets.data.projects.length === 0 && (
+                  <p className="text-sm text-muted-foreground">В Weeek пока нет доступных проектов. Создайте проект и доску в Weeek, затем откройте эту панель заново.</p>
+                )}
 
                 <TargetSelect
                   id="trackerBoard"
@@ -198,6 +202,10 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                   }
                 />
 
+                {draft.externalProjectId !== '' && boards.length === 0 && (
+                  <p className="text-sm text-muted-foreground">У выбранного проекта нет доступных досок.</p>
+                )}
+
                 <TargetSelect
                   id="trackerColumn"
                   label={BINDING_TEXTS.columnLabel}
@@ -207,6 +215,9 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                     setDraft((current) => ({ ...current, boardColumnId: value }))
                   }
                 />
+                {draft.boardId !== '' && columns.length === 0 && (
+                  <p className="text-sm text-muted-foreground">На этой доске нет доступных колонок. Добавьте колонку в Weeek.</p>
+                )}
 
                 <button
                   type="button"

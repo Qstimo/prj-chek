@@ -1,5 +1,7 @@
 import {
   TASK_PLACED,
+  TRACKER_LINK_REQUIRED,
+  TRACKER_LINK_INVALID,
   TRACKER_BINDING_MISSING,
   TRACKER_NOT_CONFIGURED,
   TRACKER_REJECTED,
@@ -94,7 +96,8 @@ export const EXPORT_TEXTS = {
   /** Подпись отметки: имя задачи в ней — иначе строки не различить. */
   select: (title: string) => `Выбрать: ${title}`,
   none: 'Не выгружена',
-  exported: 'Выгружена',
+  unlinked: 'Не связана с Weeek',
+  exported: 'Открыта в Weeek',
   completedThere: 'Закрыта в Weeek',
   /**
    * Расхождение, названное обеими сторонами.
@@ -169,7 +172,7 @@ export const EXPORT_TEXTS = {
   open: 'Открыть в трекере',
   /** Почему кнопка не нажимается — четыре разные причины, четыре действия. */
   nothingSelected: 'Отметьте задачи галочками: уедут только отмеченные.',
-  bindingMissing: 'Доска не выбрана: укажите её в «Куда выгружать» выше.',
+  bindingMissing: 'Доска не выбрана: нажмите «Выбрать доску Weeek» выше.',
   /**
    * Подключение начато и не работает.
    *
@@ -192,6 +195,8 @@ export const EXPORT_TEXTS = {
  * без кода не ищется нигде.
  */
 export const EXPORT_FAILURES: Record<string, string> = {
+  [TRACKER_LINK_REQUIRED]: 'у задачи уже есть ссылка Weeek — нажмите «Связать с Weeek», чтобы не создавать дубль',
+  [TRACKER_LINK_INVALID]: 'проверьте постоянную ссылку Weeek, рабочее пространство и выбранную доску',
   [TRACKER_UNAVAILABLE]: 'трекер не ответил, можно повторить',
   [TRACKER_REJECTED]: 'трекер отказал — токен или доска; это правит администратор',
   [TRACKER_NOT_CONFIGURED]: 'подключение трекера снято',

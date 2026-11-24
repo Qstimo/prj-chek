@@ -1,5 +1,7 @@
 import {
   ModelProbeOutcome,
+  weeekTaskLinkOf,
+  TRACKER_LINK_INVALID,
   TRACKER_REJECTED,
   TRACKER_UNAVAILABLE,
   TrackerKind,
@@ -100,9 +102,11 @@ export class WeeekTracker implements Tracker {
    * сериализации.
    */
   readonly #settings: TrackerSettings;
+  #workspaceId: string | null;
 
   constructor(settings: TrackerSettings) {
     this.#settings = settings;
+    this.#workspaceId = settings.workspaceId;
   }
 
   get kind(): TrackerKind {
@@ -130,6 +134,15 @@ export class WeeekTracker implements Tracker {
     target: TrackerTarget,
     signal: AbortSignal,
   ): Promise<TrackerTaskState> {
+    // Один предел на определение пространства и создание вместе.
+    signal = AbortSignal.any([signal, AbortSignal.timeout(this.#settings.timeoutSeconds * 1000)]);
+    // Для ссылки нужен id пространства. Пользователю достаточно токена:
+    // если id не задан, узнаём его до создания, чтобы отказ не оставил задачу без ссылки.
+    if (!this.#workspaceId) {
+      const workspace = await this.exchange('/ws', { method: 'GET' }, signal);
+      this.#workspaceId = idOf(objectOf(workspace, 'workspace')?.id);
+      if (!this.#workspaceId) throw this.rejected('в ответе нет рабочего пространства');
+    }
     const payload = await this.exchange(
       '/tm/tasks',
       {
@@ -197,6 +210,32 @@ export class WeeekTracker implements Tracker {
     );
 
     return tasks.map((task) => this.stateOf(task));
+  }
+
+  /** Проверка существующей ссылки: пространство токена и расположение задачи. */
+  async readTaskLink(url: string, target: TrackerTarget, signal: AbortSignal): Promise<TrackerTaskState> {
+    signal = AbortSignal.any([signal, AbortSignal.timeout(this.#settings.timeoutSeconds * 1000)]);
+    const link = weeekTaskLinkOf(url);
+    const invalid = () => new TrackerFailure(TRACKER_LINK_INVALID,
+      'Не удалось связать задачу: проверьте ссылку, рабочее пространство и выбранную доску.');
+    if (!link) throw invalid();
+
+    // Идентификаторы задач локальны для пространства: один taskId недостаточен.
+    const workspace = await this.exchange('/ws', { method: 'GET' }, signal);
+    if (idOf(objectOf(workspace, 'workspace')?.id) !== link.workspaceId) throw invalid();
+    const payload = await this.exchange(`/tm/tasks/${encodeURIComponent(link.taskId)}`, { method: 'GET' }, signal);
+    const task = objectOf(payload, 'task');
+    if (!task || idOf(task.id) !== link.taskId || task.isDeleted === true) throw invalid();
+    const locations = Array.isArray(task.locations) ? task.locations : [task];
+    const location = locations.find((item: Record<string, unknown> | null) =>
+      item && idOf(item.projectId) === target.externalProjectId && idOf(item.boardId) === target.boardId);
+    if (!location) throw invalid();
+    return {
+      ...this.stateOf(task),
+      externalUrl: `https://app.weeek.net/ws/${link.workspaceId}/task/${link.taskId}`,
+      boardId: target.boardId,
+      boardColumnId: idOf(location.boardColumnId),
+    };
   }
 
   /**
@@ -472,7 +511,7 @@ export class WeeekTracker implements Tracker {
       }
     }
 
-    const workspaceId = this.#settings.workspaceId;
+    const workspaceId = this.#workspaceId;
 
     return workspaceId === null || workspaceId === ''
       ? null
