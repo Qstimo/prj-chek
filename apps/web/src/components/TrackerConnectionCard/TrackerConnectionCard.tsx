@@ -12,8 +12,7 @@ import type { IFieldProps, IProps } from './types';
  *
  * Бирки источника, как у узлов модели, здесь нет вовсе: источник один —
  * база, запасного в окружении у трекера нет и не будет (дизайн, 3.4).
- * Поэтому и ненастроенное подключение видно по пустому адресу, а не по
- * отдельному полю.
+ * Адрес API задаёт приложение, на карточке он не показывается.
  *
  * О токене сказано ровно «задан» или «нет»: ни длины, ни хвоста — он сюда и
  * не приходит.
@@ -43,12 +42,16 @@ export function TrackerConnectionCard({
         }
       >
         {connection.isOperational
-          ? 'Работает'
+          ? 'Подключено'
           : (connection.blockedBy && BLOCKED_LABELS[connection.blockedBy]) ?? 'Не подключено'}
       </p>
 
+      <p className="text-sm text-muted-foreground">
+        Подключите рабочее пространство один раз. Затем в разделе «Роадмап → Задачи проекта»
+        выберите доску для каждого проекта и отправьте в неё нужные задачи.
+      </p>
+
       <dl className="space-y-1">
-        <TrackerField label="Адрес" value={connection.baseUrl || '—'} />
         <TrackerField label="Пространство" value={connection.workspaceId ?? '—'} />
       </dl>
 
@@ -72,7 +75,7 @@ export function TrackerConnectionCard({
           onClick={onEdit}
           className="rounded-md border border-border px-3 py-2 text-sm"
         >
-          Править
+          {isConfigured ? 'Настроить подключение' : 'Подключить Weeek'}
         </button>
         <button
           type="button"

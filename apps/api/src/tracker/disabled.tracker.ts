@@ -52,6 +52,10 @@ export class DisabledTracker implements Tracker {
     throw this.disabled();
   }
 
+  async readTaskLink(_url: string, _target: TrackerTarget, _signal: AbortSignal): Promise<TrackerTaskState> {
+    throw this.disabled();
+  }
+
   /**
    * Списков нет, и пустые отдавать нельзя.
    *

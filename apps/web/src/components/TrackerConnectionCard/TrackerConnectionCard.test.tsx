@@ -64,7 +64,7 @@ describe('TrackerConnectionCard', () => {
   it('у работающего подключения бирка говорит «Работает»', () => {
     renderCard(CONNECTION);
 
-    expect(screen.getByText('Работает')).toBeInTheDocument();
+    expect(screen.getByText('Подключено')).toBeInTheDocument();
   });
 
   it('снятая галочка названа отдельно от отсутствующего токена', () => {

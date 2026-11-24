@@ -2,6 +2,7 @@
 
 import {
   MAX_TASK_EXPORT_BATCH,
+  isWeeekLink,
   TRACKER_BASE_URL_MISSING,
   TaskExportOutcome,
   type ProjectTask,
@@ -18,6 +19,7 @@ import {
   useMutationDeleteTask,
   useMutationDetachTask,
   useMutationExportTasks,
+  useMutationLinkTask,
   useMutationUpdateTask,
   useQueryPlatforms,
   useQueryProjectTracker,
@@ -72,6 +74,7 @@ export function TasksScreen({ projectId }: { projectId: string }) {
   const remove = useMutationDeleteTask(projectId);
   const detach = useMutationDetachTask(projectId);
   const exportTasks = useMutationExportTasks(projectId);
+  const linkTask = useMutationLinkTask(projectId);
   const [isCreating, setIsCreating] = useState(false);
   const [editing, setEditing] = useState<ProjectTask | null>(null);
   const [removing, setRemoving] = useState<ProjectTask | null>(null);
@@ -90,7 +93,7 @@ export function TasksScreen({ projectId }: { projectId: string }) {
   }
 
   const rows = isLoose ? tasks.data.filter((task) => task.placement === null) : tasks.data;
-  const failed = remove.error ?? exportTasks.error;
+  const failed = remove.error ?? exportTasks.error ?? linkTask.error;
   const failure = summaryFailureOf(failed);
   const error =
     (failure.code && taskFailureTextOf(failure.code)) ??
@@ -291,6 +294,14 @@ export function TasksScreen({ projectId }: { projectId: string }) {
                 {isExportVisible && (
                   <td className="px-2 py-2">
                     <TaskExportCell task={task} attempt={attempts.get(task.id) ?? null} />
+                    {task.export === null && isWeeekLink(task.url) && (
+                      <button type="button"
+                        disabled={!tracker.data?.isOperational || !tracker.data.binding || linkTask.isPending}
+                        onClick={() => linkTask.mutate(task.id)}
+                        className="relative mt-2 rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50"
+                      >Связать с Weeek</button>
+                    )}
+
                   </td>
                 )}
                 <td className="px-2 py-2">

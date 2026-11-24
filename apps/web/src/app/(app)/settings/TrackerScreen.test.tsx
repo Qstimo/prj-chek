@@ -108,7 +108,7 @@ describe('TrackerScreen', () => {
     render(<TrackerScreen />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Проверить связь' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Править' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Настроить подключение' }));
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     expect(save).toHaveBeenCalledTimes(1);
@@ -118,9 +118,10 @@ describe('TrackerScreen', () => {
   it('правка открывает панель с формой подключения', async () => {
     render(<TrackerScreen />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Править' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Настроить подключение' }));
 
-    expect(screen.getByLabelText('Адрес')).toHaveValue('https://api.weeek.net/public/v1');
+    expect(screen.queryByLabelText('Адрес')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Токен')).toHaveValue('');
     expect(screen.getByLabelText('Токен')).toHaveValue('');
   });
 

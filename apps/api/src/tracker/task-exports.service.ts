@@ -1,12 +1,24 @@
 import {
   TRACKER_UNAVAILABLE,
+  TRACKER_LINK_INVALID,
+  TRACKER_LINK_REQUIRED,
+  weeekTaskLinkOf,
+  isWeeekLink,
+  type TaskExport,
   TaskExportOutcome,
   type AuditSubjectKind,
   type TaskExportRequest,
   type TaskExportResult,
   type TrackerBinding,
 } from '@cairn/shared';
-import { Inject, Injectable } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
 
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
@@ -204,6 +216,88 @@ export class TaskExportsService {
     return results;
   }
 
+  /** Связать по сохранённой ссылке: в Weeek идут только GET-запросы. */
+  async link(subject: RequestSubject, projectId: string, taskId: string): Promise<TaskExport> {
+    await this.bindings.requireWrite(subject, projectId);
+    const binding = await this.bindings.findForProject(subject, projectId);
+
+    if (!binding) {
+      throw new TrackerBindingMissingError();
+    }
+
+    const port = await this.trackers.current();
+
+    if (!port.isEnabled) {
+      throw new TrackerNotConfiguredError();
+    }
+
+    const controller = new AbortController();
+
+    try {
+      return await this.lockDb.transaction(async (lockTx) => {
+        const target = await this.exports.lockTarget(subject, lockTx, projectId, taskId);
+
+        if (!target) {
+          throw new NotFoundException();
+        }
+
+        const link = weeekTaskLinkOf(target.url);
+
+        if (!link) {
+          throw new BadRequestException({
+            code: TRACKER_LINK_INVALID,
+            message: 'Укажите постоянную ссылку Weeek вида https://app.weeek.net/ws/123/task/456.',
+          });
+        }
+
+        if (target.export) {
+          if (
+            target.export.externalId === link.taskId &&
+            weeekTaskLinkOf(target.export.externalUrl)?.workspaceId === link.workspaceId
+          ) {
+            return target.export;
+          }
+
+          throw new ConflictException({
+            code: TRACKER_LINK_INVALID,
+            message: 'Задача уже связана с другой задачей Weeek.',
+          });
+        }
+
+        let state: TrackerTaskState;
+
+        try {
+          state = await port.readTaskLink(target.url!, targetOf(binding), controller.signal);
+        } catch (cause) {
+          throw new BadGatewayException({
+            code: codeOf(cause),
+            message: 'Не удалось прочитать задачу Weeek. Проверьте ссылку, рабочее пространство и выбранную доску.',
+          });
+        }
+
+        return this.db.transaction(async (tx) => {
+          await this.exports.recordExported(subject, tx, projectId, taskId, {
+            tracker: port.kind,
+            boardId: binding.boardId,
+            state,
+          });
+          await this.audit.record(tx, actorOf(subject), {
+            action: AuditAction.TaskTrackerLinked,
+            entityType: 'task',
+            entityId: taskId,
+            projectId,
+            metadata: { tracker: port.kind, externalId: state.externalId, boardId: binding.boardId },
+          });
+          const row = await this.exports.recordPolled(tx, taskId, { tracker: port.kind, state, code: null });
+
+          return taskExportOfRow(row!);
+        });
+      });
+    } finally {
+      controller.abort();
+    }
+  }
+
   /**
    * Одна задача под замком: решение, журнал, вызов, запись.
    *
@@ -259,6 +353,15 @@ export class TaskExportsService {
     controller: AbortController,
   ): Promise<TaskExportResult> {
     const isFirst = target.export === null;
+    // Ручная ссылка на Weeek означает уже существующую задачу. Создавать дубль нельзя.
+    if (isFirst && isWeeekLink(target.url)) {
+      return {
+        taskId: target.taskId,
+        outcome: TaskExportOutcome.Failed,
+        failureCode: TRACKER_LINK_REQUIRED,
+        export: null,
+      };
+    }
 
     await this.db.transaction((tx) =>
       this.audit.record(tx, actorOf(subject), {

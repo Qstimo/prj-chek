@@ -1,6 +1,6 @@
 'use client';
 
-import { TaskExportOutcome, type ProjectTask, type TaskExportResult } from '@cairn/shared';
+import { isWeeekLink, TaskExportOutcome, type ProjectTask, type TaskExportResult } from '@cairn/shared';
 
 import { EXPORT_TEXTS, exportFailureTextOf } from './constants';
 
@@ -45,7 +45,9 @@ export function TaskExportCell({
   if (mirror === null) {
     return (
       <div className="space-y-1">
-        <Badge tone="bg-muted text-muted-foreground">{EXPORT_TEXTS.none}</Badge>
+        <Badge tone="bg-muted text-muted-foreground">
+          {isWeeekLink(task.url) ? EXPORT_TEXTS.unlinked : EXPORT_TEXTS.none}
+        </Badge>
         {failureCode !== null && <FailureBadge code={failureCode} />}
       </div>
     );

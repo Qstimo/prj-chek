@@ -190,6 +190,7 @@ beforeEach(() => {
   vi.mocked(hooks.useMutationDeleteTask).mockReturnValue(remove);
   vi.mocked(hooks.useMutationDetachTask).mockReturnValue(detach);
   vi.mocked(hooks.useMutationExportTasks).mockReturnValue(exportTasks);
+  vi.mocked(hooks.useMutationLinkTask).mockReturnValue(mutation());
   // Панель «Куда выгружать» читает готовность трекера на рендере:
   // автомок отдал бы `undefined` и уронил бы экран. Умолчание —
   // установка без трекера: о нём на экране задач не сказано ничего.
@@ -201,6 +202,19 @@ beforeEach(() => {
 });
 
 describe('реестр задач проекта', () => {
+  it('существующая ссылка Weeek связывает задачу без обычной выгрузки', async () => {
+    ready();
+    const link = mutation();
+    vi.mocked(hooks.useMutationLinkTask).mockReturnValue(link);
+    vi.mocked(hooks.useQueryTasks).mockReturnValue(query([
+      { ...LOOSE, url: 'https://app.weeek.net/ws/4242/task/42' },
+    ]));
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Связать с Weeek' }));
+    expect(mutateOf(link)).toHaveBeenCalledWith(LOOSE.id);
+    expect(mutateOf(exportTasks)).not.toHaveBeenCalled();
+  });
+
   it('показывает задачи, версию и происхождение', () => {
     render(<TasksScreen projectId={PROJECT_ID} />);
 
@@ -333,7 +347,7 @@ describe('реестр задач проекта', () => {
     // установка без трекера полностью рабочая, задачи ведутся здесь.
     render(<TasksScreen projectId={PROJECT_ID} />);
 
-    expect(screen.queryByRole('button', { name: /Куда выгружать/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Выбрать доску Weeek/ })).toBeNull();
   });
 
   it('привязка доски живёт рядом с задачами, а не на экране версий', () => {
@@ -342,7 +356,7 @@ describe('реестр задач проекта', () => {
 
     render(<TasksScreen projectId={PROJECT_ID} />);
 
-    expect(screen.getByRole('button', { name: /Куда выгружать/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Выбрать доску Weeek/ })).toBeInTheDocument();
   });
 });
 

@@ -86,6 +86,7 @@ describe('две выгрузки одной задачи сразу', () => {
       createTask,
       updateTask,
       readTasks: vi.fn(),
+            readTaskLink: vi.fn(),
       targets: vi.fn(),
       probe: vi.fn(),
     }),

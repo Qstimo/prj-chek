@@ -2,7 +2,6 @@ import type { TrackerConnection, TrackerConnectionUpdate } from '@cairn/shared';
 
 /** Черновик формы: правки накапливаются в памяти до «Сохранить». */
 export interface TrackerFormValues {
-  baseUrl: string;
   workspaceId: string;
   isEnabled: boolean;
   /** Вписанный токен. Пусто означает «не менять»: сервер его не отдаёт. */

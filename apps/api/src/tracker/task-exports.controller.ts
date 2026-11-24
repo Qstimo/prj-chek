@@ -1,4 +1,4 @@
-import { taskExportRequestSchema, type TaskExportRequest, type TaskExportResult } from '@cairn/shared';
+import { taskExportRequestSchema, type TaskExport, type TaskExportRequest, type TaskExportResult } from '@cairn/shared';
 import { Body, Controller, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 
 import type { RequestSubject } from '../access/access.types';
@@ -27,6 +27,15 @@ import { TaskExportsService } from './task-exports.service';
 @UseGuards(SessionGuard)
 export class TaskExportsController {
   constructor(private readonly exports: TaskExportsService) {}
+
+  @Post(':taskId/link')
+  async link(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+  ): Promise<TaskExport> {
+    return this.exports.link(subject, projectId, taskId);
+  }
 
   /**
    * Выгружает отмеченные задачи и отвечает итогом на каждую.

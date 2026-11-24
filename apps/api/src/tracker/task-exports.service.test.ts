@@ -6,6 +6,7 @@ import {
   TRACKER_NOT_CONFIGURED,
   TRACKER_REJECTED,
   TRACKER_UNAVAILABLE,
+  TRACKER_LINK_REQUIRED,
   TaskExportOutcome,
   TaskOrigin,
   TrackerKind,
@@ -61,6 +62,7 @@ describe('выгрузка задач в трекер', () => {
 
   const createTask = vi.fn<Tracker['createTask']>();
   const updateTask = vi.fn<Tracker['updateTask']>();
+  const readTaskLink = vi.fn<Tracker['readTaskLink']>();
   /** Выключатель заглушки: лестница «без токена порт выключен» проверяется. */
   let isEnabled = true;
 
@@ -81,6 +83,7 @@ describe('выгрузка задач в трекер', () => {
             createTask,
             updateTask,
             readTasks: vi.fn(),
+            readTaskLink,
             targets: vi.fn(),
             probe: vi.fn(),
           }
@@ -112,6 +115,8 @@ describe('выгрузка задач в трекер', () => {
   beforeEach(async () => {
     await testDb.truncate();
     isEnabled = true;
+    readTaskLink.mockReset();
+    readTaskLink.mockResolvedValue(STATE);
     createTask.mockReset();
     createTask.mockResolvedValue(STATE);
     updateTask.mockReset();
@@ -200,6 +205,58 @@ describe('выгрузка задач в трекер', () => {
 
     return row;
   }
+
+  describe('связь по существующей ссылке', () => {
+    it('сохраняет внешний id и статус, не создавая и не меняя задачу Weeek', async () => {
+      await grant(AccessLevel.Write);
+      await bind();
+      const taskId = await seedTask('Наша формулировка', STATE.externalUrl);
+      readTaskLink.mockResolvedValue({ ...STATE, isCompleted: true });
+      const result = await service.link(member(), projectId, taskId);
+      expect(result.externalId).toBe(STATE.externalId);
+      expect(result.isCompleted).toBe(true);
+      expect(result.checkedAt).not.toBeNull();
+      expect(createTask).not.toHaveBeenCalled();
+      expect(updateTask).not.toHaveBeenCalled();
+      expect(readTaskLink).toHaveBeenCalledWith(STATE.externalUrl,
+        { externalProjectId: '7', boardId: '11', boardColumnId: '31' }, expect.any(AbortSignal));
+      const [task] = await testDb.db.select().from(projectTasks).where(eq(projectTasks.id, taskId));
+      expect(task!.url).toBe(STATE.externalUrl);
+      expect(task!.title).toBe('Наша формулировка');
+      expect((await auditRows()).map((row) => row.action)).toContain(AuditAction.TaskTrackerLinked);
+      await service.link(member(), projectId, taskId);
+      expect(readTaskLink).toHaveBeenCalledTimes(1);
+    });
+
+    it('обычная выгрузка не создаёт дубль, если в задаче уже есть ссылка Weeek', async () => {
+      await grant(AccessLevel.Write);
+      await bind();
+      const taskId = await seedTask('Оплата', STATE.externalUrl);
+      const results = await service.export(member(), projectId, { taskIds: [taskId] });
+      expect(results[0]?.failureCode).toBe(TRACKER_LINK_REQUIRED);
+      expect(createTask).not.toHaveBeenCalled();
+      expect(await exportRow(taskId)).toBeUndefined();
+      expect(await auditRows()).toHaveLength(0);
+    });
+
+    it('без права записи не обращается к Weeek', async () => {
+      await bind();
+      const taskId = await seedTask('Оплата', STATE.externalUrl);
+      await expect(service.link(member(), projectId, taskId)).rejects.toThrow();
+      expect(readTaskLink).not.toHaveBeenCalled();
+    });
+
+    it('отказ проверки ссылки не оставляет ложную связь', async () => {
+      await grant(AccessLevel.Write);
+      await bind();
+      const taskId = await seedTask('Оплата', STATE.externalUrl);
+      readTaskLink.mockRejectedValue(new TrackerFailure(TRACKER_REJECTED, TOKEN));
+      await expect(service.link(member(), projectId, taskId)).rejects.toThrow();
+      expect(await exportRow(taskId)).toBeUndefined();
+      expect(await auditRows()).toHaveLength(0);
+      expect(createTask).not.toHaveBeenCalled();
+    });
+  });
 
   describe('право и готовность', () => {
     it('без выдачи проект не раскрывается и в сеть не идёт ни один байт', async () => {

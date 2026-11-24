@@ -9,7 +9,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ROADMAP_KEYS } from './useQueryRoadmap';
-import { TASK_KEYS, useMutationExportTasks } from './useTasks';
+import { TASK_KEYS, useMutationExportTasks, useMutationLinkTask } from './useTasks';
 
 const PROJECT_ID = '11111111-1111-1111-1111-111111111111';
 const FIRST = '22222222-2222-2222-2222-222222222222';
@@ -54,6 +54,18 @@ function okFetch(payload: unknown = [resultOf(FIRST, TaskExportOutcome.Created)]
 }
 
 describe('выгрузка задач в трекер', () => {
+  it('связь по ссылке использует свою ручку и перечитывает задачи', async () => {
+    const fetchMock = okFetch({});
+    const client = freshClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useMutationLinkTask(PROJECT_ID), { wrapper: wrapperOf(client) });
+    await result.current.mutateAsync(FIRST);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/projects/${PROJECT_ID}/tasks/${FIRST}/link`,
+      expect.objectContaining({ method: 'POST' }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: TASK_KEYS.forProject(PROJECT_ID) });
+    client.clear();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
