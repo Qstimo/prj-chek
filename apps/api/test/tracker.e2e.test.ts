@@ -373,8 +373,7 @@ describe('HTTP: трекер задач', () => {
         Promise.resolve(
           new Response(
             JSON.stringify(
-              // По подстроке, а не по концу адреса: списки листаются, и в
-              // строке запроса едут `perPage` с `offset`.
+              // Доски и колонки запрашиваются в контексте родителя.
               url.includes('/tm/projects')
                 ? { projects: [{ id: 7, name: 'CAIRN' }] }
                 : url.includes('/tm/boards')
@@ -393,6 +392,11 @@ describe('HTTP: трекер задач', () => {
         boards: [{ id: '11', name: 'Разработка', projectId: '7' }],
         columns: [{ id: '31', name: 'Бэклог', boardId: '11' }],
       });
+      expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+        'https://api.weeek.net/public/v1/tm/projects',
+        'https://api.weeek.net/public/v1/tm/boards?projectId=7',
+        'https://api.weeek.net/public/v1/tm/board-columns?boardId=11',
+      ]);
       // Токен уходит заголовком и остаётся на сервере (дизайн, 9.3).
       expect(JSON.stringify(targets.body)).not.toContain(TOKEN);
       const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
