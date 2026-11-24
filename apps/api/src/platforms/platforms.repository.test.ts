@@ -6,6 +6,7 @@ import {
   Section,
   SubjectKind,
   SummaryTaskOrigin,
+  TaskOrigin,
 } from '@cairn/shared';
 import { ConflictException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -14,7 +15,8 @@ import { InsufficientLevelError, SectionNotVisibleError } from '../access/access
 import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import {
-  checkpointPlatforms,
+  projectTaskPlatforms,
+  projectTasks,
   chronicleEntries,
   environmentPlatforms,
   environments,
@@ -242,22 +244,26 @@ describe('репозиторий платформ', () => {
       .insert(roadmapVersions)
       .values({ projectId, label: 'v1.0', position: 1 })
       .returning();
-    const [checkpoint] = await testDb.db
-      .insert(roadmapCheckpoints)
-      .values({ versionId: version!.id, title: 'Оплата', position: 1 })
+    // Формулировка живёт у задачи, размещение её только держит: теги
+    // платформ висят на задаче, и уборка за удалением платформы идёт по
+    // ним, а не по чекпоинтам.
+    const [task] = await testDb.db
+      .insert(projectTasks)
+      .values({ projectId, title: 'Оплата', origin: TaskOrigin.Roadmap })
       .returning();
+    await testDb.db
+      .insert(roadmapCheckpoints)
+      .values({ versionId: version!.id, taskId: task!.id, position: 1 });
     await testDb.db
       .insert(versionPlatformReleases)
       .values({ versionId: version!.id, platformId, state: PlatformReleaseState.OnTest });
-    await testDb.db
-      .insert(checkpointPlatforms)
-      .values({ checkpointId: checkpoint!.id, platformId });
+    await testDb.db.insert(projectTaskPlatforms).values({ taskId: task!.id, platformId });
     await testDb.db.insert(environmentPlatforms).values({ environmentId, platformId });
 
     await testDb.db.transaction((tx) => repository.remove(admin(), tx, projectId, platformId));
 
     expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
-    expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+    expect(await testDb.rowsOf(projectTaskPlatforms)).toHaveLength(0);
     expect(await testDb.rowsOf(environmentPlatforms)).toHaveLength(0);
     expect(await testDb.rowsOf(projectPlatforms)).toHaveLength(0);
   });

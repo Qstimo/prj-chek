@@ -35,9 +35,25 @@ describe('чекпоинты', () => {
     expect(columns).not.toContain('parent_id');
   });
 
-  it('требует формулировку и признак', () => {
-    expect(roadmapCheckpoints.title.notNull).toBe(true);
+  it('требует задачу и признак, а формулировки у себя не держит', () => {
+    // Чекпоинт — размещение задачи в версии: формулировка и ссылка
+    // переехали в `project_tasks`, и второго места для них нет.
+    const columns = getTableConfig(roadmapCheckpoints).columns.map((column) => column.name);
+
+    expect(roadmapCheckpoints.taskId.notNull).toBe(true);
     expect(roadmapCheckpoints.isDone.notNull).toBe(true);
+    expect(columns).not.toContain('title');
+    expect(columns).not.toContain('url');
+  });
+
+  it('держит задачу не больше чем в одной версии', () => {
+    // Две версии на одну задачу означали бы двойное «сделано» у одного
+    // факта, и прогресс двух версий считался бы из него же.
+    const names = getTableConfig(roadmapCheckpoints).uniqueConstraints.map(
+      (constraint) => constraint.name,
+    );
+
+    expect(names).toContain('roadmap_checkpoints_task');
   });
 
   it('помнит версию, из которой чекпоинт перенесли', () => {

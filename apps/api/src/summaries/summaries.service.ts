@@ -39,6 +39,7 @@ import {
   type TaskSuggesterSource,
 } from './suggester/task-suggester';
 import { RoadmapRepository } from '../roadmap/roadmap.repository';
+import { TasksRepository } from '../tasks/tasks.repository';
 import { SummariesRepository } from './summaries.repository';
 import { RecordingStore } from './transcription/recording-store';
 
@@ -70,6 +71,9 @@ export class SummariesService implements OnModuleDestroy {
     private readonly audit: AuditService,
     @Inject(TASK_SUGGESTER_SOURCE) private readonly suggesters: TaskSuggesterSource,
     private readonly roadmap: RoadmapRepository,
+    // Реестр задач: релиз черновика заводит задачи, а не чекпоинты
+    // напрямую — формулировка живёт у задачи.
+    private readonly tasks: TasksRepository,
     private readonly recordings: RecordingStore,
   ) {}
 
@@ -238,20 +242,28 @@ export class SummariesService implements OnModuleDestroy {
           entityId: version.id, projectId, metadata: { label: version.label },
         });
       }
+      // Строка черновика становится **задачей реестра**, и только потом
+      // её размещением в версии: задача живёт между версиями, а черновик
+      // остаётся поверхностью до подтверждения. Порядок — по позиции в
+      // черновике, а не по порядку отметок.
+      const released: { draftId: string; taskId: string }[] = [];
+
       for (const task of tasks) {
-        const checkpoint = await this.roadmap.createCheckpoint(subject, tx, projectId, version.id, {
+        const created = await this.tasks.createFromSummary(subject, tx, projectId, summaryId, {
           title: task.title,
           url: task.url,
           platformIds: task.platformIds,
         });
+        const checkpoint = await this.roadmap.createCheckpoint(subject, tx, projectId, version.id, {
+          taskId: created.id,
+        });
+        released.push({ draftId: task.id, taskId: created.id });
         await this.audit.record(tx, actorOf(subject), {
           action: AuditAction.CheckpointCreated, entityType: 'checkpoint',
           entityId: checkpoint.id, projectId, metadata: { title: checkpoint.title },
         });
       }
-      await this.repository.markReleased(
-        subject, tx, projectId, summaryId, version.id, tasks.map((task) => task.id),
-      );
+      await this.repository.markReleased(subject, tx, projectId, summaryId, version.id, released);
       await this.audit.record(tx, actorOf(subject), {
         action: AuditAction.SummaryReleased, entityType: 'summary', entityId: summaryId, projectId,
         metadata: {

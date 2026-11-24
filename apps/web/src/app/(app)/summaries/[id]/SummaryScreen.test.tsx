@@ -193,11 +193,11 @@ function mutateOf(stub: unknown): ReturnType<typeof vi.fn> {
 }
 
 /** Мутация, уже вернувшая отказ с кодом из контракта. */
-function failed(code: string, extra: Record<string, unknown> = {}) {
+function failed(code: string, extra: Record<string, unknown> = {}, message = 'ответ сервера') {
   return {
     mutate: vi.fn(),
     isPending: false,
-    error: new ApiError(502, 'ответ сервера', { code, ...extra }),
+    error: new ApiError(502, message, { code, ...extra }),
   } as never;
 }
 
@@ -344,12 +344,37 @@ describe('экран саммари', () => {
     expect((suggest as unknown as { mutate: ReturnType<typeof vi.fn> }).mutate).toHaveBeenCalled();
   });
 
-  it('отказ разбивки объясняет по коду', () => {
+  it('неудача разбивки называет узел и причину словами сервера', () => {
+    // За одним кодом стоят четыре события, и каждое чинится своим
+    // действием: «попробуйте ещё раз» верно только для «узел не ответил»
+    // и отправляет жать кнопку там, где жать бесполезно. Ключа и
+    // присланного текста в сообщении сервера нет по устройству.
+    //
     // «И не очищает список» здесь не проверялось: список рисуется из
     // замоканного запроса, на который состояние ошибки мутации не
     // влияет. Настоящая проверка этого свойства стоит на сервере —
     // `summaries.service.test.ts`, «отказ оставляет прежний черновик».
-    vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(failed(SUGGESTER_UNAVAILABLE));
+    vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(
+      failed(
+        SUGGESTER_UNAVAILABLE,
+        {},
+        'Разбивка не удалась: api.proxyapi.ru — узел ответил 400.',
+      ),
+    );
+
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+
+    expect(screen.getByText(/узел ответил 400/)).toBeInTheDocument();
+  });
+
+  it('неудача без сообщения объясняется нашей фразой', () => {
+    // Отказ, у которого сервер ничего не сказал, оставить без слов
+    // нельзя: пустое место читается как «ничего не произошло».
+    vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+      error: new ApiError(502, '', { code: SUGGESTER_UNAVAILABLE }),
+    } as never);
 
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 

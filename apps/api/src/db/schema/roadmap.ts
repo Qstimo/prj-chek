@@ -14,6 +14,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { projects } from './projects';
+import { projectTasks } from './tasks';
 
 /** Состояние версии. Значения совпадают с контрактом. */
 export const roadmapVersionStateEnum = pgEnum('roadmap_version_state', [
@@ -51,7 +52,17 @@ export const roadmapVersions = pgTable(
 );
 
 /**
- * Чекпоинты: формулировка результата и признак «закрыт» — и всё.
+ * Чекпоинты: **размещение задачи в версии** и признак «закрыт».
+ *
+ * Прежде здесь лежала и формулировка. Она переехала в `project_tasks`
+ * вместе со ссылкой и тегами платформ: задача приходит двумя путями и
+ * живёт между версиями, а формулировка в двух местах разошлась бы — одна
+ * и та же задача называлась бы в версии и в реестре по-разному.
+ *
+ * Что осталось здесь и почему именно здесь: `is_done` — потому что
+ * прогресс считается по версии (ТЗ 3.5), `position` — потому что порядок
+ * значим внутри версии, `carried_from_version_id` — потому что перенос
+ * это свойство размещения, а не задачи.
  *
  * Исполнителей, оценок, дат, комментариев и вложенности не будет:
  * сознательное ограничение ТЗ 1.4, удерживающее продукт от трекера.
@@ -63,9 +74,16 @@ export const roadmapCheckpoints = pgTable(
     versionId: uuid('version_id')
       .notNull()
       .references(() => roadmapVersions.id, { onDelete: 'restrict' }),
-    title: text('title').notNull(),
-    /** Ссылка на задачу во внешнем трекере; наружу не отдаётся. */
-    url: text('url'),
+    /**
+     * Задача, которую это размещение держит в версии.
+     *
+     * Уникум ниже: задача стоит не более чем в одной версии. Две версии на
+     * одну задачу означали бы, что «сделано» у неё двойное, а прогресс
+     * двух версий считается из одного факта.
+     */
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => projectTasks.id, { onDelete: 'restrict' }),
     isDone: boolean('is_done').notNull().default(false),
     position: integer('position').notNull(),
     /**
@@ -94,6 +112,7 @@ export const roadmapCheckpoints = pgTable(
   },
   (table) => [
     index('roadmap_checkpoints_version_idx').on(table.versionId),
+    unique('roadmap_checkpoints_task').on(table.taskId),
     foreignKey({
       columns: [table.carriedFromVersionId],
       foreignColumns: [roadmapVersions.id],

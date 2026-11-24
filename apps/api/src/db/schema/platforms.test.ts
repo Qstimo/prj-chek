@@ -2,8 +2,9 @@ import { PlatformKind, PlatformReleaseState } from '@cairn/shared';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
+import { projectTaskPlatforms } from './tasks';
+
 import {
-  checkpointPlatforms,
   environmentPlatforms,
   platformKindEnum,
   platformReleaseStateEnum,
@@ -71,12 +72,15 @@ describe('связи', () => {
     ]);
   });
 
-  it('тег чекпоинта — тоже пара', () => {
-    const [primary] = getTableConfig(checkpointPlatforms).primaryKeys;
+  it('тег задачи — тоже пара', () => {
+    const [primary] = getTableConfig(projectTaskPlatforms).primaryKeys;
 
+    // Ключ — пара «задача × платформа»: тег принадлежит задаче, и пока
+    // он висел на размещении, вынутая из версии задача теряла бы теги
+    // вместе с местом.
     expect(primary?.columns.map((column) => column.name).sort()).toEqual([
-      'checkpoint_id',
       'platform_id',
+      'task_id',
     ]);
   });
 });

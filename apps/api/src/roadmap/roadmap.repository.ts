@@ -21,6 +21,7 @@ import {
   type RoadmapVersionCreate,
   type RoadmapVersionDetail,
   type RoadmapVersionUpdate,
+  TaskOrigin,
 } from '@cairn/shared';
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, inArray } from 'drizzle-orm';
@@ -32,7 +33,8 @@ import { generateToken } from '../auth/token';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
 import {
-  checkpointPlatforms,
+  projectTaskPlatforms,
+  projectTasks,
   projectPlatforms,
   projects,
   roadmapCheckpoints,
@@ -45,6 +47,7 @@ import {
   type RoadmapCheckpointRow,
   type RoadmapVersionRow,
 } from '../db/schema';
+import { TaskAlreadyPlacedError } from '../tasks/tasks.errors';
 import { releaseReportOf } from './release.report';
 import { releaseSummaryOf } from './release.summary';
 import { versionProjection } from './roadmap.projection';
@@ -255,23 +258,14 @@ export class RoadmapRepository {
 
     const version = await this.requireVersion(tx, projectId, versionId);
 
-    // Порядок обратен ссылкам: сначала теги чекпоинтов этой версии,
-    // затем её выпуски, затем сами чекпоинты и версия. На всех ссылках
-    // `restrict`, и без уборки удаление упёрлось бы в целостность.
-    const checkpoints = await tx
-      .select({ id: roadmapCheckpoints.id })
-      .from(roadmapCheckpoints)
-      .where(eq(roadmapCheckpoints.versionId, versionId));
-
-    if (checkpoints.length > 0) {
-      await tx.delete(checkpointPlatforms).where(
-        inArray(
-          checkpointPlatforms.checkpointId,
-          checkpoints.map((checkpoint) => checkpoint.id),
-        ),
-      );
-    }
-
+    // Порядок обратен ссылкам: сначала выпуски, затем размещения и сама
+    // версия. На всех ссылках `restrict`, и без уборки удаление упёрлось
+    // бы в целостность.
+    //
+    // Теги здесь больше не трогаются: они висят на задаче, а задача
+    // переживает версию — удаление версии **вынимает** её задачи из
+    // роадмапа, а не стирает формулировки. Прежде стирало: формулировка
+    // жила в этой строке, и другого места у неё не было.
     await tx
       .delete(versionPlatformReleases)
       .where(eq(versionPlatformReleases.versionId, versionId));
@@ -310,26 +304,93 @@ export class RoadmapRepository {
       .from(roadmapCheckpoints)
       .where(eq(roadmapCheckpoints.versionId, versionId));
 
+    // Две формы одного действия: положить в версию существующую задачу
+    // реестра или завести новую вместе с размещением. Ветвление по
+    // наличию поля, а не по флагу: контракт отвергает тело с обоими.
+    const taskId =
+      'taskId' in input
+        ? await this.requirePlaceableTask(tx, projectId, input.taskId)
+        : await this.createTaskForCheckpoint(tx, projectId, input);
+
     const [created] = await tx
       .insert(roadmapCheckpoints)
       .values({
         versionId,
-        title: input.title,
-        // `?? null`, а не `input.url`: поле необязательно в схеме создания,
-        // и `undefined` заставил бы Drizzle пропустить колонку молча.
-        url: input.url ?? null,
+        taskId,
         position: Math.max(0, ...existing.map((row) => row.position)) + 1,
       })
       .returning();
 
-    if (input.platformIds) {
-      await this.replaceCheckpointPlatforms(tx, projectId, created!.id, input.platformIds);
-    }
-
-    return { ...created!, platformIds: await this.tagsOf(tx, created!.id) };
+    return this.taggedOf(tx, created!);
   }
 
-  /** Правит чекпоинт: формулировку, признак, позицию. */
+  /**
+   * Задача, которую можно положить в версию, либо отказ.
+   *
+   * Два условия, и оба — отказ, а не молчание: задача чужого проекта не
+   * раскрывается вовсе (`404`, как любая невидимая строка), а занятая
+   * задача получает свой код — её уже держит другая версия, и второе
+   * размещение означало бы двойное «сделано» у одного факта.
+   */
+  private async requirePlaceableTask(
+    tx: Transaction,
+    projectId: string,
+    taskId: string,
+  ): Promise<string> {
+    const [task] = await tx
+      .select({ id: projectTasks.id })
+      .from(projectTasks)
+      .where(and(eq(projectTasks.id, taskId), eq(projectTasks.projectId, projectId)))
+      .limit(1);
+
+    if (!task) {
+      throw new SectionNotVisibleError();
+    }
+
+    const [placed] = await tx
+      .select({ id: roadmapCheckpoints.id })
+      .from(roadmapCheckpoints)
+      .where(eq(roadmapCheckpoints.taskId, taskId))
+      .limit(1);
+
+    if (placed) {
+      throw new TaskAlreadyPlacedError();
+    }
+
+    return task.id;
+  }
+
+  /**
+   * Заводит задачу под новое размещение.
+   *
+   * `origin: roadmap` — задача пришла этим путём, и признак нужен экрану
+   * задач: «заведена в версии» отличается от «приехала из созвона».
+   */
+  private async createTaskForCheckpoint(
+    tx: Transaction,
+    projectId: string,
+    input: { title: string; url?: string | null; platformIds?: string[] },
+  ): Promise<string> {
+    const [task] = await tx
+      .insert(projectTasks)
+      .values({
+        projectId,
+        title: input.title,
+        // `?? null`, а не `input.url`: поле необязательно в схеме создания,
+        // и `undefined` заставил бы Drizzle пропустить колонку молча.
+        url: input.url ?? null,
+        origin: TaskOrigin.Roadmap,
+      })
+      .returning();
+
+    if (input.platformIds) {
+      await this.replaceTaskPlatforms(tx, projectId, task!.id, input.platformIds);
+    }
+
+    return task!.id;
+  }
+
+  /** Правит размещение: признак «закрыт» и позицию в версии. */
   async updateCheckpoint(
     subject: RequestSubject,
     tx: Transaction,
@@ -342,41 +403,46 @@ export class RoadmapRepository {
     await this.lockProject(tx, projectId);
     await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
 
-    // Теги — не колонка чекпоинта: без отделения поле уехало бы
-    // в `set()` несуществующей колонкой.
-    const { platformIds, ...fields } = input;
-
     const [updated] = await tx
       .update(roadmapCheckpoints)
-      .set({ ...fields, updatedAt: new Date() })
+      .set({ ...input, updatedAt: new Date() })
       .where(eq(roadmapCheckpoints.id, checkpointId))
       .returning();
 
-    // Поля нет — набор не трогать: ровно так переключается галочка
-    // «закрыт», и буквальная замена снесла бы теги при каждом щелчке.
-    if (platformIds) {
-      await this.replaceCheckpointPlatforms(tx, projectId, checkpointId, platformIds);
-    }
-
-    // Набор читается из базы, а не берётся из тела: ответ описывает
-    // состояние после операции, а правка могла тегов и не присылать.
-    return { ...updated!, platformIds: await this.tagsOf(tx, checkpointId) };
+    // Формулировка, ссылка и теги читаются из задачи, а не берутся из
+    // тела: эта ручка их не правит вовсе, а ответ обязан описать
+    // состояние после операции целиком.
+    return this.taggedOf(tx, updated!);
   }
 
-  /** Удаляет чекпоинт. */
+  /**
+   * Вынимает задачу из версии: удаляет размещение, задачу оставляет.
+   *
+   * Отмена прежнего смысла: пока формулировка лежала в этой строке,
+   * удаление размещения означало потерю формулировки целиком. Теперь
+   * задача живёт в реестре проекта, и «убрать из версии» — это ровно то,
+   * что человек и имеет в виду, нажимая крестик у чекпоинта.
+   *
+   * Возвращает формулировку для журнала: без неё запись сказала бы
+   * «удалён чекпоинт такой-то uuid», то есть ничего.
+   */
   async removeCheckpoint(
     subject: RequestSubject,
     tx: Transaction,
     projectId: string,
     versionId: string,
     checkpointId: string,
-  ): Promise<RoadmapCheckpointRow> {
+  ): Promise<TaggedCheckpointRow> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
     await this.lockProject(tx, projectId);
 
-    const checkpoint = await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
+    const row = await this.requireCheckpoint(tx, projectId, versionId, checkpointId);
+    const checkpoint = await this.taggedOf(tx, row);
 
-    await tx.delete(checkpointPlatforms).where(eq(checkpointPlatforms.checkpointId, checkpointId));
+    // Теги не трогаются: они у задачи, и задача остаётся в реестре
+    // проекта. Удаление размещения — это «вынуть из версии», и это
+    // отмена прежнего смысла: пока формулировка лежала здесь, удалить
+    // размещение значило потерять её целиком.
     await tx.delete(roadmapCheckpoints).where(eq(roadmapCheckpoints.id, checkpointId));
 
     return checkpoint;
@@ -439,10 +505,10 @@ export class RoadmapRepository {
       .where(eq(roadmapCheckpoints.id, checkpointId))
       .returning();
 
-    // Теги не трогаются вовсе: они висят на чекпоинте, а не на версии,
-    // и переезжают вместе с ним сами.
+    // Теги не трогаются вовсе: они висят на задаче, а не на версии, и
+    // переезжают вместе с размещением сами.
     return {
-      checkpoint: { ...moved!, platformIds: await this.tagsOf(tx, checkpointId) },
+      checkpoint: await this.taggedOf(tx, moved!),
       fromLabel: source.label,
       toLabel: target.label,
       versionCreated,
@@ -595,29 +661,57 @@ export class RoadmapRepository {
     return { platformName: platform.name, versionLabel: version.label };
   }
 
-  /** Теги одного чекпоинта по порядку платформ. */
-  private async tagsOf(executor: Executor, checkpointId: string): Promise<string[]> {
+  /** Теги одной задачи по порядку платформ. */
+  private async tagsOf(executor: Executor, taskId: string): Promise<string[]> {
     const rows = await executor
-      .select({ platformId: checkpointPlatforms.platformId })
-      .from(checkpointPlatforms)
-      .innerJoin(projectPlatforms, eq(projectPlatforms.id, checkpointPlatforms.platformId))
-      .where(eq(checkpointPlatforms.checkpointId, checkpointId))
+      .select({ platformId: projectTaskPlatforms.platformId })
+      .from(projectTaskPlatforms)
+      .innerJoin(projectPlatforms, eq(projectPlatforms.id, projectTaskPlatforms.platformId))
+      .where(eq(projectTaskPlatforms.taskId, taskId))
       .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt));
 
     return rows.map((row) => row.platformId);
   }
 
   /**
-   * Заменяет набор тегов чекпоинта целиком.
+   * Поля задачи и её теги по идентификатору размещения.
    *
-   * Платформы обязаны принадлежать проекту чекпоинта: иначе субъект
+   * Отдельным чтением, а не join'ом в каждом запросе: размещение правится
+   * точечно (галочка «закрыт», позиция, перенос), и ответ обязан описать
+   * состояние **после** операции — включая формулировку, которую эта
+   * операция не трогала.
+   */
+  private async taggedOf(
+    executor: Executor,
+    checkpoint: RoadmapCheckpointRow,
+  ): Promise<TaggedCheckpointRow> {
+    const [task] = await executor
+      .select({ title: projectTasks.title, url: projectTasks.url })
+      .from(projectTasks)
+      .where(eq(projectTasks.id, checkpoint.taskId))
+      .limit(1);
+
+    return {
+      ...checkpoint,
+      // Задача не может отсутствовать: ссылка `not null` и `restrict`.
+      // Пустые значения здесь — не «бывает», а «база потеряла строку».
+      title: task!.title,
+      url: task!.url,
+      platformIds: await this.tagsOf(executor, checkpoint.taskId),
+    };
+  }
+
+  /**
+   * Заменяет набор тегов задачи целиком.
+   *
+   * Платформы обязаны принадлежать проекту задачи: иначе субъект
    * с записью в «Роадмап» вписал бы идентификатор чужого проекта, и
    * уборка за удалением унесла бы строку оттуда.
    */
-  private async replaceCheckpointPlatforms(
+  private async replaceTaskPlatforms(
     tx: Transaction,
     projectId: string,
-    checkpointId: string,
+    taskId: string,
     platformIds: string[],
   ): Promise<void> {
     const unique = [...new Set(platformIds)];
@@ -638,12 +732,12 @@ export class RoadmapRepository {
       }
     }
 
-    await tx.delete(checkpointPlatforms).where(eq(checkpointPlatforms.checkpointId, checkpointId));
+    await tx.delete(projectTaskPlatforms).where(eq(projectTaskPlatforms.taskId, taskId));
 
     if (unique.length > 0) {
       await tx
-        .insert(checkpointPlatforms)
-        .values(unique.map((platformId) => ({ checkpointId, platformId })));
+        .insert(projectTaskPlatforms)
+        .values(unique.map((platformId) => ({ taskId, platformId })));
     }
   }
 
@@ -980,10 +1074,25 @@ export class RoadmapRepository {
       .where(eq(roadmapVersions.projectId, projectId))
       .orderBy(asc(roadmapVersions.position), asc(roadmapVersions.createdAt));
 
+    // Формулировка и ссылка приходят из задачи одним join'ом, а не
+    // вторым запросом на каждое размещение: роадмап читается целиком, и
+    // N+1 на чекпоинтах версии — это десятки запросов на один экран.
     const checkpoints = versions.length
       ? await executor
-          .select()
+          .select({
+            id: roadmapCheckpoints.id,
+            versionId: roadmapCheckpoints.versionId,
+            taskId: roadmapCheckpoints.taskId,
+            isDone: roadmapCheckpoints.isDone,
+            position: roadmapCheckpoints.position,
+            carriedFromVersionId: roadmapCheckpoints.carriedFromVersionId,
+            createdAt: roadmapCheckpoints.createdAt,
+            updatedAt: roadmapCheckpoints.updatedAt,
+            title: projectTasks.title,
+            url: projectTasks.url,
+          })
           .from(roadmapCheckpoints)
+          .innerJoin(projectTasks, eq(projectTasks.id, roadmapCheckpoints.taskId))
           .where(
             inArray(
               roadmapCheckpoints.versionId,
@@ -993,7 +1102,7 @@ export class RoadmapRepository {
           .orderBy(asc(roadmapCheckpoints.position), asc(roadmapCheckpoints.createdAt))
       : [];
 
-    const byVersion = new Map<string, RoadmapCheckpointRow[]>();
+    const byVersion = new Map<string, LoadedCheckpointRow[]>();
 
     for (const checkpoint of checkpoints) {
       byVersion.set(checkpoint.versionId, [
@@ -1051,24 +1160,26 @@ export class RoadmapRepository {
 
     // Теги сортируются по позиции платформы — тем же порядком, что
     // сводка: иначе чипы у чекпоинта тасовались бы между запросами.
-    const checkpointIds = checkpoints.map((checkpoint) => checkpoint.id);
+    const taskIds = checkpoints.map((checkpoint) => checkpoint.taskId);
 
-    const tagRows = checkpointIds.length
+    const tagRows = taskIds.length
       ? await executor
           .select({
-            checkpointId: checkpointPlatforms.checkpointId,
-            platformId: checkpointPlatforms.platformId,
+            taskId: projectTaskPlatforms.taskId,
+            platformId: projectTaskPlatforms.platformId,
           })
-          .from(checkpointPlatforms)
-          .innerJoin(projectPlatforms, eq(projectPlatforms.id, checkpointPlatforms.platformId))
-          .where(inArray(checkpointPlatforms.checkpointId, checkpointIds))
+          .from(projectTaskPlatforms)
+          .innerJoin(projectPlatforms, eq(projectPlatforms.id, projectTaskPlatforms.platformId))
+          .where(inArray(projectTaskPlatforms.taskId, taskIds))
           .orderBy(asc(projectPlatforms.position), asc(projectPlatforms.createdAt))
       : [];
 
+    // Ключ — задача, а не размещение: теги принадлежат ей, и проекция
+    // разворачивает их на размещения по `taskId`.
     const tags = new Map<string, string[]>();
 
     for (const row of tagRows) {
-      tags.set(row.checkpointId, [...(tags.get(row.checkpointId) ?? []), row.platformId]);
+      tags.set(row.taskId, [...(tags.get(row.taskId) ?? []), row.platformId]);
     }
 
     // Плоский список чекпоинтов отдаётся рядом со сгруппированным:
@@ -1250,12 +1361,31 @@ function nextOpenVersion(
 }
 
 /**
- * Строка чекпоинта вместе с его тегами.
+ * Размещение вместе с полями задачи и её тегами.
  *
- * Теги живут отдельной таблицей, а ответы ручек собираются литералом:
- * без них контроллеру нечего положить в обязательное поле контракта.
+ * Формулировка и ссылка живут у задачи, теги — своей таблицей, а ответы
+ * ручек собираются литералом: без этих полей контроллеру нечего положить
+ * в обязательные поля контракта. Склейка идёт здесь, в репозитории, а не
+ * в контроллере: право проверяется на уровне выборки (ТЗ 4.1), и второе
+ * чтение задачи мимо репозитория прошло бы мимо проверки.
  */
-export type TaggedCheckpointRow = RoadmapCheckpointRow & { platformIds: string[] };
+export type TaggedCheckpointRow = RoadmapCheckpointRow & {
+  title: string;
+  url: string | null;
+  platformIds: string[];
+};
+
+/**
+ * Размещение с полями задачи — то, что читает проекция.
+ *
+ * Без тегов: их проекция получает отдельной картой по `taskId`, потому
+ * что читает роадмап целиком и собирает их одним запросом на все
+ * размещения сразу.
+ */
+export type LoadedCheckpointRow = RoadmapCheckpointRow & {
+  title: string;
+  url: string | null;
+};
 
 /**
  * Перенесённый чекпоинт вместе с обозначениями «откуда» и «куда».

@@ -17,7 +17,8 @@ import { AccessService } from '../access/access.service';
 import { InsufficientLevelError, SectionNotVisibleError } from '../access/access.errors';
 import type { RequestSubject } from '../access/access.types';
 import {
-  checkpointPlatforms,
+  projectTaskPlatforms,
+  projectTasks,
   environments,
   grants,
   projectPlatforms,
@@ -841,7 +842,9 @@ describe('репозиторий роадмапа', () => {
       const carried = await carryOver(from, created.id, { targetVersionId: to });
 
       expect(carried.checkpoint.platformIds).toEqual([apiId]);
-      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(1);
+      // Галочка «закрыт» тегов не касается по устройству: у ручки
+      // размещения их нет в теле, и снести их щелчком больше нечем.
+      expect(await testDb.rowsOf(projectTaskPlatforms)).toHaveLength(1);
     });
 
     it('возвращает обозначения «откуда» и «куда» для журнала', async () => {
@@ -1053,10 +1056,10 @@ describe('репозиторий роадмапа', () => {
         repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Оплата' }),
       );
       await testDb.db
-        .insert(checkpointPlatforms)
+        .insert(projectTaskPlatforms)
         .values([
-          { checkpointId: checkpoint.id, platformId: webId },
-          { checkpointId: checkpoint.id, platformId: apiId },
+          { taskId: checkpoint.taskId, platformId: webId },
+          { taskId: checkpoint.taskId, platformId: apiId },
         ]);
 
       const roadmap = await repository.findForProject(member(), projectId);
@@ -1229,11 +1232,18 @@ describe('репозиторий роадмапа', () => {
         }),
       );
 
-      await testDb.db.transaction((tx) =>
-        repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
-          platformIds: [iosId],
-        }),
-      );
+      // Теги правятся у задачи, а не у размещения: ручка чекпоинта их
+      // больше не принимает вовсе. Здесь проверяется, что роадмап читает
+      // набор **у задачи** — правка набора своим путём живёт в тестах
+      // репозитория задач.
+      await testDb.db
+        .delete(projectTaskPlatforms)
+        .where(
+          and(
+            eq(projectTaskPlatforms.taskId, created.taskId),
+            eq(projectTaskPlatforms.platformId, androidId),
+          ),
+        );
 
       const roadmap = await repository.findForProject(member(), projectId);
       const detail = roadmap.versions[0] as RoadmapVersionDetail;
@@ -1251,13 +1261,11 @@ describe('репозиторий роадмапа', () => {
         }),
       );
 
-      await testDb.db.transaction((tx) =>
-        repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
-          platformIds: [],
-        }),
-      );
+      await testDb.db
+        .delete(projectTaskPlatforms)
+        .where(eq(projectTaskPlatforms.taskId, created.taskId));
 
-      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+      expect(await testDb.rowsOf(projectTaskPlatforms)).toHaveLength(0);
     });
 
     it('правка без тегов их не трогает', async () => {
@@ -1278,7 +1286,9 @@ describe('репозиторий роадмапа', () => {
         }),
       );
 
-      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(1);
+      // Галочка «закрыт» тегов не касается по устройству: у ручки
+      // размещения их нет в теле, и снести их щелчком больше нечем.
+      expect(await testDb.rowsOf(projectTaskPlatforms)).toHaveLength(1);
     });
 
     it('не ставит тег платформы чужого проекта', async () => {
@@ -1315,10 +1325,17 @@ describe('репозиторий роадмапа', () => {
       );
 
       expect(await testDb.rowsOf(versionPlatformReleases)).toHaveLength(0);
-      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+      // Теги остаются: они у задачи, а задача переживает версию —
+      // удаление версии **вынимает** её задачи из роадмапа, а не стирает
+      // формулировки. Это отмена прежнего поведения, и названа она прямо.
+      expect(await testDb.rowsOf(projectTaskPlatforms)).toHaveLength(1);
+      expect(await testDb.rowsOf(projectTasks)).toHaveLength(1);
     });
 
-    it('удаление чекпоинта уносит его теги', async () => {
+    it('удаление чекпоинта оставляет задачу в реестре с её тегами', async () => {
+      // Прежде удаление размещения стирало формулировку: другого места у
+      // неё не было. Теперь это «вынуть из версии», и задача ждёт в
+      // реестре проекта — вместе с тегами, которые ей и принадлежат.
       const versionId = await createVersion('v1.0');
       const apiId = await createPlatform('API');
       const created = await testDb.db.transaction((tx) =>
@@ -1332,7 +1349,9 @@ describe('репозиторий роадмапа', () => {
         repository.removeCheckpoint(admin(), tx, projectId, versionId, created.id),
       );
 
-      expect(await testDb.rowsOf(checkpointPlatforms)).toHaveLength(0);
+      expect(await testDb.rowsOf(roadmapCheckpoints)).toHaveLength(0);
+      expect(await testDb.rowsOf(projectTaskPlatforms)).toHaveLength(1);
+      expect((await testDb.rowsOf(projectTasks))[0]).toMatchObject({ title: 'Оплата' });
     });
   });
 
@@ -1352,13 +1371,20 @@ describe('репозиторий роадмапа', () => {
 
       expect(created.platformIds).toEqual([iosId]);
 
+      await testDb.db
+        .delete(projectTaskPlatforms)
+        .where(eq(projectTaskPlatforms.taskId, created.taskId));
+
       const updated = await testDb.db.transaction((tx) =>
         repository.updateCheckpoint(admin(), tx, projectId, versionId, created.id, {
-          platformIds: [],
+          isDone: true,
         }),
       );
 
+      // Ответ описывает состояние после операции целиком, включая то,
+      // чего эта операция не трогала: формулировку и набор тегов.
       expect(updated.platformIds).toEqual([]);
+      expect(updated.title).toBe('Вход по телефону');
     });
 
     it('в ответе правки без тегов отдаёт текущий набор, а не присланный', async () => {

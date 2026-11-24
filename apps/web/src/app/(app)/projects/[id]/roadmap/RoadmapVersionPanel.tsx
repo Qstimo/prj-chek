@@ -16,6 +16,8 @@ import {
   useMutationReadLinkTitle,
   useMutationSaveVersion,
   useMutationUpdateCheckpoint,
+  useMutationUpdatePlacedTask,
+  useQueryTasks,
   useQueryRoadmap,
 } from '@/api/hooks';
 import { reportHrefOf } from '@/components/ReleaseReport';
@@ -51,6 +53,11 @@ export function RoadmapVersionPanel({
   const deleteVersion = useMutationDeleteVersion(projectId);
   const createCheckpoint = useMutationCreateCheckpoint(projectId);
   const updateCheckpoint = useMutationUpdateCheckpoint(projectId);
+  // Формулировку правит ручка задачи: у поля одно место записи.
+  const updatePlacedTask = useMutationUpdatePlacedTask(projectId);
+  // Реестр задач — мягким запросом: без него панель работает, просто
+  // взять готовую задачу будет нечем, а завести новую можно всегда.
+  const tasks = useQueryTasks(projectId, canWrite);
   const deleteCheckpoint = useMutationDeleteCheckpoint(projectId);
   const readLinkTitle = useMutationReadLinkTitle(projectId);
   const carryOverCheckpoint = useMutationCarryOverCheckpoint(projectId);
@@ -110,6 +117,7 @@ export function RoadmapVersionPanel({
       version={version}
       isCurrent={isCurrent}
       platforms={platforms}
+      looseTasks={(tasks.data ?? []).filter((task) => task.placement === null)}
       carryOverTargetLabel={carryOverTargetLabel}
       reportHref={reportHrefOf(projectId, version.id)}
       isOpen
@@ -121,8 +129,7 @@ export function RoadmapVersionPanel({
                 updateCheckpoint.mutate({ versionId: version.id, checkpointId, input: { isDone } }),
               onAddCheckpoint: (input) =>
                 createCheckpoint.mutate({ versionId: version.id, input }),
-              onEditCheckpoint: (checkpointId, input) =>
-                updateCheckpoint.mutate({ versionId: version.id, checkpointId, input }),
+              onEditCheckpoint: (taskId, input) => updatePlacedTask.mutate({ taskId, input }),
               onReadCheckpointTitle: (url) => readLinkTitle.mutateAsync(url),
               onDeleteCheckpoint: (checkpointId) =>
                 deleteCheckpoint.mutate({ versionId: version.id, checkpointId }),

@@ -28,6 +28,16 @@ export const checkpointUrlSchema = z.string().trim().url().max(2000).nullable();
  */
 export const roadmapCheckpointSchema = z.object({
   id: z.string().uuid(),
+  /**
+   * Задача, которую это размещение держит в версии.
+   *
+   * Чекпоинт — **размещение задачи**, а не формулировка: формулировка,
+   * ссылка и теги живут у задачи (`schemas/task.ts`) и приходят в этот
+   * ответ join'ом. Поэтому они здесь остались: экран роадмапа показывает
+   * их на месте, и второго запроса за ними делать незачем. Править их
+   * ручкой чекпоинта нельзя — у поля одно место записи.
+   */
+  taskId: z.string().uuid(),
   title: z.string(),
   isDone: z.boolean(),
   position: z.number().int().positive(),
@@ -121,29 +131,42 @@ export const roadmapVersionUpdateSchema = z
   })
   .strict();
 
-/** Создание чекпоинта: только формулировка. */
-export const roadmapCheckpointCreateSchema = z
-  .object({
-    title: z.string().trim().min(1).max(300),
-    url: checkpointUrlSchema.optional(),
-    /**
-     * Набор целиком: он правится целиком в одной форме чекпоинта.
-     * Отсутствие поля в правке означает «не трогать», пустой массив —
-     * «снять все»; иначе переключение галочки «закрыт» снесло бы теги.
-     */
-    platformIds: platformIdsSchema.optional(),
-  })
-  .strict();
+/**
+ * Создание чекпоинта — две формы одного действия, и ровно одна за раз.
+ *
+ * Либо кладём в версию **существующую** задачу реестра (она могла ждать
+ * вне версий), либо заводим новую вместе с размещением — путь, которым
+ * чекпоинты заводились всегда. Тело с обоими намерениями отвергается:
+ * сервер не решает за человека, какое из двух главнее. Пустое тело — тоже
+ * отказ: разместить нечего.
+ *
+ * Строгие объекты в обеих ветвях удерживают ограничение ТЗ 1.4: ни
+ * исполнителя, ни даты, ни оценки сюда не просунуть.
+ */
+export const roadmapCheckpointCreateSchema = z.union([
+  z.object({ taskId: z.string().uuid() }).strict(),
+  z
+    .object({
+      title: z.string().trim().min(1).max(300),
+      url: checkpointUrlSchema.optional(),
+      /** Набор целиком; отсутствие поля означает «без платформ». */
+      platformIds: platformIdsSchema.optional(),
+    })
+    .strict(),
+]);
 
-/** Правка чекпоинта: формулировка, признак, позиция. */
+/**
+ * Правка чекпоинта: только то, что принадлежит размещению.
+ *
+ * Формулировка, ссылка и теги платформ ушли к задаче, и это не косметика:
+ * у поля одно место записи. Пока они правились здесь, одна и та же задача
+ * в версии и в реестре могла называться по-разному, а «кто из двух прав» —
+ * вопрос без ответа.
+ */
 export const roadmapCheckpointUpdateSchema = z
   .object({
-    title: z.string().trim().min(1).max(300).optional(),
-    url: checkpointUrlSchema.optional(),
     isDone: z.boolean().optional(),
     position: z.number().int().positive().optional(),
-    /** Набор целиком; отсутствие поля не трогает теги. */
-    platformIds: platformIdsSchema.optional(),
   })
   .strict();
 
@@ -223,7 +246,9 @@ export const publicLinkSchema = z.object({
  * Схема строгая: лишнее поле — ошибка, а не молчаливое отбрасывание. Тихое
  * отбрасывание скрыло бы ошибку проекции вместо того, чтобы её показать.
  */
-export const publicCheckpointSchema = roadmapCheckpointSchema.omit({ url: true }).strict();
+export const publicCheckpointSchema = roadmapCheckpointSchema
+  .omit({ url: true, taskId: true })
+  .strict();
 
 /** Версия в публичной выдаче. */
 export const publicVersionSchema = roadmapVersionMetadataSchema.extend({

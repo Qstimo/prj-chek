@@ -55,6 +55,10 @@ function checkpoint(
 ) {
   return {
     id: `c-${title}`,
+    // Размещение и задача — разные строки, и отчёт видит обе склеенными:
+    // идентификаторы разные намеренно, иначе тест не заметил бы, что
+    // отчёт читает не то поле.
+    taskId: `t-${title}`,
     title,
     isDone: false,
     position: 1,
@@ -304,7 +308,15 @@ describe('releaseReportOf', () => {
         ...VERSION,
         releases: [],
         checkpoints: [
-          { id: 'c-1', title: 'Поиск', isDone: false, position: 1, url: null, platformIds: [] },
+          {
+            id: 'c-1',
+            taskId: 't-1',
+            title: 'Поиск',
+            isDone: false,
+            position: 1,
+            url: null,
+            platformIds: [],
+          },
         ],
       },
       { ...context, carriedFrom: new Map([['c-1', 'v1.1']]) },

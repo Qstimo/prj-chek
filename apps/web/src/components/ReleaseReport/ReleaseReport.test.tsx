@@ -50,6 +50,7 @@ const report: ReleaseReportData = {
   checkpoints: [
     {
       id: 'c1',
+      taskId: 't-c1',
       title: 'Оплата',
       isDone: true,
       position: 1,
@@ -59,6 +60,7 @@ const report: ReleaseReportData = {
     },
     {
       id: 'c2',
+      taskId: 't-c2',
       title: 'Отчёты',
       isDone: false,
       position: 2,
@@ -70,6 +72,7 @@ const report: ReleaseReportData = {
   carriedOut: [
     {
       id: 'c3',
+      taskId: 't-c3',
       title: 'Экспорт',
       isDone: false,
       position: 3,

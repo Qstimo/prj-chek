@@ -155,6 +155,7 @@ describe('схема переноса чекпоинта', () => {
     const result = checkpointCarryOverResultSchema.parse({
       checkpoint: {
         id: '66666666-6666-4666-8666-666666666666',
+        taskId: '66666666-6666-4666-8666-666666666667',
         title: 'Оплата',
         isDone: false,
         position: 4,
@@ -177,8 +178,30 @@ describe('схема переноса чекпоинта', () => {
 });
 
 describe('схема чекпоинта', () => {
-  it('принимает формулировку', () => {
-    expect(roadmapCheckpointCreateSchema.parse({ title: 'Готов вход' }).title).toBe('Готов вход');
+  const taskId = '33333333-3333-4333-8333-333333333333';
+
+  it('принимает формулировку: задача заводится вместе с размещением', () => {
+    const parsed = roadmapCheckpointCreateSchema.parse({ title: 'Готов вход' });
+
+    expect('title' in parsed && parsed.title).toBe('Готов вход');
+  });
+
+  it('принимает существующую задачу вместо формулировки', () => {
+    // Задача живёт в реестре проекта и может ждать вне версии: положить
+    // её в версию — это ссылка, а не вторая формулировка.
+    const parsed = roadmapCheckpointCreateSchema.parse({ taskId });
+
+    expect('taskId' in parsed && parsed.taskId).toBe(taskId);
+  });
+
+  it('отвергает и то и то сразу', () => {
+    // Два намерения в одном теле: завести новую задачу и положить
+    // существующую. Сервер не решает за человека, какое из них главнее.
+    expect(() => roadmapCheckpointCreateSchema.parse({ taskId, title: 'Готов вход' })).toThrow();
+  });
+
+  it('отвергает пустое тело', () => {
+    expect(() => roadmapCheckpointCreateSchema.parse({})).toThrow();
   });
 
   it('отвергает лишние поля — у чекпоинта нет исполнителей и дат', () => {
@@ -195,11 +218,20 @@ describe('схема чекпоинта', () => {
 describe('ссылка на задачу у чекпоинта', () => {
   const checkpoint = {
     id: '11111111-1111-4111-8111-111111111111',
+    taskId: '11111111-1111-4111-8111-111111111112',
     title: 'Перевести биллинг',
     isDone: false,
     position: 1,
     platformIds: [],
   };
+
+  /**
+   * Тот же чекпоинт без двух полей — ровно то, что отдаёт проекция.
+   *
+   * Снаружи ни ссылки на трекер, ни задачи реестра не существует, и
+   * `taskId` был бы идентификатором, по которому снаружи нечего спросить.
+   */
+  const { url: _publicUrl, taskId: _publicTaskId, ...publicCheckpoint } = checkpoint;
 
   it('принимает ссылку на задачу', () => {
     const parsed = roadmapCheckpointSchema.parse({
@@ -255,7 +287,7 @@ describe('ссылка на задачу у чекпоинта', () => {
       unfinished: 1,
       hasUnfinishedOnRelease: false,
       releases: [],
-      checkpoints: [checkpoint],
+      checkpoints: [publicCheckpoint],
     };
 
     expect(() =>
@@ -282,7 +314,7 @@ describe('ссылка на задачу у чекпоинта', () => {
       unfinished: 1,
       hasUnfinishedOnRelease: true,
       releases: [],
-      checkpoints: [checkpoint],
+      checkpoints: [publicCheckpoint],
     };
 
     expect(() =>
@@ -306,6 +338,7 @@ describe('схема отчёта по релизу', () => {
 
   const CHECKPOINT = {
     id: '88888888-8888-4888-8888-888888888888',
+    taskId: '88888888-8888-4888-8888-888888888889',
     title: 'Оплата',
     isDone: true,
     position: 1,
@@ -483,21 +516,30 @@ describe('платформы в роадмапе', () => {
       platformIds: ['44444444-4444-4444-8444-444444444444'],
     };
 
+    // `taskId` в публичной выдаче нет намеренно: снаружи задачи реестра
+    // не существует, и идентификатор, по которому её не спросить, —
+    // лишний след наружу.
     expect(publicCheckpointSchema.parse(fields).platformIds).toHaveLength(1);
+    expect(() =>
+      publicCheckpointSchema.parse({ ...fields, taskId: '33333333-3333-4333-8333-333333333334' }),
+    ).toThrow();
     expect(() => publicCheckpointSchema.parse({ ...fields, url: 'https://tracker/1' })).toThrow();
   });
 
-  it('правка чекпоинта принимает набор тегов и отвергает повторы', () => {
+  it('правка чекпоинта правит только размещение', () => {
     const platformId = '44444444-4444-4444-8444-444444444444';
 
-    // Положительный случай обязателен: схема и так строгая, и без него
-    // тест прошёл бы на неизвестном ключе, а не на проверке повторов.
-    expect(roadmapCheckpointUpdateSchema.parse({ platformIds: [platformId] }).platformIds).toEqual(
-      [platformId],
-    );
-    expect(() =>
-      roadmapCheckpointUpdateSchema.parse({ platformIds: [platformId, platformId] }),
-    ).toThrow();
+    // Формулировка, ссылка и теги принадлежат задаче и правятся её
+    // ручкой: второе место для того же поля разошлось бы с первым, и
+    // тогда одна и та же задача в версии и в реестре называлась бы
+    // по-разному.
+    expect(roadmapCheckpointUpdateSchema.parse({ isDone: true, position: 2 })).toEqual({
+      isDone: true,
+      position: 2,
+    });
+    expect(() => roadmapCheckpointUpdateSchema.parse({ title: 'Другая' })).toThrow();
+    expect(() => roadmapCheckpointUpdateSchema.parse({ url: null })).toThrow();
+    expect(() => roadmapCheckpointUpdateSchema.parse({ platformIds: [platformId] })).toThrow();
   });
 
   it('ответ роадмапа несёт сводку релизов', () => {

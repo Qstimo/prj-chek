@@ -1,4 +1,4 @@
-import type { RoadmapCheckpointCreate } from '@cairn/shared';
+import type { CheckpointFormPayload } from './types';
 
 /** Что нужно знать, чтобы решить, идти ли за заголовком. */
 interface IReadArgs {
@@ -48,7 +48,7 @@ export function submitValuesOf({
   url,
   platformIds,
   hasPlatforms,
-}: SubmitValues): RoadmapCheckpointCreate {
+}: SubmitValues): CheckpointFormPayload {
   return {
     title: title.trim(),
     url: url.trim() || null,
