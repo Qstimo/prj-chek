@@ -47,16 +47,14 @@ const MAX_RESPONSE_CHARS = 2_000_000;
 /**
  * Сколько строк просим на страницу списка.
  *
- * **Имена параметров пагинации живым токеном не проверены** (дизайн, 10.4):
- * `perPage` и `offset` взяты как самые вероятные у публичного REST. Сотня —
- * не выдумка: это общий предел страницы у таких API, и просить больше
- * значило бы рисковать отказом «страница слишком велика» там, где отказ
- * роняет весь обход.
+ * `perPage` и `offset` документированы для `/tm/tasks`; живой обмен пока
+ * не проверен токеном. Каталогам привязки эти параметры не передаются.
+ * Размер страницы ограничивает объём ответа при опросе доски.
  *
  * Поведение не зависит от того, понял ли сервер эти имена: страница короче
  * просимой кончает обход, а страница, пришедшая той же (сервер проигнорировал
  * смещение), кончает его повтором идентификаторов — см. {@link listed}.
- * Поэтому неверная догадка стоит одного лишнего запроса, а не зеркала.
+ * Эти условия защищают от бесконечного обхода при игнорировании смещения.
  */
 export const TRACKER_LIST_PAGE_SIZE = 100;
 
@@ -241,37 +239,45 @@ export class WeeekTracker implements Tracker {
   /**
    * Списки для привязки: проекты, доски и колонки.
    *
-   * Три запроса разом, а не по очереди: списки независимы, и человек ждёт
-   * один раз вместо трёх. Отказ любого роняет всю операцию — привязка
-   * собирается из трёх списков, и форма с двумя предложила бы выбрать
-   * колонку из пустоты.
-   *
-   * Каждый список листается до исчерпания, тем же правилом, что задачи: в
-   * установке с сотнями досок привязку иначе нельзя было бы поставить вовсе,
-   * а выглядело бы это как «у вас нет такой доски» — самый вводящий в
-   * заблуждение ответ, он отправляет человека завести доску, которая у него
-   * уже есть.
+   * Weeek требует projectId для досок и boardId для колонок: сначала
+   * проекты, затем доски каждого проекта и колонки каждой доски. Каталоги
+   * возвращаются целиком; параметры пагинации документированы у задач,
+   * но не у этих трёх ручек. Общий предел ожидания ограничивает весь обход.
    */
   async targets(signal: AbortSignal): Promise<TrackerTargets> {
-    const [projects, boards, columns] = await Promise.all([
-      this.listed('/tm/projects', {}, ['projects'], signal),
-      this.listed('/tm/boards', {}, ['boards'], signal),
-      this.listed(
-        '/tm/board-columns',
-        {},
-        ['boardColumns', 'board_columns', 'columns'],
-        signal,
-      ),
-    ]);
+    signal = AbortSignal.any([signal, AbortSignal.timeout(this.#settings.timeoutSeconds * 1000)]);
+    const projects = identified(
+      arrayOf(await this.exchange('/tm/projects', { method: 'GET' }, signal), ['projects']),
+      () => ({}),
+    );
+    const boards = new Map<string, TrackerTargets['boards'][number]>();
+    const columns = new Map<string, TrackerTargets['columns'][number]>();
+
+    for (const project of projects) {
+      const boardQuery = new URLSearchParams({ projectId: project.id });
+      const payload = await this.exchange(`/tm/boards?${boardQuery}`, { method: 'GET' }, signal);
+      const projectBoards = identified(arrayOf(payload, ['boards']), () => ({ projectId: project.id }));
+
+      for (const board of projectBoards) {
+        if (boards.has(board.id)) continue;
+        boards.set(board.id, board);
+
+        const columnQuery = new URLSearchParams({ boardId: board.id });
+        const columnPayload = await this.exchange(
+          `/tm/board-columns?${columnQuery}`, { method: 'GET' }, signal,
+        );
+        const boardColumns = identified(
+          arrayOf(columnPayload, ['boardColumns', 'board_columns', 'columns']),
+          () => ({ boardId: board.id }),
+        );
+        for (const column of boardColumns) columns.set(column.id, column);
+      }
+    }
 
     return {
-      projects: identified(projects, () => ({})),
-      boards: identified(boards, (row) => ({
-        projectId: idOf(row.projectId),
-      })),
-      columns: identified(columns, (row) => ({
-        boardId: idOf(row.boardId),
-      })),
+      projects,
+      boards: [...boards.values()],
+      columns: [...columns.values()],
     };
   }
 
@@ -327,9 +333,8 @@ export class WeeekTracker implements Tracker {
   /**
    * Список целиком: страница за страницей, пока они не кончатся.
    *
-   * Общий на задачи доски и на три списка привязки, потому что правило
-   * остановки у них обязано совпадать: обход, устроенный в двух местах
-   * по-разному, в одном из них рано или поздно прочитает одну страницу.
+   * Используется для задач доски. Каталоги проектов, досок и колонок
+   * читаются отдельно: у них другой контракт параметров.
    *
    * Обход кончается по одному из трёх условий, и каждое отвечает за свой
    * случай:
@@ -422,9 +427,13 @@ export class WeeekTracker implements Tracker {
       // `429` и `5xx` — «не ответил», всё прочее — «отказал»: различие в
       // том, что делать, а не в том, что случилось. Первое лечится
       // повтором, второе — правкой настройки.
-      throw response.status === 429 || response.status >= 500
-        ? this.unavailable(`узел ответил ${response.status}`)
-        : this.rejected(`узел ответил ${response.status}`);
+      if (response.status === 429 || response.status >= 500) {
+        throw this.unavailable(`узел ответил ${response.status}`);
+      }
+      const reason = response.status === 401 || response.status === 403
+        ? `токен не принят или недостаточно прав (HTTP ${response.status})`
+        : `запрос ${init.method} ${path.split('?')[0]} отклонён (HTTP ${response.status})`;
+      throw this.rejected(reason);
     }
 
     let payload: string;

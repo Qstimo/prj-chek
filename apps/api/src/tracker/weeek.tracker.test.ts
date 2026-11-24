@@ -371,9 +371,7 @@ describe('WeeekTracker', () => {
   });
 
   describe('targets', () => {
-    it('спрашивает проекты, доски и колонки тремя запросами', async () => {
-      // Три списка, а не дерево: Weeek отдаёт их тремя ручками, и дерево
-      // спрятало бы, какая вернулась пустой.
+    it('спрашивает доски с projectId, а колонки с boardId', async () => {
       fetchMock.mockImplementation((url: string) => {
         if (url.includes('/tm/projects')) {
           return Promise.resolve(json({ success: true, projects: [{ id: 7, name: 'CAIRN' }] }));
@@ -397,6 +395,11 @@ describe('WeeekTracker', () => {
         boards: [{ id: '11', name: 'Разработка', projectId: '7' }],
         columns: [{ id: '31', name: 'Бэклог', boardId: '11' }],
       });
+      expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+        'https://api.weeek.net/public/v1/tm/projects',
+        'https://api.weeek.net/public/v1/tm/boards?projectId=7',
+        'https://api.weeek.net/public/v1/tm/board-columns?boardId=11',
+      ]);
     });
 
     it('цель без идентификатора в список не попадает', async () => {
@@ -428,33 +431,52 @@ describe('WeeekTracker', () => {
       });
     });
 
-    it('листает каждый из трёх списков: доска со второй страницы выбирается', async () => {
-      // Списки привязки листаются тем же правилом, что задачи: доска,
-      // не попавшая в первую сотню, иначе не выбиралась бы вовсе — и человек
-      // пошёл бы заводить доску, которая у него уже есть.
+    it('обходит каждый проект и доску, сохраняя родителя из запроса', async () => {
       fetchMock.mockImplementation((url: string) => {
-        if (url.includes('/tm/boards')) {
-          return Promise.resolve(
-            json({
-              success: true,
-              boards: new URL(url).searchParams.get('offset') === '0'
-                ? fullPage('доска')
-                : [{ id: 999, name: 'Поздняя', projectId: 7 }],
-            }),
-          );
+        const request = new URL(url);
+        expect(request.searchParams.has('perPage')).toBe(false);
+        expect(request.searchParams.has('offset')).toBe(false);
+        if (request.pathname.endsWith('/projects')) {
+          return Promise.resolve(json({ success: true, projects: [{ id: 7 }, { id: 8 }] }));
         }
-
-        if (url.includes('/tm/projects')) {
-          return Promise.resolve(json({ success: true, projects: [{ id: 7, name: 'CAIRN' }] }));
+        if (request.pathname.endsWith('/boards')) {
+          const projectId = request.searchParams.get('projectId');
+          expect(['7', '8']).toContain(projectId);
+          return Promise.resolve(json({ success: true, boards: [{ id: projectId === '7' ? 11 : 12 }] }));
         }
-
-        return Promise.resolve(json({ success: true, boardColumns: [] }));
+        const boardId = request.searchParams.get('boardId');
+        expect(['11', '12']).toContain(boardId);
+        return Promise.resolve(json({ success: true, boardColumns: [{ id: boardId === '11' ? 31 : 32 }] }));
       });
 
       const targets = await tracker().targets(AbortSignal.timeout(1000));
 
-      expect(targets.boards).toHaveLength(TRACKER_LIST_PAGE_SIZE + 1);
-      expect(targets.boards.at(-1)).toEqual({ id: '999', name: 'Поздняя', projectId: '7' });
+      expect(targets.boards).toEqual([
+        { id: '11', name: '', projectId: '7' }, { id: '12', name: '', projectId: '8' },
+      ]);
+      expect(targets.columns).toEqual([
+        { id: '31', name: '', boardId: '11' }, { id: '32', name: '', boardId: '12' },
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+    });
+
+    it('без проектов не спрашивает доски и колонки без обязательных параметров', async () => {
+      fetchMock.mockResolvedValue(json({ success: true, projects: [] }));
+      await expect(tracker().targets(AbortSignal.timeout(1000))).resolves.toEqual({
+        projects: [], boards: [], columns: [],
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('422 на досках сообщает путь и HTTP-код, не обвиняя токен и не раскрывая тело', async () => {
+      fetchMock.mockResolvedValueOnce(json({ success: true, projects: [{ id: 7 }] }))
+        .mockResolvedValueOnce(json({ message: TOKEN }, 422));
+      const cause = await tracker().targets(AbortSignal.timeout(1000)).catch((error: Error) => error);
+      expect(cause).toBeInstanceOf(TrackerFailure);
+      expect((cause as Error).message).toContain('GET /tm/boards');
+      expect((cause as Error).message).toContain('HTTP 422');
+      expect((cause as Error).message).not.toContain('токен');
+      expect((cause as Error).message).not.toContain(TOKEN);
     });
   });
 

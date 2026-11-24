@@ -2,6 +2,7 @@ import {
   TRACKER_BASE_URL_MISSING,
   TRACKER_DISABLED,
   TRACKER_NOT_CONFIGURED,
+  TRACKER_REJECTED,
   TRACKER_SECRET_MISSING,
   TRACKER_UNAVAILABLE,
   TrackerKind,
@@ -71,6 +72,18 @@ beforeEach(() => {
 });
 
 describe('TrackerBindingPanel', () => {
+  it('показывает причину отказа запроса, не подменяя её ошибкой токена', async () => {
+    const message = 'Обмен с трекером не удался: api.weeek.net — запрос GET /tm/boards отклонён (HTTP 422).';
+    vi.mocked(hooks.useQueryTrackerTargets).mockReturnValue(query(undefined, {
+      isError: true,
+      error: new ApiError(502, message, { code: TRACKER_REJECTED }),
+    }));
+    render(<TrackerBindingPanel projectId={PROJECT_ID} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Выбрать доску Weeek' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(screen.queryByText(/токен не принят/)).not.toBeInTheDocument();
+  });
+
   it('при выключенном трекере панели нет вовсе, и сказано почему', async () => {
     // Та же лестница, что у загрузки записи при выключенной расшифровке:
     // кнопки нет, а причина названа — иначе человек ищет её по экрану.

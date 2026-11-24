@@ -101,7 +101,8 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
   const failure = summaryFailureOf(targets.error ?? save.error);
   const error =
     (failure.code && BINDING_FAILURES[failure.code]) ??
-    (targets.isError ? BINDING_TEXTS.loadFailed : describeApiError(save.error));
+    describeApiError(targets.error ?? save.error) ??
+    (targets.isError ? BINDING_TEXTS.loadFailed : undefined);
 
   return (
     <section className="space-y-2 rounded-md border border-border p-4">

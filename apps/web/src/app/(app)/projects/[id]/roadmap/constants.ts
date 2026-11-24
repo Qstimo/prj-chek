@@ -1,7 +1,6 @@
 import {
   TRACKER_DISABLED,
   TRACKER_NOT_CONFIGURED,
-  TRACKER_REJECTED,
   TRACKER_SECRET_MISSING,
   TRACKER_SECRET_UNDECRYPTABLE,
   TRACKER_UNAVAILABLE,
@@ -66,6 +65,4 @@ export const BINDING_FAILURES: Record<string, string> = {
   [TRACKER_NOT_CONFIGURED]:
     'Трекер задач не подключён: спросить списки досок не у кого. Подключение настраивает администратор.',
   [TRACKER_UNAVAILABLE]: 'Трекер не ответил. Попробуйте ещё раз.',
-  [TRACKER_REJECTED]:
-    'Трекер отказал: токен не принят или пространство не то. Это правит администратор.',
 };
