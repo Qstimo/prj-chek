@@ -53,6 +53,8 @@ export type TrackerImportPreview = z.infer<typeof trackerImportPreviewSchema>;
 export const trackerImportRequestSchema = z
   .object({
     boardId: z.string().trim().min(1).max(100),
+    /** Нет поля — ближайший разрабатываемый релиз; null — вне релиза. */
+    versionId: z.string().uuid().nullable().optional(),
     externalIds: z
       .array(z.string().regex(/^[1-9]\d*$/))
       .min(1)

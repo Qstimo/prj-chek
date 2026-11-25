@@ -2,6 +2,7 @@ import { TaskImportsController } from './task-imports.controller';
 import { TaskImportsService } from './task-imports.service';
 import { TaskImportsRepository } from './task-imports.repository';
 import { Module } from '@nestjs/common';
+import { TaskPlanningModule } from '../tasks/task-planning.module';
 
 import { AccessModule } from '../access/access.module';
 import { AuditModule } from '../audit/audit.module';
@@ -15,10 +16,7 @@ import { TrackerBindingsRepository } from './tracker-bindings.repository';
 import { TrackerConnectionService } from './tracker-connection.service';
 import { TrackerConnectionsRepository } from './tracker-connections.repository';
 import { TRACKER_SOURCE } from './tracker';
-import {
-  TRACKER_POLL_LOCK_DB,
-  TrackerPollRunnerService,
-} from './tracker-poll-runner.service';
+import { TRACKER_POLL_LOCK_DB, TrackerPollRunnerService } from './tracker-poll-runner.service';
 import { TrackerController } from './tracker.controller';
 import { TrackerService } from './tracker.service';
 import { TrackerConnectionSource } from './tracker.source';
@@ -46,8 +44,13 @@ import { TrackerConnectionSource } from './tracker.source';
  * `AuthModule` обязателен: все три контроллера висят на `SessionGuard`.
  */
 @Module({
-  imports: [DbModule, AccessModule, AuditModule, AuthModule],
-  controllers: [TaskImportsController, TrackerController, ProjectTrackerController, TaskExportsController],
+  imports: [DbModule, AccessModule, AuditModule, AuthModule, TaskPlanningModule],
+  controllers: [
+    TaskImportsController,
+    TrackerController,
+    ProjectTrackerController,
+    TaskExportsController,
+  ],
   providers: [
     TaskImportsService,
     TaskImportsRepository,

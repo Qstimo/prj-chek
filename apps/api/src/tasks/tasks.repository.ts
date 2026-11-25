@@ -77,6 +77,7 @@ export class TasksRepository {
         id: projectTasks.id,
         projectId: projectTasks.projectId,
         title: projectTasks.title,
+        completionRule: projectTasks.completionRule,
         url: projectTasks.url,
         origin: projectTasks.origin,
         sourceSummaryId: projectTasks.sourceSummaryId,
@@ -125,6 +126,7 @@ export class TasksRepository {
       id: row.id,
       projectId: row.projectId,
       title: row.title,
+      completionRule: row.completionRule,
       url: row.url,
       origin: row.origin,
       sourceSummaryId: row.sourceSummaryId,
@@ -353,10 +355,7 @@ export class TasksRepository {
   }
 
   /** Теги набора задач по порядку платформ, одним запросом. */
-  private async tagsOf(
-    executor: Executor,
-    taskIds: string[],
-  ): Promise<Map<string, string[]>> {
+  private async tagsOf(executor: Executor, taskIds: string[]): Promise<Map<string, string[]>> {
     const tags = new Map<string, string[]>();
 
     if (taskIds.length === 0) {
@@ -399,7 +398,9 @@ export class TasksRepository {
       const chosen = await tx
         .select({ id: projectPlatforms.id })
         .from(projectPlatforms)
-        .where(and(eq(projectPlatforms.projectId, projectId), inArray(projectPlatforms.id, unique)));
+        .where(
+          and(eq(projectPlatforms.projectId, projectId), inArray(projectPlatforms.id, unique)),
+        );
 
       if (chosen.length !== unique.length) {
         throw new SectionNotVisibleError();

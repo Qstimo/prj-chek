@@ -55,7 +55,7 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
         <p className="text-sm text-amber-600 dark:text-amber-500">
           {blockedBy === TRACKER_BASE_URL_MISSING
             ? 'Подключите Weeek, чтобы отправлять задачи на доску и видеть их статус здесь.'
-            : (blockedBy && BINDING_BLOCKED[blockedBy]) ?? 'Трекер задач не подключён.'}
+            : ((blockedBy && BINDING_BLOCKED[blockedBy]) ?? 'Трекер задач не подключён.')}
         </p>
         <p className="text-sm text-muted-foreground">{BINDING_TEXTS.adminNote}</p>
       </section>
@@ -114,9 +114,12 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
         <p className="text-sm text-muted-foreground">
           {targets.data
             ? [
-                targets.data.projects.find((item) => item.id === binding.externalProjectId)?.name ?? 'Проект недоступен',
-                targets.data.boards.find((item) => item.id === binding.boardId)?.name ?? 'Доска недоступна',
-                targets.data.columns.find((item) => item.id === binding.boardColumnId)?.name ?? 'Колонка недоступна',
+                targets.data.projects.find((item) => item.id === binding.externalProjectId)?.name ??
+                  'Проект недоступен',
+                targets.data.boards.find((item) => item.id === binding.boardId)?.name ??
+                  'Доска недоступна',
+                targets.data.columns.find((item) => item.id === binding.boardColumnId)?.name ??
+                  'Колонка недоступна',
               ].join(' → ')
             : targets.isError
               ? 'Не удалось загрузить названия доски и колонки. Откройте выбор доски, чтобы повторить.'
@@ -134,13 +137,21 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
       </button>
 
       <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
-        <li>Выберите доску и колонку Weeek для новых задач этого проекта.</li>
-        <li>Отметьте задачи ниже и нажмите «Выгрузить выбранные». Ссылка и статус появятся в колонке «Выгрузка».</li>
-        <li>Статус из Weeek обновляется автоматически. Повторная выгрузка обновит формулировку в Weeek.</li>
+        <li>Выберите одну доску Weeek для проекта и колонку для новых задач.</li>
+        <li>
+          Вернитесь во вкладку «Задачи», отметьте строки и нажмите «Выгрузить выбранные». Ссылка и
+          статус появятся в колонке «Выгрузка».
+        </li>
+        <li>
+          Статус из Weeek обновляется автоматически. Повторная выгрузка обновит формулировку в
+          Weeek.
+        </li>
       </ol>
       <p className="text-sm text-muted-foreground">
-        Синхронизация получает статус из Weeek. Закрытие задачи в роадмапе остаётся за вами;
-        различие статусов будет видно в таблице. Если ссылка Weeek уже есть, нажмите у задачи «Связать с Weeek»: новая задача не создаётся.
+        Синхронизация с Weeek выполняется каждые 10 минут. У задачи в «Релиз и выполнение» можно
+        включить автоматическое завершение по колонке Weeek. Без правила статус только отображается.
+        Импорт позволяет сразу выбрать релиз. Если ссылка Weeek уже есть, нажмите «Связать с Weeek»:
+        новая задача не создаётся.
       </p>
 
       <Drawer
@@ -190,7 +201,10 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                   }
                 />
                 {targets.data.projects.length === 0 && (
-                  <p className="text-sm text-muted-foreground">В Weeek пока нет доступных проектов. Создайте проект и доску в Weeek, затем откройте эту панель заново.</p>
+                  <p className="text-sm text-muted-foreground">
+                    В Weeek пока нет доступных проектов. Создайте проект и доску в Weeek, затем
+                    откройте эту панель заново.
+                  </p>
                 )}
 
                 <TargetSelect
@@ -204,7 +218,9 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                 />
 
                 {draft.externalProjectId !== '' && boards.length === 0 && (
-                  <p className="text-sm text-muted-foreground">У выбранного проекта нет доступных досок.</p>
+                  <p className="text-sm text-muted-foreground">
+                    У выбранного проекта нет доступных досок.
+                  </p>
                 )}
 
                 <TargetSelect
@@ -217,7 +233,9 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                   }
                 />
                 {draft.boardId !== '' && columns.length === 0 && (
-                  <p className="text-sm text-muted-foreground">На этой доске нет доступных колонок. Добавьте колонку в Weeek.</p>
+                  <p className="text-sm text-muted-foreground">
+                    На этой доске нет доступных колонок. Добавьте колонку в Weeek.
+                  </p>
                 )}
 
                 <button

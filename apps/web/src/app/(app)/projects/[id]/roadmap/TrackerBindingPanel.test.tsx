@@ -73,11 +73,14 @@ beforeEach(() => {
 
 describe('TrackerBindingPanel', () => {
   it('показывает причину отказа запроса, не подменяя её ошибкой токена', async () => {
-    const message = 'Обмен с трекером не удался: api.weeek.net — запрос GET /tm/boards отклонён (HTTP 422).';
-    vi.mocked(hooks.useQueryTrackerTargets).mockReturnValue(query(undefined, {
-      isError: true,
-      error: new ApiError(502, message, { code: TRACKER_REJECTED }),
-    }));
+    const message =
+      'Обмен с трекером не удался: api.weeek.net — запрос GET /tm/boards отклонён (HTTP 422).';
+    vi.mocked(hooks.useQueryTrackerTargets).mockReturnValue(
+      query(undefined, {
+        isError: true,
+        error: new ApiError(502, message, { code: TRACKER_REJECTED }),
+      }),
+    );
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
     await userEvent.click(screen.getByRole('button', { name: 'Выбрать доску Weeek' }));
     expect(screen.getByRole('alert')).toHaveTextContent(message);
@@ -109,16 +112,25 @@ describe('TrackerBindingPanel', () => {
   });
 
   it('показывает привязанную доску и колонку без открытия панели', () => {
-    vi.mocked(hooks.useQueryProjectTracker).mockReturnValue(query({
-      ...READY,
-      binding: { tracker: TrackerKind.Weeek, externalProjectId: '7', boardId: '11',
-        boardColumnId: '31', updatedAt: '2026-11-20T10:00:00.000Z', updatedByLabel: null },
-    }));
+    vi.mocked(hooks.useQueryProjectTracker).mockReturnValue(
+      query({
+        ...READY,
+        binding: {
+          tracker: TrackerKind.Weeek,
+          externalProjectId: '7',
+          boardId: '11',
+          boardColumnId: '31',
+          updatedAt: '2026-11-20T10:00:00.000Z',
+          updatedByLabel: null,
+        },
+      }),
+    );
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
     expect(screen.getByText('Платформа → Спринт → Бэклог')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Сменить доску Weeek' })).toBeInTheDocument();
     expect(vi.mocked(hooks.useQueryTrackerTargets)).toHaveBeenCalledWith(PROJECT_ID, true);
-    expect(screen.getByText(/Закрытие задачи в роадмапе остаётся за вами/)).toBeInTheDocument();
+    expect(screen.getByText(/каждые 10 минут/)).toBeInTheDocument();
+    expect(screen.getByText(/Без правила статус только отображается/)).toBeInTheDocument();
   });
 
   it('без токена причина названа токеном, а не общим «не настроено»', () => {

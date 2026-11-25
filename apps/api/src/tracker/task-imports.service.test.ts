@@ -5,6 +5,7 @@ import {
   type TrackerImportQuery,
 } from '@cairn/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TaskPlanningRepository } from '../tasks/task-planning.repository';
 import type { AuditService } from '../audit/audit.service';
 import type { Database } from '../db/db.types';
 import type { TaskExportsRepository } from './task-exports.repository';
@@ -87,8 +88,11 @@ describe('подтверждение импорта', () => {
   const known = vi.fn();
   const record = vi.fn();
   let service: TaskImportsService;
+  const resolveVersion = vi.fn();
+  const assign = vi.fn();
   beforeEach(() => {
     vi.resetAllMocks();
+    resolveVersion.mockResolvedValue(null);
     readImportTasks.mockResolvedValue({
       tasks: [task],
       people: [],
@@ -115,12 +119,36 @@ describe('подтверждение импорта', () => {
         current: async () =>
           ({ kind: TrackerKind.Weeek, isEnabled: true, readImportTasks }) as unknown as Tracker,
       } as TrackerSource,
+      { resolveVersion, assign } as unknown as TaskPlanningRepository,
     );
   });
   it('проверяет право до внешнего вызова', async () => {
     requireWrite.mockRejectedValue(new Error('403'));
     await expect(service.preview(subject, 'project', filter)).rejects.toThrow('403');
     expect(readImportTasks).not.toHaveBeenCalled();
+  });
+  it('не читает задачи другой доски даже из того же пространства', async () => {
+    await expect(
+      service.preview(subject, 'project', { ...filter, boardId: 'other' }),
+    ).rejects.toThrow('только с доски');
+    expect(readImportTasks).not.toHaveBeenCalled();
+  });
+  it('ставит новые задачи в выбранный сервером релиз в той же транзакции', async () => {
+    resolveVersion.mockResolvedValue('release');
+    await service.import(subject, 'project', { boardId: '11', externalIds: ['42'] });
+    expect(resolveVersion).toHaveBeenCalledWith(subject, expect.anything(), 'project', undefined);
+    expect(assign).toHaveBeenCalledWith(subject, expect.anything(), 'project', 'local', {
+      versionId: 'release',
+    });
+  });
+  it('явное «вне релиза» не заменяется автоматическим выбором', async () => {
+    await service.import(subject, 'project', {
+      boardId: '11',
+      externalIds: ['42'],
+      versionId: null,
+    });
+    expect(resolveVersion).toHaveBeenCalledWith(subject, expect.anything(), 'project', null);
+    expect(assign).not.toHaveBeenCalled();
   });
   it('перечитывает внешнюю задачу и создаёт её только из серверных данных', async () => {
     const results = await service.import(subject, 'project', {

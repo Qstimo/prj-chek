@@ -1,0 +1,1 @@
+ALTER TABLE "project_tasks" ADD COLUMN "completion_rule" jsonb;
