@@ -13,14 +13,16 @@ export function TaskPlanningPanel({
   task,
   binding,
   onClose,
+  showTracker = true,
 }: {
   projectId: string;
   task: ProjectTask;
   binding: TrackerBinding | null;
   onClose: () => void;
+  showTracker?: boolean;
 }) {
   const roadmap = useQueryRoadmap(projectId);
-  const targets = useQueryTrackerTargets(projectId, !!task.export && !!binding);
+  const targets = useQueryTrackerTargets(projectId, showTracker && !!task.export && !!binding);
   const save = useMutationPlanTask(projectId);
   const [versionId, setVersionId] = useState(task.placement?.versionId ?? '');
   const [done, setDone] = useState(task.placement?.isDone ?? false);
@@ -91,43 +93,47 @@ export function TaskPlanningPanel({
             Выполнена в релизе
           </label>
         )}
-        <label className="block space-y-1 text-sm">
-          <span>Автоматически выполнить при попадании в колонку Weeek</span>
-          <Select value={columnId} onChange={setColumnId}>
-            <option value="">Не завершать автоматически</option>
-            {canAutomate &&
-              columns.map((column) => (
-                <option key={column.id} value={column.id}>
-                  {column.name}
-                </option>
-              ))}
-            {columnId && !columns.some((column) => column.id === columnId) && (
-              <option value={columnId}>Сохранённая колонка {columnId}</option>
+        {showTracker && (
+          <>
+            <label className="block space-y-1 text-sm">
+              <span>Автоматически выполнить при попадании в колонку Weeek</span>
+              <Select value={columnId} onChange={setColumnId}>
+                <option value="">Не завершать автоматически</option>
+                {canAutomate &&
+                  columns.map((column) => (
+                    <option key={column.id} value={column.id}>
+                      {column.name}
+                    </option>
+                  ))}
+                {columnId && !columns.some((column) => column.id === columnId) && (
+                  <option value={columnId}>Сохранённая колонка {columnId}</option>
+                )}
+              </Select>
+            </label>
+            {!canAutomate && (
+              <p className="text-sm text-muted-foreground">
+                Для включения правила свяжите задачу с доской проекта. Сохранённое правило можно
+                отключить.
+              </p>
             )}
-          </Select>
-        </label>
-        {!canAutomate && (
-          <p className="text-sm text-muted-foreground">
-            Для включения правила свяжите задачу с доской проекта. Сохранённое правило можно
-            отключить.
-          </p>
+            {task.completionRule && task.completionRule.boardId !== binding?.boardId && (
+              <p className="text-sm text-muted-foreground">
+                Сохранённое правило относится к прежней доске и сейчас не действует. Выберите
+                колонку текущей доски или отключите правило.
+              </p>
+            )}
+            {targets.isError && (
+              <p className="text-sm text-destructive">
+                Не удалось получить колонки Weeek. Сохранённое правило можно оставить или отключить.
+              </p>
+            )}
+            <p className="text-sm text-muted-foreground">
+              Проверяем Weeek каждые 10 минут. Правило отмечает задачу выполненной в её релизе и
+              меняет его прогресс. Возврат в другую колонку не открывает задачу заново. Без релиза
+              правило ожидает размещения.
+            </p>
+          </>
         )}
-        {task.completionRule && task.completionRule.boardId !== binding?.boardId && (
-          <p className="text-sm text-muted-foreground">
-            Сохранённое правило относится к прежней доске и сейчас не действует. Выберите колонку
-            текущей доски или отключите правило.
-          </p>
-        )}
-        {targets.isError && (
-          <p className="text-sm text-destructive">
-            Не удалось получить колонки Weeek. Сохранённое правило можно оставить или отключить.
-          </p>
-        )}
-        <p className="text-sm text-muted-foreground">
-          Проверяем Weeek каждые 10 минут. Правило отмечает задачу выполненной в её релизе и меняет
-          его прогресс. Возврат в другую колонку не открывает задачу заново. Без релиза правило
-          ожидает размещения.
-        </p>
         <button
           type="submit"
           disabled={

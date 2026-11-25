@@ -61,7 +61,7 @@ describe('история саммари', () => {
       <SummaryList items={[{ ...WITH_TASKS, taskCount: 3, archivedCount: 2, releasedCount: 5 }]} />,
     );
 
-    expect(screen.getByText('3 в работе · 2 в архиве · 5 в релизе')).toBeInTheDocument();
+    expect(screen.getByText('3 в работе · 2 в архиве · 5 в проекте')).toBeInTheDocument();
   });
 
   it('нули не показываются', () => {
@@ -71,7 +71,7 @@ describe('история саммари', () => {
 
     expect(screen.getByText('3 в работе')).toBeInTheDocument();
     expect(screen.queryByText(/в архиве/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/в релизе/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/в проекте/)).not.toBeInTheDocument();
   });
 
   it('саммари, где всё отложено, не называется «Текст»', () => {

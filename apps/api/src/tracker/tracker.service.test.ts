@@ -89,8 +89,8 @@ describe('TrackerService', () => {
         createTask: vi.fn(),
         updateTask: vi.fn(),
         readTasks: vi.fn(),
-            readImportTasks: vi.fn(),
-            readTaskLink: vi.fn(),
+        readImportTasks: vi.fn(),
+        readTaskLink: vi.fn(),
         targets,
         probe,
       };
@@ -176,9 +176,11 @@ describe('TrackerService', () => {
       .insert(subjects)
       .values({ kind: SubjectKind.User, label: 'подрядчик@cairn.local' })
       .returning();
-    await testDb.db
-      .insert(users)
-      .values({ subjectId: memberSubject!.id, email: 'подрядчик@cairn.local', passwordHash: 'хэш' });
+    await testDb.db.insert(users).values({
+      subjectId: memberSubject!.id,
+      email: 'подрядчик@cairn.local',
+      passwordHash: 'хэш',
+    });
     member = {
       id: memberSubject!.id,
       kind: SubjectKind.User,
@@ -455,7 +457,10 @@ describe('TrackerService', () => {
       await grantLevel(AccessLevel.Write);
       await service.saveBinding(member, projectId, binding);
 
-      const saved = await service.saveBinding(member, projectId, { ...binding, boardColumnId: '32' });
+      const saved = await service.saveBinding(member, projectId, {
+        ...binding,
+        boardColumnId: '32',
+      });
 
       expect(saved.boardColumnId).toBe('32');
       expect((await service.findForProject(member, projectId)).binding?.boardColumnId).toBe('32');
@@ -467,7 +472,12 @@ describe('TrackerService', () => {
 
       const found = await service.findForProject(member, projectId);
 
-      expect(found).toEqual({ isOperational: true, blockedBy: null, binding: null });
+      expect(found).toEqual({
+        hasConnection: true,
+        isOperational: true,
+        blockedBy: null,
+        binding: null,
+      });
       expect(JSON.stringify(found)).not.toContain('api.weeek.net');
     });
   });

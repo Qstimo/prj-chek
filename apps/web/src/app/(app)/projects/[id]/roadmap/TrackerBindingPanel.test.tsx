@@ -101,13 +101,13 @@ describe('TrackerBindingPanel', () => {
     expect(screen.getByText(/Настройк/)).toBeInTheDocument();
   });
 
-  it('без подключения объясняет, как начать работу с Weeek', () => {
+  it('без подключения настройки Weeek проекта скрыты', () => {
     vi.mocked(hooks.useQueryProjectTracker).mockReturnValue(
       query({ isOperational: false, blockedBy: TRACKER_BASE_URL_MISSING, binding: null }),
     );
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
-    expect(screen.getByText(/Подключите Weeek/)).toBeInTheDocument();
-    expect(screen.getByText(/Настройки/)).toBeInTheDocument();
+    expect(screen.queryByText('Weeek проекта')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Выбрать доску Weeek/ })).not.toBeInTheDocument();
     expect(vi.mocked(hooks.useQueryTrackerTargets)).toHaveBeenCalledWith(PROJECT_ID, false);
   });
 
@@ -133,14 +133,14 @@ describe('TrackerBindingPanel', () => {
     expect(screen.getByText(/Без правила статус только отображается/)).toBeInTheDocument();
   });
 
-  it('без токена причина названа токеном, а не общим «не настроено»', () => {
+  it('одного адреса без токена недостаточно для показа настроек', () => {
     vi.mocked(hooks.useQueryProjectTracker).mockReturnValue(
       query({ isOperational: false, blockedBy: TRACKER_SECRET_MISSING, binding: null }),
     );
 
     render(<TrackerBindingPanel projectId={PROJECT_ID} />);
 
-    expect(screen.getByText(/Нет токена/)).toBeInTheDocument();
+    expect(screen.queryByText('Weeek проекта')).not.toBeInTheDocument();
   });
 
   it('списки целей не спрашиваются, пока панель закрыта', () => {

@@ -9,11 +9,13 @@ export function TaskFilters({
   versions,
   params,
   change,
+  showTracker = true,
 }: {
   tasks: ProjectTask[];
   versions: { id: string; label: string }[];
   params: Pick<URLSearchParams, 'get'>;
   change: (key: string, value: string) => void;
+  showTracker?: boolean;
 }) {
   const releases = new Map(versions.map((version) => [version.id, version.label]));
   const people = new Map<string, string>();
@@ -51,12 +53,13 @@ export function TaskFilters({
         />
       </label>
       {select('release', 'Релиз', [['loose', 'Вне релиза'], ...releases])}
-      {select('integration', 'Интеграция Weeek', [
-        ['linked', 'Связаны с Weeek'],
-        ['local', 'Без связи'],
-        ['link', 'Есть ссылка, ещё не связаны'],
-        ['failed', 'Ошибка синхронизации'],
-      ])}
+      {showTracker &&
+        select('integration', 'Интеграция Weeek', [
+          ['linked', 'Связаны с Weeek'],
+          ['local', 'Без связи'],
+          ['link', 'Есть ссылка, ещё не связаны'],
+          ['failed', 'Ошибка синхронизации'],
+        ])}
       {select('assignee', 'Исполнитель', [['unassigned', 'Без исполнителя'], ...people])}
       {select('status', 'Статус', [
         ['open', 'Не выполнены здесь'],

@@ -64,6 +64,22 @@ beforeEach(() => {
   } as never);
 });
 describe('релиз и выполнение задачи', () => {
+  it('без подключения скрывает правило Weeek и не запрашивает колонки', () => {
+    render(
+      <TaskPlanningPanel
+        projectId="p"
+        task={task}
+        binding={binding}
+        showTracker={false}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByLabelText('Автоматически выполнить при попадании в колонку Weeek'),
+    ).not.toBeInTheDocument();
+    expect(hooks.useQueryTrackerTargets).toHaveBeenCalledWith('p', false);
+    expect(screen.getByLabelText('Релиз задачи')).toBeInTheDocument();
+  });
   it('сохраняет выбранный релиз и явное правило, скрывает колонки чужой доски', async () => {
     render(<TaskPlanningPanel projectId="p" task={task} binding={binding} onClose={vi.fn()} />);
     expect(screen.queryByRole('option', { name: 'Чужая колонка' })).toBeNull();

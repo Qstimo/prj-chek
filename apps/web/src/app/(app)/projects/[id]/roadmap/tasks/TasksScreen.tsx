@@ -14,6 +14,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 
 import { describeApiError, summaryFailureOf } from '@/api';
+import { hasProjectTrackerConnection } from '@/api/trackerConnection';
 import {
   useMutationCreateTask,
   useMutationDeleteTask,
@@ -167,17 +168,20 @@ export function TasksScreen({ projectId }: { projectId: string }) {
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3 text-sm">
-        <p>
-          {tracker.data?.binding
-            ? 'Доска Weeek подключена. Импорт и выгрузка работают с доской проекта.'
-            : 'Доска Weeek ещё не выбрана.'}
-        </p>
-        <Link href={`/projects/${projectId}/tasks/settings`} className="underline">
-          Настройки задач
-        </Link>
-      </div>
+      {hasProjectTrackerConnection(tracker.data) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3 text-sm">
+          <p>
+            {tracker.data?.binding
+              ? 'Доска Weeek подключена. Импорт и выгрузка работают с доской проекта.'
+              : 'Доска Weeek ещё не выбрана.'}
+          </p>
+          <Link href={`/projects/${projectId}/tasks/settings`} className="underline">
+            Настройки задач
+          </Link>
+        </div>
+      )}
       <TaskFilters
+        showTracker={hasProjectTrackerConnection(tracker.data)}
         tasks={tasks.data}
         versions={roadmap?.data?.versions ?? []}
         params={params}
@@ -410,6 +414,7 @@ export function TasksScreen({ projectId }: { projectId: string }) {
 
       {planning && (
         <TaskPlanningPanel
+          showTracker={hasProjectTrackerConnection(tracker.data)}
           projectId={projectId}
           task={planning}
           binding={tracker.data?.binding ?? null}
@@ -507,7 +512,7 @@ function hasArrived(result: TaskExportResult): boolean {
  * из-за трекера, который на этом экране дело десятое, хуже её отсутствия.
  */
 function isExportKnown(tracker: ProjectTracker | undefined): tracker is ProjectTracker {
-  return tracker !== undefined && tracker.blockedBy !== TRACKER_BASE_URL_MISSING;
+  return tracker !== undefined && hasProjectTrackerConnection(tracker);
 }
 
 /**

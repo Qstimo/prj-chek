@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { useLayoutEffect, useState } from 'react';
 
 import { BROWSER_API_URL, describeApiError, summaryFailureOf } from '@/api';
+import Link from 'next/link';
+import { hasProjectTrackerConnection } from '@/api/trackerConnection';
 import {
   SUMMARY_KEYS,
   useMutationArchiveSummaryTasks,
@@ -21,6 +23,7 @@ import {
   useQuerySections,
   useQuerySummary,
   useQueryTaskSuggester,
+  useQueryProjectTracker,
 } from '@/api/hooks';
 import { ChronicleForm } from '@/components/ChronicleForm';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
@@ -29,15 +32,11 @@ import { SummaryRecording } from '@/components/SummaryRecording';
 import { SummaryText } from '@/components/SummaryText';
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning';
 
-import {
-  SUMMARY_TEXTS,
-  failureMessageOf,
-  releaseBlockedNoteOf,
-  stateBadgesOf,
-} from '../constants';
+import { SUMMARY_TEXTS, failureMessageOf, releaseBlockedNoteOf, stateBadgesOf } from '../constants';
 import { ReleaseDrawer } from './ReleaseDrawer';
 import { SummaryHeader } from './SummaryHeader';
 import { TasksBlock } from './TasksBlock';
+import { TransferTasksDrawer, type TransferSelection } from './TransferTasksDrawer';
 import type { IBodyProps } from './types';
 
 /**
@@ -70,6 +69,9 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   // выключен: он ответил бы `404`, и спрашивать его незачем.
   const canRelease = sections.data?.[Section.Roadmap] === AccessLevel.Write;
   const roadmap = useQueryRoadmap(projectId, canRelease);
+  const tracker = useQueryProjectTracker(projectId, canRelease);
+  const hasTracker = hasProjectTrackerConnection(tracker?.data);
+  const canExport = tracker?.data?.isOperational === true && !!tracker.data.binding && canRelease;
   const suggest = useMutationSuggestSummaryTasks(projectId, summaryId);
   const save = useMutationSaveSummaryTasks(projectId, summaryId);
   const archive = useMutationArchiveSummaryTasks(projectId, summaryId);
@@ -84,6 +86,7 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
   // «панель открыта»: в ручку уедет ровно то, что было отмечено в момент
   // нажатия, а не то, что окажется отмеченным к отправке формы.
   const [releasing, setReleasing] = useState<string[]>();
+  const [transferring, setTransferring] = useState<TransferSelection>();
   // Высота прилипшей шапки: её нельзя сосчитать заранее — заголовок
   // переносится, а бирок может не быть вовсе. Полоса действий редактора
   // прилипает под шапкой на эту высоту, иначе встаёт за ней.
@@ -193,6 +196,20 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
             isSaving={save.isPending}
             saveError={describeApiError(save.error)}
             onRelease={setReleasing}
+            onTransfer={(draftIds) => setTransferring({ draftIds, exportToWeeek: false })}
+            onExport={
+              hasTracker
+                ? (draftIds) => setTransferring({ draftIds, exportToWeeek: true })
+                : undefined
+            }
+            onExportTransferred={
+              canExport ? (taskIds) => setTransferring({ taskIds, exportToWeeek: true }) : undefined
+            }
+            exportBlockedNote={
+              hasTracker && !canExport
+                ? 'Настройте доступное подключение и доску Weeek проекта.'
+                : undefined
+            }
             onArchive={(taskIds) => archive.mutate({ taskIds })}
             onRestore={(taskIds) => restore.mutate({ taskIds })}
             onDelete={(taskIds) => remove.mutate({ taskIds })}
@@ -200,6 +217,14 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
             isActing={isActing}
             actionError={actionError}
           />
+          {hasTracker && !canExport && canRelease && (
+            <p className="text-sm text-muted-foreground">
+              Для выгрузки нужна доска проекта и включённое подключение Weeek.{' '}
+              <Link href={`/projects/${projectId}/tasks/settings`} className="underline">
+                Настройки Weeek проекта
+              </Link>
+            </p>
+          )}
         </div>
       </div>
 
@@ -228,6 +253,15 @@ export function SummaryBody({ projectId, summaryId }: IBodyProps) {
           )
         }
       />
+      {transferring && (
+        <TransferTasksDrawer
+          projectId={projectId}
+          summaryId={summaryId}
+          selection={transferring}
+          canExport={canExport}
+          onClose={() => setTransferring(undefined)}
+        />
+      )}
 
       <Drawer
         isOpen={isEditing}

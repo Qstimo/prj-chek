@@ -69,16 +69,30 @@ export class SummariesRepository {
 
   /** Цели выбора фильтруются по хронике, а не по видимости паспорта. */
   async writableProjects(subject: RequestSubject): Promise<ProjectMetadata[]> {
-    const ids = await this.access.projectIdsWithLevel(subject, Section.Chronicle, AccessLevel.Write);
+    const ids = await this.access.projectIdsWithLevel(
+      subject,
+      Section.Chronicle,
+      AccessLevel.Write,
+    );
     if (ids.length === 0) return [];
-    return this.db.select({ id: projects.id, slug: projects.slug, name: projects.name, lifecycle: projects.lifecycle })
-      .from(projects).where(inArray(projects.id, ids)).orderBy(asc(projects.name));
+    return this.db
+      .select({
+        id: projects.id,
+        slug: projects.slug,
+        name: projects.name,
+        lifecycle: projects.lifecycle,
+      })
+      .from(projects)
+      .where(inArray(projects.id, ids))
+      .orderBy(asc(projects.name));
   }
 
   /** Общая история использует ту же выборку целей и те же проекции саммари. */
   async findOverview(subject: RequestSubject): Promise<SummaryListItem[]> {
     const targets = await this.writableProjects(subject);
-    const lists = await Promise.all(targets.map(project => this.findForProject(subject, project.id)));
+    const lists = await Promise.all(
+      targets.map((project) => this.findForProject(subject, project.id)),
+    );
     return lists.flat().sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -409,15 +423,33 @@ export class SummariesRepository {
     return mediaPathsOf(rows);
   }
 
-  async archive(subject: RequestSubject, tx: Transaction, projectId: string, summaryId: string, ids: string[]) {
+  async archive(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    ids: string[],
+  ) {
     return this.changeTasks(subject, tx, projectId, summaryId, ids, 'archive');
   }
 
-  async restore(subject: RequestSubject, tx: Transaction, projectId: string, summaryId: string, ids: string[]) {
+  async restore(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    ids: string[],
+  ) {
     return this.changeTasks(subject, tx, projectId, summaryId, ids, 'restore');
   }
 
-  async removeTasks(subject: RequestSubject, tx: Transaction, projectId: string, summaryId: string, ids: string[]) {
+  async removeTasks(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    ids: string[],
+  ) {
     return this.changeTasks(subject, tx, projectId, summaryId, ids, 'remove');
   }
 
@@ -433,24 +465,37 @@ export class SummariesRepository {
     const summary = await this.lockSummary(tx, projectId, summaryId);
     const tasks = await this.selectedTasks(tx, summaryId, ids);
     const allowed = action === 'archive' ? SummaryTaskState.Active : SummaryTaskState.Archived;
-    if (tasks.some((task) => action === 'remove'
-      ? task.state === SummaryTaskState.Released
-      : task.state !== allowed)) throw taskNotActive();
+    if (
+      tasks.some((task) =>
+        action === 'remove' ? task.state === SummaryTaskState.Released : task.state !== allowed,
+      )
+    )
+      throw taskNotActive();
 
     const selectedIds = tasks.map((task) => task.id);
     if (action === 'remove') {
       await this.deleteTasks(tx, selectedIds);
     } else if (action === 'archive') {
-      await tx.update(summaryTaskDrafts).set({ state: SummaryTaskState.Archived })
+      await tx
+        .update(summaryTaskDrafts)
+        .set({ state: SummaryTaskState.Archived })
         .where(inArray(summaryTaskDrafts.id, selectedIds));
     } else {
       // После замены черновика прежняя позиция могла достаться другой задаче.
-      const [last] = await tx.select({ position: max(summaryTaskDrafts.position) })
+      const [last] = await tx
+        .select({ position: max(summaryTaskDrafts.position) })
         .from(summaryTaskDrafts)
-        .where(and(eq(summaryTaskDrafts.summaryId, summaryId), eq(summaryTaskDrafts.state, SummaryTaskState.Active)));
+        .where(
+          and(
+            eq(summaryTaskDrafts.summaryId, summaryId),
+            eq(summaryTaskDrafts.state, SummaryTaskState.Active),
+          ),
+        );
       let position = last?.position ?? 0;
       for (const task of tasks) {
-        await tx.update(summaryTaskDrafts).set({ state: SummaryTaskState.Active, position: ++position })
+        await tx
+          .update(summaryTaskDrafts)
+          .set({ state: SummaryTaskState.Active, position: ++position })
           .where(eq(summaryTaskDrafts.id, task.id));
       }
     }
@@ -476,11 +521,57 @@ export class SummariesRepository {
     return tasks;
   }
 
-  private async selectedTasks(tx: Transaction, summaryId: string, ids: string[]): Promise<SummaryTask[]> {
+  private async selectedTasks(
+    tx: Transaction,
+    summaryId: string,
+    ids: string[],
+  ): Promise<SummaryTask[]> {
     const requested = new Set(ids);
     const tasks = (await this.tasksOf(tx, summaryId)).filter((task) => requested.has(task.id));
     if (tasks.length !== requested.size) throw new SectionNotVisibleError();
     return tasks;
+  }
+
+  /** Перенос повторяем: подтверждённая строка возвращает прежнюю задачу, не копию. */
+  async tasksForTransfer(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    ids: string[],
+  ): Promise<SummaryTask[]> {
+    await this.requireWrite(subject, projectId, tx);
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await this.lockSummary(tx, projectId, summaryId);
+    const tasks = await this.selectedTasks(tx, summaryId, ids);
+    if (
+      tasks.some(
+        (task) =>
+          task.state !== SummaryTaskState.Active &&
+          !(task.state === SummaryTaskState.Released && task.taskId),
+      )
+    )
+      throw taskNotActive();
+    return tasks;
+  }
+
+  async markTransferred(
+    subject: RequestSubject,
+    tx: Transaction,
+    projectId: string,
+    summaryId: string,
+    transferred: { draftId: string; taskId: string }[],
+  ): Promise<void> {
+    await this.requireForWrite(subject, tx, projectId, summaryId);
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    for (const { draftId, taskId } of transferred) {
+      await tx
+        .update(summaryTaskDrafts)
+        .set({ state: SummaryTaskState.Released, taskId })
+        .where(and(eq(summaryTaskDrafts.summaryId, summaryId), eq(summaryTaskDrafts.id, draftId)));
+    }
+    if (transferred.length)
+      await tx.update(summaries).set({ updatedAt: new Date() }).where(eq(summaries.id, summaryId));
   }
 
   /** Общий замок удерживает набор задач до конца изменения или релиза. */
@@ -489,7 +580,9 @@ export class SummariesRepository {
     projectId: string,
     summaryId: string,
   ): Promise<SummaryRow> {
-    const [row] = await tx.select().from(summaries)
+    const [row] = await tx
+      .select()
+      .from(summaries)
       .where(and(eq(summaries.id, summaryId), eq(summaries.projectId, projectId)))
       .for('no key update');
     if (!row) throw new SectionNotVisibleError();
@@ -517,7 +610,9 @@ export class SummariesRepository {
         .set({ state: SummaryTaskState.Released, releasedVersionId: versionId, taskId })
         .where(and(eq(summaryTaskDrafts.summaryId, summaryId), eq(summaryTaskDrafts.id, draftId)));
     }
-    await tx.update(summaries).set({ releasedVersionId: versionId, updatedAt: new Date() })
+    await tx
+      .update(summaries)
+      .set({ releasedVersionId: versionId, updatedAt: new Date() })
       .where(eq(summaries.id, summaryId));
   }
 
@@ -532,7 +627,11 @@ export class SummariesRepository {
       .select()
       .from(summaryTaskDrafts)
       .where(eq(summaryTaskDrafts.summaryId, summaryId))
-      .orderBy(asc(summaryTaskDrafts.position), asc(summaryTaskDrafts.createdAt), asc(summaryTaskDrafts.id));
+      .orderBy(
+        asc(summaryTaskDrafts.position),
+        asc(summaryTaskDrafts.createdAt),
+        asc(summaryTaskDrafts.id),
+      );
 
     const tags = await this.tagsOf(
       executor,
@@ -547,6 +646,7 @@ export class SummariesRepository {
       state: row.state,
       releasedVersionId: row.releasedVersionId,
       releasedVersionLabel: null,
+      taskId: row.taskId,
       url: row.url,
       platformIds: tags.get(row.id) ?? [],
     }));
@@ -583,10 +683,24 @@ export class SummariesRepository {
     return tags;
   }
 
-  private async clearTasks(tx: Transaction, summaryId: string, state?: SummaryTaskState): Promise<void> {
-    const rows = await tx.select({ id: summaryTaskDrafts.id }).from(summaryTaskDrafts)
-      .where(and(eq(summaryTaskDrafts.summaryId, summaryId), state && eq(summaryTaskDrafts.state, state)));
-    await this.deleteTasks(tx, rows.map((row) => row.id));
+  private async clearTasks(
+    tx: Transaction,
+    summaryId: string,
+    state?: SummaryTaskState,
+  ): Promise<void> {
+    const rows = await tx
+      .select({ id: summaryTaskDrafts.id })
+      .from(summaryTaskDrafts)
+      .where(
+        and(
+          eq(summaryTaskDrafts.summaryId, summaryId),
+          state && eq(summaryTaskDrafts.state, state),
+        ),
+      );
+    await this.deleteTasks(
+      tx,
+      rows.map((row) => row.id),
+    );
   }
 
   /** На связях тегов стоит restrict, поэтому первым уходит их набор. */
@@ -673,7 +787,14 @@ export class SummariesRepository {
     // Уровень роадмапа резолвится один раз на сборку детали: три поля
     // того же гейта дали бы три запроса прав, а деталь собирается на
     // каждое сохранение черновика (дизайн, 6.3).
-    const seesRoadmap = await this.seesRoadmap(subject, row.projectId, executor);
+    const roadmapLevel = await this.access.resolveLevel(
+      subject,
+      row.projectId,
+      Section.Roadmap,
+      executor,
+    );
+    const seesRoadmap = meets(roadmapLevel ?? undefined, AccessLevel.Metadata);
+    const seesTasks = meets(roadmapLevel ?? undefined, AccessLevel.Read);
     const labels = await this.releasedLabels(
       row.projectId,
       [row.releasedVersionId, ...tasks.map((task) => task.releasedVersionId)],
@@ -687,16 +808,22 @@ export class SummariesRepository {
       projectName: project?.name ?? '',
       occurredOn: entry.occurredOn,
       title: entry.title,
-      ...countsOf(tasks.reduce<Partial<Record<SummaryTaskState, number>>>((counts, task) => {
-        counts[task.state] = (counts[task.state] ?? 0) + 1;
-        return counts;
-      }, {})),
+      ...countsOf(
+        tasks.reduce<Partial<Record<SummaryTaskState, number>>>((counts, task) => {
+          counts[task.state] = (counts[task.state] ?? 0) + 1;
+          return counts;
+        }, {}),
+      ),
       isReleased: row.releasedVersionId !== null,
       ...releasedOf(row.releasedVersionId, labels),
       createdAt: row.createdAt.toISOString(),
       chronicleEntryId: row.chronicleEntryId,
       text: entry.content,
-      tasks: tasks.map((task) => ({ ...task, ...releasedOf(task.releasedVersionId, labels) })),
+      tasks: tasks.map((task) => ({
+        ...task,
+        taskId: seesTasks ? (task.taskId ?? null) : null,
+        ...releasedOf(task.releasedVersionId, labels),
+      })),
       suggester: stampOf(row),
       // Грубо намеренно: `updated_at` двигает любая правка записи, включая
       // правку одного заголовка. Точность стоила бы копии текста в базе —
@@ -754,7 +881,11 @@ export class SummariesRepository {
     }
 
     const rows = await executor
-      .select({ summaryId: summaryTaskDrafts.summaryId, state: summaryTaskDrafts.state, total: count() })
+      .select({
+        summaryId: summaryTaskDrafts.summaryId,
+        state: summaryTaskDrafts.state,
+        total: count(),
+      })
       .from(summaryTaskDrafts)
       .where(inArray(summaryTaskDrafts.summaryId, summaryIds))
       .groupBy(summaryTaskDrafts.summaryId, summaryTaskDrafts.state);
@@ -826,7 +957,6 @@ export class SummariesRepository {
     executor: Executor,
   ): Promise<boolean> {
     const level = await this.access.resolveLevel(subject, projectId, Section.Roadmap, executor);
-
     return meets(level ?? undefined, AccessLevel.Metadata);
   }
 }

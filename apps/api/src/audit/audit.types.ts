@@ -49,6 +49,7 @@ export enum AuditAction {
   SummaryTasksRestored = 'summary.tasks_restored',
   SummaryTasksDeleted = 'summary.tasks_deleted',
   SummaryReleased = 'summary.released',
+  SummaryTasksTransferred = 'summary.tasks_transferred',
   SummaryDeleted = 'summary.deleted',
   /** Запись созвона дотекла на том: задача расшифровки заведена. */
   SummaryRecordingUploaded = 'summary.recording_uploaded',

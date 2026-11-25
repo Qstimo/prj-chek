@@ -12,6 +12,7 @@ import { SummariesController } from './summaries.controller';
 import { SummariesOverviewController } from './summaries-overview.controller';
 import { SummariesRepository } from './summaries.repository';
 import { SummariesService } from './summaries.service';
+import { SummaryTaskTransferService } from './summary-task-transfer.service';
 import { AUDIO_EXTRACTOR, type AudioExtractor } from './transcription/extractor';
 import { FfmpegExtractor, ffmpegCommandsOf } from './transcription/ffmpeg.extractor';
 import { RecordingStore } from './transcription/recording-store';
@@ -50,6 +51,7 @@ import { UnavailableExtractor } from './transcription/unavailable.extractor';
   providers: [
     SummariesRepository,
     SummariesService,
+    SummaryTaskTransferService,
     // Расшифровка живёт в **том же** модуле: это вторая итерация того же
     // потока, а второй модуль рядом означал бы второй токен порта, вторую
     // регистрацию и вторую точку, где можно забыть проверку права

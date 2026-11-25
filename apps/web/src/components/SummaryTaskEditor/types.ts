@@ -38,6 +38,9 @@ export interface IDraftTask {
  * отметок (дизайн, 3.6).
  */
 export interface ISelectionActions {
+  onTransfer?: (taskIds: string[]) => void;
+  onExport?: (taskIds: string[]) => void;
+  exportBlockedNote?: string;
   /** Отмеченные уезжают в версию: панель релиза открывает контейнер. */
   onRelease: (taskIds: string[]) => void;
   onArchive: (taskIds: string[]) => void;

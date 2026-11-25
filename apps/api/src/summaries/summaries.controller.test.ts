@@ -1,4 +1,13 @@
-import { AccessLevel, Section, SUMMARY_TASK_NOT_ACTIVE, SummaryTaskState, SUGGESTER_DISABLED, SUGGESTER_UNAVAILABLE, SUMMARY_TEXT_NOT_PLAIN, SUMMARY_TEXT_TOO_LONG } from '@cairn/shared';
+import {
+  AccessLevel,
+  Section,
+  SUMMARY_TASK_NOT_ACTIVE,
+  SummaryTaskState,
+  SUGGESTER_DISABLED,
+  SUGGESTER_UNAVAILABLE,
+  SUMMARY_TEXT_NOT_PLAIN,
+  SUMMARY_TEXT_TOO_LONG,
+} from '@cairn/shared';
 import { describe, expect, it } from 'vitest';
 import { SuggesterFailure } from './suggester/task-suggester';
 import { summariesHttpFixture, SUMMARY_BODY } from '../../test/summaries-http-fixture';
@@ -6,6 +15,35 @@ import { summariesHttpFixture, SUMMARY_BODY } from '../../test/summaries-http-fi
 describe('HTTP: саммари проекта', () => {
   const fixture = summariesHttpFixture();
   const base = () => `/projects/${fixture.state.projectId}/summaries`;
+
+  it('переносит только выбранное в реестр без версии; повтор возвращает прежнюю задачу', async () => {
+    const agent = await fixture.signIn();
+    const summary = await agent.post(base()).send(SUMMARY_BODY).expect(201);
+    const path = `${base()}/${summary.body.id}`;
+    const saved = await agent
+      .put(`${path}/tasks`)
+      .send({ tasks: [{ title: 'Перенести' }, { title: 'Оставить' }] })
+      .expect(200);
+    const input = { taskIds: [saved.body.tasks[0].id] };
+    const first = await agent.post(`${path}/tasks/transfer`).send(input).expect(201);
+    await agent.post(`${path}/tasks/transfer`).send(input).expect(201, first.body);
+    const detail = await agent.get(path).expect(200);
+    expect(detail.body.isReleased).toBe(false);
+    expect(detail.body.tasks[0]).toMatchObject({
+      state: SummaryTaskState.Released,
+      taskId: first.body.taskIds[0],
+      releasedVersionId: null,
+    });
+    expect(detail.body.tasks[1].state).toBe(SummaryTaskState.Active);
+    const registry = await agent.get(`/projects/${fixture.state.projectId}/tasks`).expect(200);
+    expect(registry.body).toHaveLength(1);
+    expect(registry.body[0]).toMatchObject({
+      title: 'Перенести',
+      origin: 'summary',
+      placement: null,
+      sourceSummaryId: summary.body.id,
+    });
+  });
 
   it('создаёт 201, читает список и деталь, удаляет 204 без тела', async () => {
     const agent = await fixture.signIn();
@@ -22,15 +60,26 @@ describe('HTTP: саммари проекта', () => {
     const agent = await fixture.signIn();
     const created = await agent.post(base()).send(SUMMARY_BODY).expect(201);
     const path = `${base()}/${created.body.id}`;
-    await agent.put(`${path}/tasks`).send({ tasks: [{ title: 'Ручная' }] }).expect(200);
+    await agent
+      .put(`${path}/tasks`)
+      .send({ tasks: [{ title: 'Ручная' }] })
+      .expect(200);
     const suggested = await agent.post(`${path}/tasks/suggest`).expect(200);
     expect(suggested.body.tasks[0].title).toBe('Предложенная задача');
     const taskIds = [suggested.body.tasks[0].id];
-    const released = await agent.post(`${path}/tasks/release`)
-      .send({ taskIds, target: { kind: 'new', version: { label: 'v1.0' } } }).expect(201);
-    expect(released.body).toEqual({ versionId: expect.any(String), label: 'v1.0', checkpointCount: 1 });
-    const duplicate = await agent.post(`${path}/tasks/release`)
-      .send({ taskIds, target: { kind: 'new', version: { label: 'v1.1' } } }).expect(409);
+    const released = await agent
+      .post(`${path}/tasks/release`)
+      .send({ taskIds, target: { kind: 'new', version: { label: 'v1.0' } } })
+      .expect(201);
+    expect(released.body).toEqual({
+      versionId: expect.any(String),
+      label: 'v1.0',
+      checkpointCount: 1,
+    });
+    const duplicate = await agent
+      .post(`${path}/tasks/release`)
+      .send({ taskIds, target: { kind: 'new', version: { label: 'v1.1' } } })
+      .expect(409);
     expect(duplicate.body.code).toBe(SUMMARY_TASK_NOT_ACTIVE);
   });
 
@@ -49,7 +98,10 @@ describe('HTTP: саммари проекта', () => {
     const agent = await fixture.signIn();
     const created = await agent.post(base()).send(SUMMARY_BODY).expect(201);
     const path = `${base()}/${created.body.id}/tasks`;
-    const saved = await agent.put(path).send({ tasks: [{ title: 'Ручная' }] }).expect(200);
+    const saved = await agent
+      .put(path)
+      .send({ tasks: [{ title: 'Ручная' }] })
+      .expect(200);
     const body = { taskIds: [saved.body.tasks[0].id] };
     await agent.post(`${path}/archive`).send({ taskIds: [] }).expect(400);
     const archived = await agent.post(`${path}/archive`).send(body).expect(200);
@@ -62,10 +114,19 @@ describe('HTTP: саммари проекта', () => {
 
   it('проверяет строгие тела создания, черновика и версии общей схемой роадмапа', async () => {
     const agent = await fixture.signIn();
-    await agent.post(base()).send({ ...SUMMARY_BODY, projectId: fixture.state.projectId }).expect(400);
+    await agent
+      .post(base())
+      .send({ ...SUMMARY_BODY, projectId: fixture.state.projectId })
+      .expect(400);
     const created = await agent.post(base()).send(SUMMARY_BODY).expect(201);
-    await agent.put(`${base()}/${created.body.id}/tasks`).send({ tasks: [{ title: 'Задача', position: 1 }] }).expect(400);
-    await agent.post(`${base()}/${created.body.id}/tasks/release`).send({ taskIds: [created.body.id], target: { kind: 'new', version: { label: '' } } }).expect(400);
+    await agent
+      .put(`${base()}/${created.body.id}/tasks`)
+      .send({ tasks: [{ title: 'Задача', position: 1 }] })
+      .expect(400);
+    await agent
+      .post(`${base()}/${created.body.id}/tasks/release`)
+      .send({ taskIds: [created.body.id], target: { kind: 'new', version: { label: '' } } })
+      .expect(400);
   });
 
   it('принимает расшифровку четырёхчасового созвона целиком', async () => {
@@ -107,13 +168,18 @@ describe('HTTP: саммари проекта', () => {
   it('саммари другого проекта и отдельная правка текста — 404, неверные UUID — 400', async () => {
     const agent = await fixture.signIn();
     const created = await agent.post(base()).send(SUMMARY_BODY).expect(201);
-    await agent.get(`/projects/${fixture.state.otherProjectId}/summaries/${created.body.id}`).expect(404);
+    await agent
+      .get(`/projects/${fixture.state.otherProjectId}/summaries/${created.body.id}`)
+      .expect(404);
     await agent.patch(`${base()}/${created.body.id}/text`).send({ text: 'Правка' }).expect(404);
     await agent.get(`${base()}/не-uuid`).expect(400);
     await agent.get('/projects/не-uuid/summaries').expect(400);
   });
 
-  it.each([[SUGGESTER_DISABLED, 409], [SUGGESTER_UNAVAILABLE, 502]])('отказ предложителя %s имеет статус %s', async (code, status) => {
+  it.each([
+    [SUGGESTER_DISABLED, 409],
+    [SUGGESTER_UNAVAILABLE, 502],
+  ])('отказ предложителя %s имеет статус %s', async (code, status) => {
     const agent = await fixture.signIn();
     const created = await agent.post(base()).send(SUMMARY_BODY).expect(201);
     fixture.suggester.suggest.mockRejectedValue(new SuggesterFailure(code, 'Безопасное сообщение'));
@@ -123,7 +189,10 @@ describe('HTTP: саммари проекта', () => {
 
   it('длинный текст — 409 с фактическим пределом', async () => {
     const agent = await fixture.signIn();
-    const created = await agent.post(base()).send({ ...SUMMARY_BODY, text: 'я'.repeat(40_001) }).expect(201);
+    const created = await agent
+      .post(base())
+      .send({ ...SUMMARY_BODY, text: 'я'.repeat(40_001) })
+      .expect(201);
     const response = await agent.post(`${base()}/${created.body.id}/tasks/suggest`).expect(409);
     expect(response.body).toMatchObject({ code: SUMMARY_TEXT_TOO_LONG, maxChars: 40_000 });
   });
@@ -134,9 +203,14 @@ describe('HTTP: саммари проекта', () => {
     await fixture.grant(Section.Chronicle, AccessLevel.Read);
     const agent = await fixture.signIn('user@cairn.local');
     const path = `${base()}/${created.body.id}/tasks/release`;
-    await agent.post(path).send({ taskIds: [created.body.id], target: { kind: 'new', version: { label: 'v1' } } }).expect(404);
+    await agent
+      .post(path)
+      .send({ taskIds: [created.body.id], target: { kind: 'new', version: { label: 'v1' } } })
+      .expect(404);
     await fixture.grant(Section.Roadmap, AccessLevel.Write);
-    await agent.post(path).send({ taskIds: [created.body.id], target: { kind: 'new', version: { label: 'v1' } } }).expect(403);
+    await agent
+      .post(path)
+      .send({ taskIds: [created.body.id], target: { kind: 'new', version: { label: 'v1' } } })
+      .expect(403);
   });
 });
-

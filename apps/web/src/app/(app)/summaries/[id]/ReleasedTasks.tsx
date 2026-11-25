@@ -18,7 +18,7 @@ import type { IReleasedProps } from './types';
  * видимости, поэтому проверяются вместе: без выдачи на роадмап ссылки
  * нет, и это штатный случай, а не ошибка.
  */
-export function ReleasedTasks({ tasks, projectId }: IReleasedProps) {
+export function ReleasedTasks({ tasks, projectId, onExport }: IReleasedProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   if (tasks.length === 0) {
@@ -48,7 +48,23 @@ export function ReleasedTasks({ tasks, projectId }: IReleasedProps) {
             >
               <p className="min-w-0 flex-1 text-sm">{task.title}</p>
 
-              {task.releasedVersionLabel === null || task.releasedVersionId === null ? (
+              {task.taskId && (
+                <Link href={`/projects/${projectId}/tasks`} className="shrink-0 text-xs underline">
+                  В задачах проекта
+                </Link>
+              )}
+              {onExport && task.taskId && (
+                <button
+                  type="button"
+                  onClick={() => onExport([task.taskId!])}
+                  className="rounded-md border border-border px-2 py-1 text-xs"
+                >
+                  Выгрузить в Weeek
+                </button>
+              )}
+              {task.releasedVersionId === null && task.taskId ? (
+                <span className="text-xs text-muted-foreground">Вне релиза</span>
+              ) : task.releasedVersionLabel === null || task.releasedVersionId === null ? (
                 <p className="shrink-0 text-xs text-muted-foreground">
                   {SUMMARY_TEXTS.releasedHidden}
                 </p>

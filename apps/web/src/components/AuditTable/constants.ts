@@ -45,6 +45,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'summary.tasks_restored': 'Задачи саммари возвращены из архива',
   'summary.tasks_deleted': 'Задачи саммари удалены',
   'summary.released': 'Из саммари сформирован релиз',
+  'summary.tasks_transferred': 'Задачи саммари перенесены в реестр',
   'summary.deleted': 'Удалено саммари',
   'summary.recording_uploaded': 'Загружена запись созвона',
   'summary.transcription_requested': 'Запись отправлена на расшифровку',

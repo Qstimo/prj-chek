@@ -724,15 +724,15 @@ describe('выгрузка задач и зеркало трекера', () => {
     expect(screen.getByText(EXPORT_TEXTS.bindingMissing)).toBeInTheDocument();
   });
 
-  it('при неработающем подключении кнопка не нажимается, и причина названа', () => {
+  it('без токена настройки и кнопка выгрузки скрыты', () => {
     // Подключение начато и не работает — об этом сказано: его кто-то
     // настраивал и ждёт, что выгрузка работает.
     tracker({ isOperational: false, blockedBy: TRACKER_SECRET_MISSING, binding: BINDING });
 
     render(<TasksScreen projectId={PROJECT_ID} />);
 
-    expect(screen.getByRole('button', { name: EXPORT_TEXTS.action })).toBeDisabled();
-    expect(screen.getByText(EXPORT_TEXTS.blocked)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: EXPORT_TEXTS.action })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Настройки задач' })).not.toBeInTheDocument();
   });
 
   it('набор больше предела не уходит молча', () => {

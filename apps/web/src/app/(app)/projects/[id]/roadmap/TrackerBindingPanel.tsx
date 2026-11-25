@@ -4,6 +4,7 @@ import { TRACKER_BASE_URL_MISSING, type TrackerBinding, type TrackerTarget } fro
 import { useState } from 'react';
 
 import { describeApiError, summaryFailureOf } from '@/api';
+import { hasProjectTrackerConnection } from '@/api/trackerConnection';
 import {
   useMutationSaveTrackerBinding,
   useQueryProjectTracker,
@@ -42,7 +43,12 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
   // Пока готовность неизвестна или её не отдали, панели нет: роадмап
   // не обязан падать или мигать лоадером из-за трекера, который на этом
   // экране — дело десятое.
-  if (tracker.isPending || tracker.isError || !tracker.data) {
+  if (
+    tracker.isPending ||
+    tracker.isError ||
+    !tracker.data ||
+    !hasProjectTrackerConnection(tracker.data)
+  ) {
     return null;
   }
 
