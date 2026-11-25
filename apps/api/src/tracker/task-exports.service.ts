@@ -415,6 +415,18 @@ export class TaskExportsService {
       };
     }
 
+    // У задачи Weeek может быть несколько locations. Ответ на PUT не
+    // меняет выбранный при связывании проект на первый из чужого списка.
+    if (state.details) {
+      state = {
+        ...state,
+        details: {
+          ...state.details,
+          projectId: target.export?.details?.projectId || binding.externalProjectId,
+        },
+      };
+    }
+
     const row = await this.db.transaction((tx) =>
       this.exports.recordExported(subject, tx, projectId, target.taskId, {
         tracker: port.kind,

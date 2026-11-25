@@ -52,6 +52,7 @@ export const TASKS_TEXTS = {
  * значение перечня: `summary` человеку не говорит ничего.
  */
 export const ORIGIN_LABELS: Record<TaskOrigin, string> = {
+  [TaskOrigin.Tracker]: 'Из Weeek',
   [TaskOrigin.Manual]: 'Заведена руками',
   [TaskOrigin.Summary]: 'Из саммари',
   [TaskOrigin.Roadmap]: 'Заведена в версии',

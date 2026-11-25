@@ -89,6 +89,7 @@ describe('TrackerService', () => {
         createTask: vi.fn(),
         updateTask: vi.fn(),
         readTasks: vi.fn(),
+            readImportTasks: vi.fn(),
             readTaskLink: vi.fn(),
         targets,
         probe,

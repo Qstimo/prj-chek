@@ -1,4 +1,11 @@
-import type { TrackerKind, TrackerProbeResult, TrackerTargets } from '@cairn/shared';
+import type {
+  TrackerKind,
+  TrackerProbeResult,
+  TrackerTargets,
+  TrackerImportCandidate,
+  TrackerTaskDetails,
+  TrackerImportPreview,
+} from '@cairn/shared';
 
 /**
  * Куда класть задачу: привязка проекта, разобранная на три значения.
@@ -41,6 +48,7 @@ export interface TrackerTaskInput {
 export interface TrackerTaskState {
   /** Идентификатор в трекере: им идёт правка и опрос. */
   externalId: string;
+  details?: TrackerTaskDetails | null;
   /**
    * Ссылка для человека либо `null`.
    *
@@ -57,7 +65,8 @@ export interface TrackerTaskState {
 /**
  * Внешний трекер задач.
  *
- * **Шесть операций.** Четыре —
+ * Порт покрывает создание, обновление, опрос, связывание и импорт задач.
+ * Четыре исходные операции —
  * про жизнь задачи: `createTask`, `updateTask`, `readTasks`, `probe`.
  * Пятая, `targets`, читает списки проектов, досок и колонок, и появилась
  * она не для выгрузки, а потому что дизайн 9.3 требует: эти списки идут
@@ -72,6 +81,13 @@ export interface TrackerTaskState {
  * 10.5) — операция, которой нет в порту, не может быть вызвана по
  * недосмотру.
  */
+export interface TrackerImportSource {
+  tasks: Omit<TrackerImportCandidate, 'existingTaskId' | 'blockedReason'>[];
+  people: TrackerImportPreview['people'];
+  peopleAvailable: boolean;
+  truncated: boolean;
+}
+
 export interface Tracker {
   readonly kind: TrackerKind;
   /** Имя узла, куда уйдёт формулировка. `null` — называть нечего. */
@@ -94,6 +110,8 @@ export interface Tracker {
   readTasks(target: TrackerTarget, signal: AbortSignal): Promise<TrackerTaskState[]>;
   /** Читает существующую задачу по ссылке и проверяет пространство и доску. */
   readTaskLink(url: string, target: TrackerTarget, signal: AbortSignal): Promise<TrackerTaskState>;
+  /** Задачи выбранной доски для импорта, с датами, участниками и признаком неполной выдачи. */
+  readImportTasks(target: TrackerTarget, signal: AbortSignal): Promise<TrackerImportSource>;
   /** Списки для привязки: имена, а не идентификаторы, человеку на выбор. */
   targets(signal: AbortSignal): Promise<TrackerTargets>;
   /**

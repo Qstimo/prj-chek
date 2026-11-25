@@ -29,3 +29,5 @@ export * from './schemas/user';
 export * from './schemas/variable';
 
 export * from './schemas/weeek-task-link';
+
+export * from './schemas/tracker-import';

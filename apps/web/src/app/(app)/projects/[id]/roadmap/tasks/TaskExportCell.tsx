@@ -1,6 +1,11 @@
 'use client';
 
-import { isWeeekLink, TaskExportOutcome, type ProjectTask, type TaskExportResult } from '@cairn/shared';
+import {
+  isWeeekLink,
+  TaskExportOutcome,
+  type ProjectTask,
+  type TaskExportResult,
+} from '@cairn/shared';
 
 import { EXPORT_TEXTS, exportFailureTextOf } from './constants';
 
@@ -77,6 +82,19 @@ export function TaskExportCell({
           подменить его отказом значило бы потерять единственное, что о
           задаче в трекере знают. */}
       {failureCode !== null && <FailureBadge code={failureCode} />}
+
+      {mirror.details && (
+        <div className="text-xs text-muted-foreground">
+          <p>
+            Исполнитель:{' '}
+            {mirror.details.assignees.map((person) => person.name).join(', ') || 'Не назначен'}
+          </p>
+          {mirror.details.author && <p>Автор: {mirror.details.author.name}</p>}
+          {mirror.details.dueAt && (
+            <p>Срок: {new Date(mirror.details.dueAt).toLocaleDateString('ru-RU')}</p>
+          )}
+        </div>
+      )}
 
       <p className="text-xs text-muted-foreground">
         {mirror.checkedAt === null

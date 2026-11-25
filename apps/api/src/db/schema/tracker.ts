@@ -1,6 +1,7 @@
-import { TrackerKind } from '@cairn/shared';
+import { TrackerKind, type TrackerTaskDetails } from '@cairn/shared';
 import {
   boolean,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -197,6 +198,7 @@ export const taskExports = pgTable(
      */
     externalColumnId: text('external_column_id'),
     /** Закрыта ли задача **там**. Здесь не закрывает ничего. */
+    details: jsonb('details').$type<TrackerTaskDetails>(),
     isCompleted: boolean('is_completed').notNull().default(false),
     exportedAt: timestamp('exported_at', { withTimezone: true }).notNull().defaultNow(),
     /** Когда последний раз правили задачу в трекере или её зеркало. */
