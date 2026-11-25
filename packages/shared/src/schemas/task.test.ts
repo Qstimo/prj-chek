@@ -174,9 +174,7 @@ describe('задача проекта', () => {
     expect(diverged.placement?.isDone).toBe(false);
   });
 
-  it('происхождение — закрытый перечень трёх путей', () => {
-    // Задача приходит руками, из саммари и из роадмапа. Четвёртого пути
-    // нет, и перечень обязан это удерживать.
-    expect(Object.values(TaskOrigin)).toEqual(['manual', 'summary', 'roadmap']);
+  it('происхождение включает импорт из трекера отдельным путём', () => {
+    expect(Object.values(TaskOrigin)).toEqual(['manual', 'summary', 'roadmap', 'tracker']);
   });
 });

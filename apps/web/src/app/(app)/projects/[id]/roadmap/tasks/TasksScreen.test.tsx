@@ -23,6 +23,7 @@ import { TasksScreen } from './TasksScreen';
 import { EXPORT_FAILURES, EXPORT_TEXTS, TASKS_TEXTS } from './constants';
 
 vi.mock('@/api/hooks');
+vi.mock('./TaskImportPanel', () => ({ TaskImportPanel: () => null }));
 
 const replace = vi.fn();
 const search = { value: '' };

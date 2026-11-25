@@ -83,6 +83,7 @@ describe('выгрузка задач в трекер', () => {
             createTask,
             updateTask,
             readTasks: vi.fn(),
+            readImportTasks: vi.fn(),
             readTaskLink,
             targets: vi.fn(),
             probe: vi.fn(),

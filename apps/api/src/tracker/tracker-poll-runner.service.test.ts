@@ -75,6 +75,7 @@ class StubTracker implements Tracker {
   /** Задержка ответа: по ней видно, ждёт ли остановка конца тика. */
   holdMs = 0;
 
+  readImportTasks = vi.fn<Tracker['readImportTasks']>();
   readTaskLink = vi.fn<Tracker['readTaskLink']>();
 
   async readTasks(target: TrackerTarget, _signal: AbortSignal): Promise<TrackerTaskState[]> {

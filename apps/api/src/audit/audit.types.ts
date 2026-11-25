@@ -141,6 +141,7 @@ export enum AuditAction {
    */
   TaskExportUpdated = 'task.export_updated',
   TaskTrackerLinked = 'task.tracker_linked',
+  TaskImported = 'task.imported',
   CheckpointCreated = 'checkpoint.created',
   CheckpointUpdated = 'checkpoint.updated',
   CheckpointDeleted = 'checkpoint.deleted',

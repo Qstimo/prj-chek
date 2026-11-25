@@ -414,6 +414,13 @@
       "when": 1795434490302,
       "tag": "0058_task_export_privileges",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795597224684,
+      "tag": "0059_task_import_details",
+      "breakpoints": true
     }
   ]
 }

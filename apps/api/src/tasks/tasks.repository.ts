@@ -88,6 +88,7 @@ export class TasksRepository {
         isDone: roadmapCheckpoints.isDone,
         position: roadmapCheckpoints.position,
         carriedFromVersionId: roadmapCheckpoints.carriedFromVersionId,
+        details: taskExports.details,
         tracker: taskExports.tracker,
         externalId: taskExports.externalId,
         externalUrl: taskExports.externalUrl,

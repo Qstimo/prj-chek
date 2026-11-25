@@ -116,6 +116,53 @@ describe('WeeekTracker', () => {
     });
   });
 
+  describe('readImportTasks', () => {
+    const raw = { id: 42, title: 'Оплата', assignees: ['u1'], authorId: 'u2',
+      dueDate: '2026-11-25', createdAt: '2026-11-01T09:00:00Z', isCompleted: true,
+      locations: [{ projectId: 7, boardId: 11, boardColumnId: 31 }] };
+    function respond(options: { membersFail?: boolean; repeat?: boolean } = {}) {
+      fetchMock.mockImplementation((url: string) => {
+        if (url.endsWith('/ws')) return Promise.resolve(json({ workspace: { id: 4242 } }));
+        if (url.endsWith('/ws/members')) return Promise.resolve(options.membersFail ? json({}, 403) : json({ members: [
+          { id: 'u1', firstName: 'Иван', lastName: 'Иванов' }, { id: 'u2', name: 'Мария' },
+        ] }));
+        const query = new URL(url).searchParams;
+        expect(query.get('projectId')).toBe('7');
+        expect(query.get('boardId')).toBe('11');
+        expect(query.get('all')).toBe('1');
+        return Promise.resolve(json({ tasks: [raw,
+          { ...raw, id: 43, isDeleted: true },
+          { ...raw, id: 44, locations: [{ projectId: 99, boardId: 12 }] },
+        ], hasMore: options.repeat === true }));
+      });
+    }
+    it('читает закрытые задачи, исполнителя, автора и даты; исключает удалённые и чужую доску', async () => {
+      respond();
+      const result = await tracker().readImportTasks(TARGET, AbortSignal.timeout(1000));
+      expect(result.tasks).toHaveLength(1);
+      expect(result.tasks[0]).toMatchObject({ externalId: '42', title: 'Оплата', isCompleted: true,
+        externalUrl: 'https://app.weeek.net/ws/4242/task/42',
+        details: { dueAt: '2026-11-25', createdAt: '2026-11-01T09:00:00Z',
+          assignees: [{ id: 'u1', name: 'Иван Иванов' }], author: { id: 'u2', name: 'Мария' } } });
+      expect(result.peopleAvailable).toBe(true);
+      expect(result.truncated).toBe(false);
+      expect(fetchMock.mock.calls.every((call) => call[1].method === 'GET')).toBe(true);
+    });
+    it('отсутствие права на имена не блокирует задачи и не выдумывает имя', async () => {
+      respond({ membersFail: true });
+      const result = await tracker().readImportTasks(TARGET, AbortSignal.timeout(1000));
+      expect(result.peopleAvailable).toBe(false);
+      expect(result.tasks[0]?.details.assignees).toEqual([{ id: 'u1', name: 'u1' }]);
+    });
+    it('повторившаяся неполная выдача отмечается усечённой, а не полной', async () => {
+      respond({ repeat: true });
+      const result = await tracker().readImportTasks(TARGET, AbortSignal.timeout(1000));
+      expect(result.truncated).toBe(true);
+      expect(result.tasks).toHaveLength(1);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+  });
+
   describe('createTask', () => {
     it('посылает формулировку и все три идентификатора привязки', async () => {
       fetchMock.mockResolvedValue(json({ success: true, task: { id: 42 } }));

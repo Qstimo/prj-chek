@@ -7,6 +7,7 @@ import {
   TrackerKind,
   type TrackerProbeResult,
   type TrackerTargets,
+  type TrackerTaskDetails,
 } from '@cairn/shared';
 
 import { probeOutcomeOf } from '../summaries/suggester/probe-outcome';
@@ -17,6 +18,7 @@ import {
   type TrackerTarget,
   type TrackerTaskInput,
   type TrackerTaskState,
+  type TrackerImportSource,
 } from './tracker';
 
 /**
@@ -101,6 +103,8 @@ export class WeeekTracker implements Tracker {
    */
   readonly #settings: TrackerSettings;
   #workspaceId: string | null;
+  #people = new Map<string, string>();
+  #peopleReady?: boolean;
 
   constructor(settings: TrackerSettings) {
     this.#settings = settings;
@@ -202,34 +206,153 @@ export class WeeekTracker implements Tracker {
   async readTasks(target: TrackerTarget, signal: AbortSignal): Promise<TrackerTaskState[]> {
     const tasks = await this.listed(
       '/tm/tasks',
-      { projectId: target.externalProjectId, boardId: target.boardId },
+      { projectId: target.externalProjectId, boardId: target.boardId, all: '1' },
       ['tasks'],
       signal,
     );
 
-    return tasks.map((task) => this.stateOf(task));
+    if (tasks.some((task) => Array.isArray(task.assignees) && task.assignees.length)) {
+      await this.loadPeople(signal);
+    }
+    return tasks
+      .filter((task) => task.isDeleted !== true)
+      .map((task) => this.stateOf(task, target));
+  }
+
+  async readImportTasks(target: TrackerTarget, signal: AbortSignal): Promise<TrackerImportSource> {
+    signal = AbortSignal.any([signal, AbortSignal.timeout(this.#settings.timeoutSeconds * 1000)]);
+    const workspace = await this.exchange('/ws', { method: 'GET' }, signal);
+    this.#workspaceId = idOf(objectOf(workspace, 'workspace')?.id);
+    if (!this.#workspaceId) throw this.rejected('в ответе нет рабочего пространства');
+    const peopleAvailable = await this.loadPeople(signal);
+    let truncated = false;
+    const rows = await this.listed(
+      '/tm/tasks',
+      {
+        projectId: target.externalProjectId,
+        boardId: target.boardId,
+        all: '1',
+      },
+      ['tasks'],
+      signal,
+      () => {
+        truncated = true;
+      },
+    );
+    const tasks: TrackerImportSource['tasks'] = [];
+    for (const row of rows) {
+      if (row.isDeleted === true || idOf(row.id) === null) continue;
+      const locations = Array.isArray(row.locations) ? row.locations : [row];
+      const location = locations.find(
+        (item) =>
+          item &&
+          idOf(item.projectId) === target.externalProjectId &&
+          idOf(item.boardId) === target.boardId,
+      );
+      // Не доверяем одному фильтру запроса: импортирует только выбранную доску.
+      if (!location) continue;
+      const state = this.stateOf(row, target);
+      tasks.push({
+        externalId: state.externalId,
+        externalUrl: WORKSPACE_TASK_URL(this.#workspaceId, state.externalId),
+        title: typeof row.title === 'string' ? row.title.trim() : '',
+        boardId: target.boardId,
+        boardColumnId: idOf(location.boardColumnId),
+        isCompleted: state.isCompleted,
+        details: this.detailsOf(row, target.externalProjectId),
+      });
+    }
+    const assignees = new Map(
+      tasks.flatMap((task) => task.details.assignees).map((person) => [person.id, person]),
+    );
+    return { tasks, people: [...assignees.values()], peopleAvailable, truncated };
+  }
+
+  private async loadPeople(signal: AbortSignal): Promise<boolean> {
+    if (this.#peopleReady !== undefined) return this.#peopleReady;
+    try {
+      const payload = await this.exchange(
+        '/ws/members',
+        { method: 'GET' },
+        AbortSignal.any([signal, AbortSignal.timeout(3000)]),
+      );
+      if (!Array.isArray(payload.members) && !Array.isArray(payload.users))
+        return (this.#peopleReady = false);
+      for (const row of arrayOf(payload, ['members', 'users'])) {
+        const person = objectOf(row, 'user') ?? row;
+        const id = idOf(person.id) ?? idOf(row.userId);
+        const name =
+          [person.firstName, person.lastName]
+            .filter((part) => typeof part === 'string' && part)
+            .join(' ') ||
+          nameOf(person) ||
+          (typeof person.email === 'string' ? person.email : '');
+        if (id) this.#people.set(id, name || id);
+      }
+      return (this.#peopleReady = true);
+    } catch {
+      return (this.#peopleReady = false);
+    }
+  }
+
+  private detailsOf(task: Record<string, unknown>, projectId: string): TrackerTaskDetails {
+    const person = (id: string) => ({ id, name: this.#people.get(id) ?? id });
+    const raw = Array.isArray(task.assignees) ? task.assignees : [];
+    const ids = raw.flatMap((value) => {
+      const id =
+        typeof value === 'object' && value !== null ? idOf(value.userId ?? value.id) : idOf(value);
+      return id ? [id] : [];
+    });
+    const date = (value: unknown) =>
+      typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? value : null;
+    const authorId = idOf(task.authorId);
+    return {
+      projectId,
+      assignees: [...new Set(ids)].map(person),
+      author: authorId ? person(authorId) : null,
+      createdAt: date(task.createdAt),
+      startAt: date(task.startDateTime ?? task.startDate),
+      dueAt: date(task.dueDateTime ?? task.dueDate),
+      completedAt: date(task.completedAt),
+    };
   }
 
   /** Проверка существующей ссылки: пространство токена и расположение задачи. */
-  async readTaskLink(url: string, target: TrackerTarget, signal: AbortSignal): Promise<TrackerTaskState> {
+  async readTaskLink(
+    url: string,
+    target: TrackerTarget,
+    signal: AbortSignal,
+  ): Promise<TrackerTaskState> {
     signal = AbortSignal.any([signal, AbortSignal.timeout(this.#settings.timeoutSeconds * 1000)]);
     const link = weeekTaskLinkOf(url);
-    const invalid = () => new TrackerFailure(TRACKER_LINK_INVALID,
-      'Не удалось связать задачу: проверьте ссылку, рабочее пространство и выбранную доску.');
+    const invalid = () =>
+      new TrackerFailure(
+        TRACKER_LINK_INVALID,
+        'Не удалось связать задачу: проверьте ссылку, рабочее пространство и выбранную доску.',
+      );
     if (!link) throw invalid();
 
     // Идентификаторы задач локальны для пространства: один taskId недостаточен.
     const workspace = await this.exchange('/ws', { method: 'GET' }, signal);
     if (idOf(objectOf(workspace, 'workspace')?.id) !== link.workspaceId) throw invalid();
-    const payload = await this.exchange(`/tm/tasks/${encodeURIComponent(link.taskId)}`, { method: 'GET' }, signal);
+    const payload = await this.exchange(
+      `/tm/tasks/${encodeURIComponent(link.taskId)}`,
+      { method: 'GET' },
+      signal,
+    );
     const task = objectOf(payload, 'task');
     if (!task || idOf(task.id) !== link.taskId || task.isDeleted === true) throw invalid();
+    if (Array.isArray(task.assignees) && task.assignees.length) await this.loadPeople(signal);
     const locations = Array.isArray(task.locations) ? task.locations : [task];
-    const location = locations.find((item: Record<string, unknown> | null) =>
-      item && idOf(item.projectId) === target.externalProjectId && idOf(item.boardId) === target.boardId);
+    const location = locations.find(
+      (item: Record<string, unknown> | null) =>
+        item &&
+        idOf(item.projectId) === target.externalProjectId &&
+        idOf(item.boardId) === target.boardId,
+    );
     if (!location) throw invalid();
     return {
-      ...this.stateOf(task),
+      ...this.stateOf(task, target),
       externalUrl: `https://app.weeek.net/ws/${link.workspaceId}/task/${link.taskId}`,
       boardId: target.boardId,
       boardColumnId: idOf(location.boardColumnId),
@@ -256,7 +379,9 @@ export class WeeekTracker implements Tracker {
     for (const project of projects) {
       const boardQuery = new URLSearchParams({ projectId: project.id });
       const payload = await this.exchange(`/tm/boards?${boardQuery}`, { method: 'GET' }, signal);
-      const projectBoards = identified(arrayOf(payload, ['boards']), () => ({ projectId: project.id }));
+      const projectBoards = identified(arrayOf(payload, ['boards']), () => ({
+        projectId: project.id,
+      }));
 
       for (const board of projectBoards) {
         if (boards.has(board.id)) continue;
@@ -264,7 +389,9 @@ export class WeeekTracker implements Tracker {
 
         const columnQuery = new URLSearchParams({ boardId: board.id });
         const columnPayload = await this.exchange(
-          `/tm/board-columns?${columnQuery}`, { method: 'GET' }, signal,
+          `/tm/board-columns?${columnQuery}`,
+          { method: 'GET' },
+          signal,
         );
         const boardColumns = identified(
           arrayOf(columnPayload, ['boardColumns', 'board_columns', 'columns']),
@@ -360,21 +487,19 @@ export class WeeekTracker implements Tracker {
     params: Record<string, string>,
     keys: string[],
     signal: AbortSignal,
+    onIncomplete?: () => void,
   ): Promise<Record<string, unknown>[]> {
     const collected: Record<string, unknown>[] = [];
     const seen = new Set<string>();
 
+    let offset = 0;
     for (let page = 0; page < TRACKER_MAX_LIST_PAGES; page += 1) {
       const query = new URLSearchParams({
         ...params,
         perPage: String(TRACKER_LIST_PAGE_SIZE),
-        offset: String(page * TRACKER_LIST_PAGE_SIZE),
+        offset: String(offset),
       });
-      const payload = await this.exchange(
-        `${path}?${query.toString()}`,
-        { method: 'GET' },
-        signal,
-      );
+      const payload = await this.exchange(`${path}?${query.toString()}`, { method: 'GET' }, signal);
       const rows = arrayOf(payload, keys);
       let added = 0;
 
@@ -393,9 +518,14 @@ export class WeeekTracker implements Tracker {
         added += 1;
       }
 
-      if (added === 0 || rows.length < TRACKER_LIST_PAGE_SIZE) {
+      offset += rows.length;
+      if (payload.hasMore === false) break;
+      if (added === 0) {
+        if (rows.length > 0 || payload.hasMore === true) onIncomplete?.();
         break;
       }
+      if (rows.length < TRACKER_LIST_PAGE_SIZE && payload.hasMore !== true) break;
+      if (page === TRACKER_MAX_LIST_PAGES - 1) onIncomplete?.();
     }
 
     return collected;
@@ -430,9 +560,10 @@ export class WeeekTracker implements Tracker {
       if (response.status === 429 || response.status >= 500) {
         throw this.unavailable(`узел ответил ${response.status}`);
       }
-      const reason = response.status === 401 || response.status === 403
-        ? `токен не принят или недостаточно прав (HTTP ${response.status})`
-        : `запрос ${init.method} ${path.split('?')[0]} отклонён (HTTP ${response.status})`;
+      const reason =
+        response.status === 401 || response.status === 403
+          ? `токен не принят или недостаточно прав (HTTP ${response.status})`
+          : `запрос ${init.method} ${path.split('?')[0]} отклонён (HTTP ${response.status})`;
       throw this.rejected(reason);
     }
 
@@ -490,7 +621,7 @@ export class WeeekTracker implements Tracker {
   }
 
   /** Состояние задачи из её объекта в ответе. Без `id` — отказ. */
-  private stateOf(task: Record<string, unknown> | null): TrackerTaskState {
+  private stateOf(task: Record<string, unknown> | null, target?: TrackerTarget): TrackerTaskState {
     const externalId = task === null ? null : idOf(task.id);
 
     if (externalId === null || task === null) {
@@ -500,11 +631,30 @@ export class WeeekTracker implements Tracker {
       throw this.rejected('в ответе нет задачи');
     }
 
+    const locations = Array.isArray(task.locations) ? task.locations : [task];
+    const location =
+      locations.find(
+        (item) =>
+          item &&
+          (!target ||
+            (idOf(item.projectId) === target.externalProjectId &&
+              idOf(item.boardId) === target.boardId)),
+      ) ?? task;
     return {
       externalId,
+      // Короткий ответ на PUT может не содержать метаданных. Он не означает,
+      // что исполнителей сняли и даты стёрли: в этом случае сохраняем зеркало.
+      ...(Array.isArray(task.assignees)
+        ? {
+            details: this.detailsOf(
+              task,
+              target?.externalProjectId ?? idOf(location.projectId) ?? '',
+            ),
+          }
+        : {}),
       externalUrl: this.urlOf(task, externalId),
-      boardId: idOf(task.boardId),
-      boardColumnId: idOf(task.boardColumnId),
+      boardId: idOf(location.boardId),
+      boardColumnId: idOf(location.boardColumnId),
       // Отсутствие признака читается как «не закрыта»: зеркало ничего не
       // закрывает, и «неизвестно» здесь безопаснее трактовать в пользу
       // открытой задачи — она останется в обходе опроса.

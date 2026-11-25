@@ -1,3 +1,4 @@
+import { trackerTaskDetailsSchema } from './tracker-import';
 import { z } from 'zod';
 
 import { ModelProbeOutcome, TaskExportOutcome, TrackerKind } from '../enums';
@@ -355,6 +356,7 @@ export const taskExportSchema = z
      */
     checkedAt: z.string().nullable(),
     /** Код последней неудачи обмена из списка выше; пусто после удачи. */
+    details: trackerTaskDetailsSchema.nullable().optional(),
     failureCode: z.string().nullable(),
   })
   .strict();

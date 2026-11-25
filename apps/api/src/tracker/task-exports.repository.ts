@@ -147,7 +147,12 @@ export class TaskExportsRepository {
     const unique = [...new Set(taskIds)];
 
     const rows = await this.db
-      .select({ id: projectTasks.id, title: projectTasks.title, url: projectTasks.url, row: taskExports })
+      .select({
+        id: projectTasks.id,
+        title: projectTasks.title,
+        url: projectTasks.url,
+        row: taskExports,
+      })
       .from(projectTasks)
       // Соединение по задаче, без вида трекера: ключ выгрузки — пара
       // «задача × трекер», а в перечне одно значение (дизайн, 10.1), то
@@ -292,10 +297,12 @@ export class TaskExportsRepository {
         externalColumnId: input.state.boardColumnId,
         isCompleted: input.state.isCompleted,
         failureCode: null,
+        details: input.state.details ?? null,
       })
       .onConflictDoUpdate({
         target: [taskExports.taskId, taskExports.tracker],
         set: {
+          details: sql`coalesce(excluded.details, ${taskExports.details})`,
           externalUrl: sql`coalesce(excluded.external_url, ${taskExports.externalUrl})`,
           externalColumnId: sql`coalesce(excluded.external_column_id, ${taskExports.externalColumnId})`,
           // Пишется как сказал ответ на правку: это свежайшее знание о чужом
@@ -341,9 +348,7 @@ export class TaskExportsRepository {
     const [written] = await tx
       .update(taskExports)
       .set({ failureCode: failure.code, updatedAt: new Date() })
-      .where(
-        and(eq(taskExports.taskId, taskId), eq(taskExports.tracker, failure.tracker)),
-      )
+      .where(and(eq(taskExports.taskId, taskId), eq(taskExports.tracker, failure.tracker)))
       .returning();
 
     return written ?? null;
@@ -455,8 +460,8 @@ export class TaskExportsRepository {
         projectId: projectTasks.projectId,
         tracker: taskExports.tracker,
         externalId: taskExports.externalId,
-        externalProjectId: trackerProjectBindings.externalProjectId,
-        boardId: trackerProjectBindings.boardId,
+        externalProjectId: sql<string>`coalesce(${taskExports.details}->>'projectId', ${trackerProjectBindings.externalProjectId})`,
+        boardId: taskExports.externalBoardId,
         boardColumnId: trackerProjectBindings.boardColumnId,
         checkedAt: taskExports.checkedAt,
       })
@@ -468,10 +473,7 @@ export class TaskExportsRepository {
         eq(trackerProjectBindings.projectId, projectTasks.projectId),
       )
       .where(
-        and(
-          eq(taskExports.isCompleted, false),
-          ne(projects.lifecycle, ProjectLifecycle.Archived),
-        ),
+        and(eq(taskExports.isCompleted, false), ne(projects.lifecycle, ProjectLifecycle.Archived)),
       )
       .orderBy(
         // `nulls first` именно так и читается: ни разу не спрошенные сверху.
@@ -524,8 +526,10 @@ function pollPatchOf(result: TaskPollResult): PgUpdateSetSource<typeof taskExpor
   }
 
   const { isCompleted, externalUrl, boardColumnId } = result.state;
+  const detailsJson = result.state.details ? JSON.stringify(result.state.details) : null;
 
   return {
+    details: sql`coalesce(${detailsJson}::jsonb, ${taskExports.details})`,
     isCompleted,
     // `coalesce` у ссылки и колонки — то же правило, что у записи выгрузки:
     // `null` означает «трекер не сказал», и молчание не стирает известное.
@@ -537,12 +541,13 @@ function pollPatchOf(result: TaskPollResult): PgUpdateSetSource<typeof taskExpor
     checkedAt: now,
     // Сравнение построчное: двигать время правки от самого факта опроса
     // значило бы слить две колонки в одну.
-    updatedAt: sql`case when (${taskExports.isCompleted}, ${taskExports.externalUrl}, ${taskExports.externalColumnId}, ${taskExports.failureCode})
+    updatedAt: sql`case when (${taskExports.isCompleted}, ${taskExports.externalUrl}, ${taskExports.externalColumnId}, ${taskExports.failureCode}, ${taskExports.details})
       is distinct from (
         ${isCompleted}::boolean,
         coalesce(${externalUrl}::text, ${taskExports.externalUrl}),
         coalesce(${boardColumnId}::text, ${taskExports.externalColumnId}),
-        null::text
+        null::text,
+        coalesce(${detailsJson}::jsonb, ${taskExports.details})
       ) then ${stamp} else ${taskExports.updatedAt} end`,
   };
 }

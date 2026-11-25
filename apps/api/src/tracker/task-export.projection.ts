@@ -1,4 +1,4 @@
-import type { TaskExport, TrackerKind } from '@cairn/shared';
+import type { TaskExport, TrackerKind, TrackerTaskDetails } from '@cairn/shared';
 
 import type { TaskExportRow } from '../db/schema';
 
@@ -10,6 +10,7 @@ import type { TaskExportRow } from '../db/schema';
  * означали бы, что одно из них молча затирает другое.
  */
 export interface TaskExportColumns {
+  details?: TrackerTaskDetails | null;
   tracker: TrackerKind | null;
   externalId: string | null;
   externalUrl: string | null;
@@ -53,6 +54,7 @@ export function taskExportOf(row: TaskExportColumns): TaskExport | null {
   }
 
   return {
+    ...(row.details ? { details: row.details } : {}),
     tracker: row.tracker,
     externalId: row.externalId,
     externalUrl: row.externalUrl,

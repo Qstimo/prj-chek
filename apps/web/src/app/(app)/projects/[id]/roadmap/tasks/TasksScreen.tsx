@@ -32,6 +32,7 @@ import { Loader } from '@/components/Loader';
 
 import { TrackerBindingPanel } from '../TrackerBindingPanel';
 import { TaskExportCell } from './TaskExportCell';
+import { TaskImportPanel } from './TaskImportPanel';
 import { TaskExportSummary } from './TaskExportSummary';
 import {
   EXPORT_TEXTS,
@@ -188,6 +189,9 @@ export function TasksScreen({ projectId }: { projectId: string }) {
             {isLoose ? TASKS_TEXTS.filterAll : TASKS_TEXTS.filterLoose}
           </button>
           <div className="flex flex-wrap items-center gap-3">
+            {tracker.data?.isOperational && (
+              <TaskImportPanel projectId={projectId} binding={tracker.data.binding} />
+            )}
             {isExportVisible && (
               <button
                 type="button"

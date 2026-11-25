@@ -63,6 +63,10 @@ export class DisabledTracker implements Tracker {
    * досок», то есть посылает человека заводить доску вместо того, чтобы
    * идти к администратору за токеном.
    */
+  async readImportTasks(_target: TrackerTarget, _signal: AbortSignal): Promise<import('./tracker').TrackerImportSource> {
+    throw this.disabled();
+  }
+
   async targets(_signal: AbortSignal): Promise<TrackerTargets> {
     throw this.disabled();
   }

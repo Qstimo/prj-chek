@@ -18,6 +18,7 @@ export const taskOriginEnum = pgEnum('task_origin', [
   TaskOrigin.Manual,
   TaskOrigin.Summary,
   TaskOrigin.Roadmap,
+  TaskOrigin.Tracker,
 ]);
 
 /**

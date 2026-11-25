@@ -1,3 +1,6 @@
+import { TaskImportsController } from './task-imports.controller';
+import { TaskImportsService } from './task-imports.service';
+import { TaskImportsRepository } from './task-imports.repository';
 import { Module } from '@nestjs/common';
 
 import { AccessModule } from '../access/access.module';
@@ -44,8 +47,10 @@ import { TrackerConnectionSource } from './tracker.source';
  */
 @Module({
   imports: [DbModule, AccessModule, AuditModule, AuthModule],
-  controllers: [TrackerController, ProjectTrackerController, TaskExportsController],
+  controllers: [TaskImportsController, TrackerController, ProjectTrackerController, TaskExportsController],
   providers: [
+    TaskImportsService,
+    TaskImportsRepository,
     TrackerConnectionsRepository,
     TrackerBindingsRepository,
     TaskExportsRepository,

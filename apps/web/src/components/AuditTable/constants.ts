@@ -70,6 +70,7 @@ export const ACTION_LABELS: Record<string, string> = {
   // Два названия, а не одно: во втором случае в чужом трекере не появилось
   // новой задачи — повторная выгрузка правит уже лежащую там.
   'task.exported': 'Задача выгружена в трекер',
+  'task.imported': 'Задача импортирована из Weeek',
   'task.tracker_linked': 'Задача связана с существующей задачей Weeek',
   'task.export_updated': 'Задача в трекере исправлена',
   'checkpoint.created': 'Добавлен чекпоинт',
