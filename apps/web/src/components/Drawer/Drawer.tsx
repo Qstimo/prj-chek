@@ -17,6 +17,7 @@ export function Drawer({
   title,
   width = DrawerWidth.Default,
   actions,
+  returnFocusRef,
   children,
 }: IProps) {
   return (
@@ -24,6 +25,12 @@ export function Drawer({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
         <Dialog.Content
+          onCloseAutoFocus={(event) => {
+            if (returnFocusRef?.current?.isConnected) {
+              event.preventDefault();
+              returnFocusRef.current.focus();
+            }
+          }}
           aria-describedby={undefined}
           // Верхнего отступа у панели нет: его держит шапка. Прилипший
           // элемент пинается к верху padding box, и `pt-6` оставил бы над

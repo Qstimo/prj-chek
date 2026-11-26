@@ -12,7 +12,7 @@ import {
   type TaskExportResult,
   type TrackerBinding,
 } from '@cairn/shared';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -203,18 +203,53 @@ beforeEach(() => {
   vi.mocked(hooks.useMutationSaveTrackerBinding).mockReturnValue(mutation());
 });
 
+async function openActions(task: ProjectTask) {
+  await userEvent.click(screen.getByRole('button', { name: `Действия: ${task.title}` }));
+}
+async function openFilters() {
+  await userEvent.click(screen.getByRole('button', { name: /^Фильтры/ }));
+}
+
 describe('реестр задач проекта', () => {
+  it('после перехода из действий в правку возвращает клавиатурный фокус к той же задаче', async () => {
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    await openActions(PLACED);
+    await userEvent.click(screen.getByRole('button', { name: 'Править' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: `Действия: ${PLACED.title}` })).toHaveFocus(),
+    );
+  });
+
+  it('показывает один одинаковый контрол действий у каждой задачи', () => {
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    expect(screen.getAllByRole('button', { name: /^Действия:/ })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Править' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Релиз и выполнение' })).not.toBeInTheDocument();
+  });
+  it('клик по формулировке не отмечает задачу для выгрузки', async () => {
+    ready();
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    await userEvent.click(screen.getByText(LOOSE.title));
+    expect(
+      screen.getByRole('checkbox', { name: EXPORT_TEXTS.select(LOOSE.title) }),
+    ).not.toBeChecked();
+  });
+
   it('фильтр релиза сохраняет остальные условия, его можно снять быстрой кнопкой', async () => {
     search.value = 'release=loose&integration=local';
     render(<TasksScreen projectId={PROJECT_ID} />);
+    await openFilters();
     expect(screen.getByLabelText('Релиз')).toHaveValue('loose');
     expect(screen.queryByText(PLACED.title)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: TASKS_TEXTS.filterAll }));
+    await userEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Убрать фильтр: Вне релиза' }));
     expect(replace).toHaveBeenCalledWith('?integration=local', { scroll: false });
   });
-  it('старая ссылка loose показывает тот же выбранный фильтр релиза', () => {
+  it('старая ссылка loose показывает тот же выбранный фильтр релиза', async () => {
     search.value = 'loose=true';
     render(<TasksScreen projectId={PROJECT_ID} />);
+    await openFilters();
     expect(screen.getByLabelText('Релиз')).toHaveValue('loose');
   });
   it('существующая ссылка Weeek связывает задачу без обычной выгрузки', async () => {
@@ -225,6 +260,7 @@ describe('реестр задач проекта', () => {
       query([{ ...LOOSE, url: 'https://app.weeek.net/ws/4242/task/42' }]),
     );
     render(<TasksScreen projectId={PROJECT_ID} />);
+    await openActions(LOOSE);
     await userEvent.click(screen.getByRole('button', { name: 'Связать с Weeek' }));
     expect(mutateOf(link)).toHaveBeenCalledWith(LOOSE.id);
     expect(mutateOf(exportTasks)).not.toHaveBeenCalled();
@@ -236,7 +272,7 @@ describe('реестр задач проекта', () => {
     expect(screen.getByText('Поднять предел текста')).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: /v1.2/ })).toBeInTheDocument();
     expect(screen.getByText(TASKS_TEXTS.loose)).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: 'Из саммари' })).toBeInTheDocument();
+    expect(screen.getByText('Из саммари')).toBeInTheDocument();
   });
 
   it('пустой реестр говорит словами, а не пустым местом', () => {
@@ -254,9 +290,12 @@ describe('реестр задач проекта', () => {
     // состояние в памяти такую ссылку сделать не позволяет.
     render(<TasksScreen projectId={PROJECT_ID} />);
 
-    await userEvent.click(screen.getByRole('button', { name: TASKS_TEXTS.filterLoose }));
+    await openFilters();
+    await userEvent.selectOptions(screen.getByLabelText('Релиз'), 'loose');
+    expect(replace).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Применить фильтры' }));
 
-    expect(replace).toHaveBeenCalledWith('?loose=true', { scroll: false });
+    expect(replace).toHaveBeenCalledWith('?release=loose', { scroll: false });
   });
 
   it('фильтр из адреса оставляет только задачи вне версий', () => {
@@ -268,19 +307,11 @@ describe('реестр задач проекта', () => {
     expect(screen.queryByText('Оплата картой')).not.toBeInTheDocument();
   });
 
-  it('у задачи в версии нет удаления — только «вынуть»', () => {
-    // Удаление размещённой задачи меняло бы прогресс версии с этого
-    // экрана и молча; сервер его и не разрешает.
-    search.value = '';
-
+  it('у задачи в версии нет удаления — только «вынуть»', async () => {
     render(<TasksScreen projectId={PROJECT_ID} />);
-
-    const rows = screen.getAllByRole('row');
-    const placedRow = rows.find((row) => row.textContent?.includes('Оплата картой'))!;
-
-    expect(placedRow).toBeDefined();
-    expect(placedRow.textContent).toContain(TASKS_TEXTS.detach);
-    expect(placedRow.textContent).not.toContain(TASKS_TEXTS.remove);
+    await openActions(PLACED);
+    expect(screen.getByRole('button', { name: TASKS_TEXTS.detach })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: TASKS_TEXTS.remove })).not.toBeInTheDocument();
   });
 
   it('«вынуть из версии» уходит сразу, без подтверждения', async () => {
@@ -288,21 +319,23 @@ describe('реестр задач проекта', () => {
     // согласие на то, что чинится одним нажатием, незачем.
     render(<TasksScreen projectId={PROJECT_ID} />);
 
+    await openActions(PLACED);
     await userEvent.click(screen.getByRole('button', { name: TASKS_TEXTS.detach }));
 
-    expect(mutateOf(detach)).toHaveBeenCalledWith(PLACED.id);
+    expect(mutateOf(detach)).toHaveBeenCalledWith(PLACED.id, expect.anything());
   });
 
   it('удаление спрашивает подтверждение и называет потерю целиком', async () => {
     render(<TasksScreen projectId={PROJECT_ID} />);
 
+    await openActions(LOOSE);
     await userEvent.click(screen.getByRole('button', { name: TASKS_TEXTS.remove }));
 
     expect(screen.getByText(TASKS_TEXTS.removeQuestion)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: TASKS_TEXTS.removeConfirm }));
 
-    expect(mutateOf(remove)).toHaveBeenCalledWith(LOOSE.id);
+    expect(mutateOf(remove)).toHaveBeenCalledWith(LOOSE.id, expect.anything());
   });
 
   it('заводит задачу из панели', async () => {
@@ -321,7 +354,8 @@ describe('реестр задач проекта', () => {
   it('правка уходит в ту задачу, у которой нажали «Править»', async () => {
     render(<TasksScreen projectId={PROJECT_ID} />);
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Править' })[1]!);
+    await openActions(PLACED);
+    await userEvent.click(screen.getByRole('button', { name: 'Править' }));
     await userEvent.clear(screen.getByLabelText('Формулировка'));
     await userEvent.type(screen.getByLabelText('Формулировка'), 'Оплата картой и СБП');
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
@@ -709,16 +743,19 @@ describe('выгрузка задач и зеркало трекера', () => {
 
     render(<TasksScreen projectId={PROJECT_ID} />);
 
-    expect(screen.getByRole('button', { name: EXPORT_TEXTS.action })).toBeDisabled();
-    expect(screen.getByText(EXPORT_TEXTS.nothingSelected)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: EXPORT_TEXTS.action })).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Отметьте задачи галочками, чтобы выгрузить их в Weeek.'),
+    ).toBeInTheDocument();
   });
 
-  it('без привязки доски кнопка не нажимается, и причина названа', () => {
+  it('без привязки доски кнопка не нажимается, и причина названа', async () => {
     // Чинится на этом же экране, панелью выше: молчание отправило бы
     // человека к администратору за тем, что он делает сам.
     tracker({ isOperational: true, blockedBy: null, binding: null });
 
     render(<TasksScreen projectId={PROJECT_ID} />);
+    await userEvent.click(screen.getByRole('checkbox', { name: EXPORT_TEXTS.select(LOOSE.title) }));
 
     expect(screen.getByRole('button', { name: EXPORT_TEXTS.action })).toBeDisabled();
     expect(screen.getByText(EXPORT_TEXTS.bindingMissing)).toBeInTheDocument();

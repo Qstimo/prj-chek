@@ -42,7 +42,7 @@ export function TaskFilters({
     </label>
   );
   return (
-    <div className="grid grid-cols-1 gap-3 rounded-md border border-border p-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <label className="space-y-1 text-sm">
         <span className="block text-muted-foreground">Поиск задач</span>
         <input

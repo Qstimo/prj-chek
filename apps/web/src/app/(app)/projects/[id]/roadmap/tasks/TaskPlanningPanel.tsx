@@ -1,7 +1,7 @@
 'use client';
 
 import type { ProjectTask, TrackerBinding } from '@cairn/shared';
-import { useState } from 'react';
+import { useState, type RefObject } from 'react';
 import { describeApiError } from '@/api';
 import { useQueryRoadmap, useQueryTrackerTargets } from '@/api/hooks';
 import { useMutationPlanTask } from '@/api/hooks/useTasks';
@@ -14,12 +14,14 @@ export function TaskPlanningPanel({
   binding,
   onClose,
   showTracker = true,
+  returnFocusRef,
 }: {
   projectId: string;
   task: ProjectTask;
   binding: TrackerBinding | null;
   onClose: () => void;
   showTracker?: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const roadmap = useQueryRoadmap(projectId);
   const targets = useQueryTrackerTargets(projectId, showTracker && !!task.export && !!binding);
@@ -36,6 +38,7 @@ export function TaskPlanningPanel({
   const ruleUnchanged = columnId === (task.completionRule?.columnId ?? '');
   return (
     <Drawer
+      returnFocusRef={returnFocusRef}
       isOpen
       onClose={() => {
         if (!save.isPending) onClose();

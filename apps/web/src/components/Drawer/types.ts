@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
 /** Ширина выезжающей панели. */
 export enum DrawerWidth {
@@ -27,5 +27,7 @@ export interface IProps {
    * (сохранение черновика), остаётся на виду при любой прокрутке.
    */
   actions?: ReactNode;
+  /** Возврат к исходному контролу при переходах между несколькими панелями. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
   children: ReactNode;
 }

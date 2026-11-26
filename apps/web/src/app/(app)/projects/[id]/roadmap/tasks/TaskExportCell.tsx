@@ -32,9 +32,11 @@ import { EXPORT_TEXTS, exportFailureTextOf } from './constants';
 export function TaskExportCell({
   task,
   attempt,
+  compact = false,
 }: {
   task: ProjectTask;
   attempt: TaskExportResult | null;
+  compact?: boolean;
 }) {
   const mirror = task.export;
   // Код только что неудавшейся выгрузки главнее кода зеркала: при первом
@@ -83,7 +85,7 @@ export function TaskExportCell({
           задаче в трекере знают. */}
       {failureCode !== null && <FailureBadge code={failureCode} />}
 
-      {mirror.details && (
+      {!compact && mirror.details && (
         <div className="text-xs text-muted-foreground">
           <p>
             Исполнитель:{' '}
