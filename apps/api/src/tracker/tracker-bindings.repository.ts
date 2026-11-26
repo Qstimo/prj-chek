@@ -55,6 +55,7 @@ export class TrackerBindingsRepository {
           externalProjectId: row.binding.externalProjectId,
           boardId: row.binding.boardId,
           boardColumnId: row.binding.boardColumnId,
+          completionColumnId: row.binding.completionColumnId,
           updatedAt: row.binding.updatedAt.toISOString(),
           updatedByLabel: row.updatedByLabel,
         }
@@ -92,6 +93,7 @@ export class TrackerBindingsRepository {
       externalProjectId: input.externalProjectId,
       boardId: input.boardId,
       boardColumnId: input.boardColumnId,
+      completionColumnId: input.completionColumnId ?? null,
       updatedBySubjectId: subject.id,
       updatedAt: new Date(),
     };

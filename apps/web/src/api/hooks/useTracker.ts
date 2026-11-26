@@ -2,6 +2,7 @@
 
 import type {
   ProjectTracker,
+  TaskSyncResult,
   TrackerBinding,
   TrackerBindingUpdate,
   TrackerConnection,
@@ -13,6 +14,8 @@ import type {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
+import { TASK_KEYS } from './useTasks';
+import { ROADMAP_KEYS } from './useQueryRoadmap';
 
 /**
  * Ключи кэша трекера.
@@ -139,5 +142,18 @@ export function useMutationSaveTrackerBinding(projectId: string) {
         body: input,
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: TRACKER_KEYS.forProject(projectId) }),
+  });
+}
+
+export function useMutationSyncTrackerTasks(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiClient<TaskSyncResult>(`/projects/${projectId}/tasks/sync`, { method: 'POST' }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: TASK_KEYS.forProject(projectId) }),
+        client.invalidateQueries({ queryKey: ROADMAP_KEYS.forProject(projectId) }),
+      ]);
+    },
   });
 }

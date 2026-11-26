@@ -22,6 +22,7 @@ interface Draft {
   externalProjectId: string;
   boardId: string;
   boardColumnId: string;
+  completionColumnId: string;
 }
 
 /**
@@ -91,6 +92,7 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
         externalProjectId: draft.externalProjectId,
         boardId: draft.boardId,
         boardColumnId: draft.boardColumnId,
+        completionColumnId: draft.completionColumnId || null,
       },
       { onSuccess: () => setIsOpen(false) },
     );
@@ -134,6 +136,12 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
         </p>
       )}
 
+      {binding?.completionColumnId && (
+        <p className="text-sm text-muted-foreground">
+          Общее правило завершения: {targets.data?.columns.find((column) =>
+            column.id === binding.completionColumnId)?.name ?? 'Колонка недоступна'}.
+        </p>
+      )}
       <button
         type="button"
         onClick={open}
@@ -155,7 +163,7 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
       </ol>
       <p className="text-sm text-muted-foreground">
         Синхронизация с Weeek выполняется каждые 10 минут. У задачи в «Релиз и выполнение» можно
-        включить автоматическое завершение по колонке Weeek. Без правила статус только отображается.
+        задать своё правило или отключить автоматическое завершение по колонке Weeek. Без правила статус только отображается.
         Импорт позволяет сразу выбрать релиз. Если ссылка Weeek уже есть, нажмите «Связать с Weeek»:
         новая задача не создаётся.
       </p>
@@ -203,7 +211,7 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                   // проекта — отказ, который человек увидел бы позже и в
                   // другом месте.
                   onChange={(value) =>
-                    setDraft({ externalProjectId: value, boardId: '', boardColumnId: '' })
+                    setDraft({ externalProjectId: value, boardId: '', boardColumnId: '', completionColumnId: '' })
                   }
                 />
                 {targets.data.projects.length === 0 && (
@@ -219,7 +227,7 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                   value={draft.boardId}
                   options={boards}
                   onChange={(value) =>
-                    setDraft((current) => ({ ...current, boardId: value, boardColumnId: '' }))
+                    setDraft((current) => ({ ...current, boardId: value, boardColumnId: '', completionColumnId: '' }))
                   }
                 />
 
@@ -238,6 +246,18 @@ export function TrackerBindingPanel({ projectId }: { projectId: string }) {
                     setDraft((current) => ({ ...current, boardColumnId: value }))
                   }
                 />
+                <TargetSelect
+                  id="trackerCompletionColumn"
+                  label="Колонка завершения задач"
+                  value={draft.completionColumnId}
+                  options={columns}
+                  onChange={(value) => setDraft((current) => ({ ...current, completionColumnId: value }))}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Задачи в релизе автоматически выполняются при попадании в эту колонку.
+                  Если колонка не выбрана, общего правила нет. У задачи можно задать своё правило
+                  или отключить автозавершение.
+                </p>
                 {draft.boardId !== '' && columns.length === 0 && (
                   <p className="text-sm text-muted-foreground">
                     На этой доске нет доступных колонок. Добавьте колонку в Weeek.
@@ -298,6 +318,7 @@ function draftOf(binding: TrackerBinding | null): Draft {
     externalProjectId: binding?.externalProjectId ?? '',
     boardId: binding?.boardId ?? '',
     boardColumnId: binding?.boardColumnId ?? '',
+    completionColumnId: binding?.completionColumnId ?? '',
   };
 }
 

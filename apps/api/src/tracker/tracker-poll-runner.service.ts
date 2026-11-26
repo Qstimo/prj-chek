@@ -1,4 +1,3 @@
-import { TRACKER_UNAVAILABLE } from '@cairn/shared';
 import {
   Inject,
   Injectable,
@@ -17,12 +16,11 @@ import {
   type TaskExportPollTarget,
   type TaskPollResult,
 } from './task-exports.repository';
+import { codeOf, groupsOf, targetOf } from './tracker-poll-groups';
 import {
   TRACKER_SOURCE,
-  TrackerFailure,
   type Tracker,
   type TrackerSource,
-  type TrackerTarget,
   type TrackerTaskState,
 } from './tracker';
 import { TRACKER_POLL_ENV, trackerPollSecondsOf } from './tracker-poll';
@@ -335,68 +333,4 @@ export class TrackerPollRunnerService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Зеркало задачи ${target.taskId} не записано: ${String(cause)}`);
     }
   }
-}
-
-/**
- * Задачи, сбитые по доске: один вопрос на доску, а не на задачу.
- *
- * **Ключ — ровно то, что уходит в строку запроса**: проект трекера и доска.
- * Колонки в ключе нет, хотя привязка её знает и `TrackerTarget` несёт, —
- * `readTasks` о колонке не спрашивает вовсе, и ключ с ней разбивал бы одну
- * доску на столько групп, сколько у неё колонок в привязках: два проекта,
- * положенные на общую доску в разные колонки, дали бы тот же `GET` дважды
- * за тик — в API, который считает частоту.
- *
- * Группировать по `projectId` **нашего** проекта нельзя: доска приходит из
- * привязки, и смени привязка доску между строками выборки, вопрос ушёл бы о
- * доске, которой эти задачи уже не принадлежат.
- *
- * Порядок групп — порядок первой задачи в выборке, то есть «кого дольше не
- * спрашивали»: он решает, кто успеет до остановки тика на первом отказе.
- */
-function groupsOf(targets: TaskExportPollTarget[]): TaskExportPollTarget[][] {
-  const groups = new Map<string, TaskExportPollTarget[]>();
-
-  for (const target of targets) {
-    // Ключ собран `JSON.stringify`, а не склейкой через разделитель:
-    // идентификаторы приходят от трекера строками, и разделитель, который
-    // может встретиться внутри них, слил бы две разные доски в одну.
-    const key = JSON.stringify([target.externalProjectId, target.boardId]);
-    const group = groups.get(key);
-
-    if (group) {
-      group.push(target);
-    } else {
-      groups.set(key, [target]);
-    }
-  }
-
-  return [...groups.values()];
-}
-
-/**
- * Куда задавать вопрос: привязка проекта, разобранная на три значения.
- *
- * Колонка здесь есть, потому что её требует тип привязки (её спрашивает
- * выгрузка), но в вопрос она не попадает: `readTasks` посылает проект и
- * доску. Поэтому у группы она берётся у первой задачи и ни на что не
- * влияет — а группа ключуется без неё (см. {@link groupsOf}).
- */
-function targetOf(target: TaskExportPollTarget): TrackerTarget {
-  return {
-    externalProjectId: target.externalProjectId,
-    boardId: target.boardId,
-    boardColumnId: target.boardColumnId,
-  };
-}
-
-/**
- * Код неудачи обмена.
- *
- * Чужое исключение без своего кода получает «не ответил»: различать его
- * нечем, а в тексте бывает что угодно — и сам токен в сообщении о неверном
- * заголовке. Поэтому в базу идёт код, а не текст.
- */
-function codeOf(cause: unknown): string {
-  return cause instanceof TrackerFailure ? cause.code : TRACKER_UNAVAILABLE;
 }

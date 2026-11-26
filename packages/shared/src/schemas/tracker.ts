@@ -233,6 +233,14 @@ export const trackerBindingUpdateSchema = z
     externalProjectId: z.string().trim().min(1).max(100),
     boardId: z.string().trim().min(1).max(100),
     boardColumnId: z.string().trim().min(1).max(100),
+    /**
+     * Общее для проекта условие завершения по колонке этой доски.
+     *
+     * `null` — общего условия нет; отдельная задача может задать своё или
+     * явно отказаться. Поле необязательно, чтобы прежние вызовы правки
+     * привязки не снимали условие молча.
+     */
+    completionColumnId: z.string().trim().min(1).max(100).nullable().optional(),
   })
   .strict();
 
@@ -251,6 +259,7 @@ export const trackerBindingSchema = z.object({
   externalProjectId: z.string(),
   boardId: z.string(),
   boardColumnId: z.string(),
+  completionColumnId: z.string().nullable(),
   updatedAt: z.string(),
   updatedByLabel: z.string().nullable(),
 });
@@ -449,11 +458,29 @@ export const taskExportResultSchema = z
   })
   .strict();
 
+/**
+ * Итог общей синхронизации задач с уже связанными задачами трекера.
+ *
+ * Ответ считает задачи и называет код отказа канала, но не несёт ни
+ * формулировок, ни ссылок: всё это уже есть на экране, а чужое тело ответа
+ * вообще не читается — в нём бывает и сам токен.
+ */
+export const taskSyncResultSchema = z
+  .object({
+    checked: z.number().int().nonnegative(),
+    found: z.number().int().nonnegative(),
+    failureCode: z.string().nullable(),
+  })
+  .strict();
+
 /** Действующее подключение трекера. */
 export type TrackerConnection = z.infer<typeof trackerConnectionSchema>;
 
 /** Итог выгрузки одной задачи набора. */
 export type TaskExportResult = z.infer<typeof taskExportResultSchema>;
+
+/** Итог общей синхронизации связанных задач. */
+export type TaskSyncResult = z.infer<typeof taskSyncResultSchema>;
 
 /** Зеркало выгрузки задачи во внешний трекер. */
 export type TaskExport = z.infer<typeof taskExportSchema>;

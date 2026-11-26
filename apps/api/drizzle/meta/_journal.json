@@ -428,6 +428,13 @@
       "when": 1795602905287,
       "tag": "0060_task_completion_rule",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795718363539,
+      "tag": "0061_project_completion_column",
+      "breakpoints": true
     }
   ]
 }

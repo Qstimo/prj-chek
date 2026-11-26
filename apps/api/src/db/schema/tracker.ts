@@ -118,6 +118,14 @@ export const trackerProjectBindings = pgTable('tracker_project_bindings', {
   externalProjectId: text('external_project_id').notNull(),
   boardId: text('board_id').notNull(),
   boardColumnId: text('board_column_id').notNull(),
+  /**
+   * Общее для проекта condition завершения по колонке этой доски.
+   *
+   * Отдельно от колонки для новых задач: одно отвечает «куда класть», другое
+   * — «когда считать сделанным», и совпадать они обязаны не всегда. `null`
+   * означает, что общего правила нет.
+   */
+  completionColumnId: text('completion_column_id'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   updatedBySubjectId: uuid('updated_by_subject_id')
     .notNull()

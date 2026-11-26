@@ -167,12 +167,12 @@ describe('TrackerBindingPanel', () => {
     );
     await userEvent.selectOptions(
       screen.getByLabelText('Колонка'),
-      screen.getByRole('option', { name: 'В работе' }),
+      '32',
     );
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     expect(saveBinding).toHaveBeenCalledWith(
-      { externalProjectId: '7', boardId: '11', boardColumnId: '32' },
+      { externalProjectId: '7', boardId: '11', boardColumnId: '32', completionColumnId: null },
       expect.anything(),
     );
     // Идентификаторы чужой системы человеку не показываются нигде: имя
@@ -238,7 +238,7 @@ describe('TrackerBindingPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: /Сменить доску Weeek/ }));
     await userEvent.selectOptions(
       screen.getByLabelText('Колонка'),
-      screen.getByRole('option', { name: 'В работе' }),
+      '32',
     );
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
@@ -248,7 +248,7 @@ describe('TrackerBindingPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Да, сменить' }));
 
     expect(saveBinding).toHaveBeenCalledWith(
-      { externalProjectId: '7', boardId: '11', boardColumnId: '32' },
+      { externalProjectId: '7', boardId: '11', boardColumnId: '32', completionColumnId: null },
       expect.anything(),
     );
   });
@@ -281,4 +281,19 @@ describe('TrackerBindingPanel', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent(/не ответил/i);
   });
+});
+
+it('сохраняет общее правило и сбрасывает его при смене доски', async () => {
+  render(<TrackerBindingPanel projectId={PROJECT_ID} />);
+  await userEvent.click(screen.getByRole('button', { name: /Выбрать доску Weeek/ }));
+  await userEvent.selectOptions(screen.getByLabelText('Проект в Weeek'), '7');
+  await userEvent.selectOptions(screen.getByLabelText('Доска'), '11');
+  await userEvent.selectOptions(screen.getByLabelText('Колонка'), '31');
+  await userEvent.selectOptions(screen.getByLabelText('Колонка завершения задач'), '32');
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+  expect(saveBinding).toHaveBeenCalledWith({
+    externalProjectId: '7', boardId: '11', boardColumnId: '31', completionColumnId: '32',
+  }, expect.anything());
+  await userEvent.selectOptions(screen.getByLabelText('Проект в Weeek'), '8');
+  expect(screen.getByLabelText('Колонка завершения задач')).toHaveValue('');
 });

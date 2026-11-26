@@ -28,14 +28,20 @@ export function TaskPlanningPanel({
   const save = useMutationPlanTask(projectId);
   const [versionId, setVersionId] = useState(task.placement?.versionId ?? '');
   const [done, setDone] = useState(task.placement?.isDone ?? false);
-  const [columnId, setColumnId] = useState(task.completionRule?.columnId ?? '');
+  const initialRule = task.completionRule
+    ? task.completionRule.columnId === null
+      ? 'disabled'
+      : `column:${task.completionRule.columnId}`
+    : '';
+  const [selection, setSelection] = useState(initialRule);
+  const columnId = selection.startsWith('column:') ? selection.slice(7) : '';
   const canAutomate = !!task.export && !!binding && task.export.externalBoardId === binding.boardId;
   const columns = (targets.data?.columns ?? []).filter(
     (column) => column.boardId === binding?.boardId,
   );
   const error = describeApiError(save.error);
   // Сохранение релиза не должно молча переносить старое правило на новую доску.
-  const ruleUnchanged = columnId === (task.completionRule?.columnId ?? '');
+  const ruleUnchanged = selection === initialRule;
   return (
     <Drawer
       returnFocusRef={returnFocusRef}
@@ -59,7 +65,12 @@ export function TaskPlanningPanel({
                 ...(!ruleUnchanged
                   ? {
                       completionRule:
-                        columnId && binding ? { boardId: binding.boardId, columnId } : null,
+                        selection && (binding || task.completionRule)
+                          ? {
+                              boardId: binding?.boardId ?? task.completionRule!.boardId,
+                              columnId: columnId || null,
+                            }
+                          : null,
                     }
                   : {}),
               },
@@ -100,16 +111,19 @@ export function TaskPlanningPanel({
           <>
             <label className="block space-y-1 text-sm">
               <span>Автоматически выполнить при попадании в колонку Weeek</span>
-              <Select value={columnId} onChange={setColumnId}>
-                <option value="">Не завершать автоматически</option>
+              <Select value={selection} onChange={setSelection}>
+                <option value="">Использовать общее правило проекта</option>
+                <option value="disabled" disabled={!binding && !task.completionRule}>
+                  Не завершать автоматически
+                </option>
                 {canAutomate &&
                   columns.map((column) => (
-                    <option key={column.id} value={column.id}>
+                    <option key={column.id} value={`column:${column.id}`}>
                       {column.name}
                     </option>
                   ))}
                 {columnId && !columns.some((column) => column.id === columnId) && (
-                  <option value={columnId}>Сохранённая колонка {columnId}</option>
+                  <option value={`column:${columnId}`}>Сохранённая колонка {columnId}</option>
                 )}
               </Select>
             </label>

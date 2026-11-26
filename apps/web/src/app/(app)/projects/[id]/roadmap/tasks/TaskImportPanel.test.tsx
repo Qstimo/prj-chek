@@ -14,6 +14,7 @@ const binding = {
   externalProjectId: '7',
   boardId: '11',
   boardColumnId: '31',
+  completionColumnId: null,
   updatedAt: '',
   updatedByLabel: null,
 };

@@ -257,6 +257,7 @@ export class TrackerService {
           externalProjectId: input.externalProjectId,
           boardId: input.boardId,
           boardColumnId: input.boardColumnId,
+          completionColumnId: input.completionColumnId ?? null,
         },
       });
 
