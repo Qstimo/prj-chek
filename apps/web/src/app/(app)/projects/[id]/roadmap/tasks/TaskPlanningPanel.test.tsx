@@ -14,6 +14,7 @@ const binding = {
   externalProjectId: '7',
   boardId: '11',
   boardColumnId: '31',
+  completionColumnId: null,
   updatedAt: '',
   updatedByLabel: null,
 };
@@ -86,7 +87,7 @@ describe('релиз и выполнение задачи', () => {
     await userEvent.selectOptions(screen.getByLabelText('Релиз задачи'), 'v');
     await userEvent.selectOptions(
       screen.getByLabelText('Автоматически выполнить при попадании в колонку Weeek'),
-      'done',
+      screen.getByRole('option', { name: 'Готово' }),
     );
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     expect(mutate).toHaveBeenCalledWith(
@@ -120,4 +121,44 @@ describe('релиз и выполнение задачи', () => {
       expect.anything(),
     );
   });
+});
+
+it('позволяет отказаться от общего правила проекта', async () => {
+  render(<TaskPlanningPanel
+    projectId="p" task={task} binding={{ ...binding, completionColumnId: 'done' }} onClose={vi.fn()}
+  />);
+  await userEvent.selectOptions(
+    screen.getByLabelText('Автоматически выполнить при попадании в колонку Weeek'),
+    screen.getByRole('option', { name: 'Не завершать автоматически' }),
+  );
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+  expect(mutate).toHaveBeenCalledWith({
+    taskId: 'task', input: { versionId: null, completionRule: { boardId: '11', columnId: null } },
+  }, expect.anything());
+});
+
+it('возвращает наследование общего правила после отказа', async () => {
+  render(<TaskPlanningPanel
+    projectId="p" task={{ ...task, completionRule: { boardId: '11', columnId: null } }}
+    binding={{ ...binding, completionColumnId: 'done' }} onClose={vi.fn()}
+  />);
+  const select = screen.getByLabelText('Автоматически выполнить при попадании в колонку Weeek');
+  expect(select).toHaveDisplayValue('Не завершать автоматически');
+  await userEvent.selectOptions(select, screen.getByRole('option', { name: 'Использовать общее правило проекта' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+  expect(mutate).toHaveBeenCalledWith({
+    taskId: 'task', input: { versionId: null, completionRule: null },
+  }, expect.anything());
+});
+
+it('не снимает отказ при сохранении релиза', async () => {
+  render(<TaskPlanningPanel
+    projectId="p" task={{ ...task, completionRule: { boardId: '11', columnId: null } }}
+    binding={binding} onClose={vi.fn()}
+  />);
+  await userEvent.selectOptions(screen.getByLabelText('Релиз задачи'), 'v');
+  await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+  expect(mutate).toHaveBeenCalledWith({
+    taskId: 'task', input: { versionId: 'v', isDone: false },
+  }, expect.anything());
 });

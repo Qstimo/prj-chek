@@ -12,6 +12,7 @@ import { ProjectTrackerController } from './project-tracker.controller';
 import { TaskExportsController } from './task-exports.controller';
 import { TaskExportsRepository } from './task-exports.repository';
 import { TASK_EXPORT_LOCK_DB, TaskExportsService } from './task-exports.service';
+import { TaskSyncService } from './task-sync.service';
 import { TrackerBindingsRepository } from './tracker-bindings.repository';
 import { TrackerConnectionService } from './tracker-connection.service';
 import { TrackerConnectionsRepository } from './tracker-connections.repository';
@@ -60,6 +61,7 @@ import { TrackerConnectionSource } from './tracker.source';
     TrackerConnectionService,
     TrackerService,
     TaskExportsService,
+    TaskSyncService,
     // Прогон опроса живёт в **том же** модуле, что выгрузка: он спрашивает
     // о тех же строках тем же портом, а второй модуль рядом означал бы
     // второй токен источника и вторую регистрацию репозитория.

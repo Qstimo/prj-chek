@@ -10,6 +10,7 @@ import {
   taskExportRequestSchema,
   taskExportResultSchema,
   taskExportSchema,
+  taskSyncResultSchema,
   trackerBindingSchema,
   trackerBindingUpdateSchema,
   trackerConnectionSchema,
@@ -221,6 +222,16 @@ describe('trackerBindingUpdateSchema', () => {
       false,
     );
   });
+
+  it('принимает общее условие завершения и пустоту', () => {
+    expect(trackerBindingUpdateSchema.parse({ ...valid, completionColumnId: '99' })).toMatchObject({
+      completionColumnId: '99',
+    });
+    expect(
+      trackerBindingUpdateSchema.parse({ ...valid, completionColumnId: null }).completionColumnId,
+    ).toBeNull();
+    expect(trackerBindingUpdateSchema.parse(valid).completionColumnId).toBeUndefined();
+  });
 });
 
 describe('trackerBindingSchema', () => {
@@ -231,10 +242,11 @@ describe('trackerBindingSchema', () => {
         externalProjectId: '7',
         boardId: '11',
         boardColumnId: '31',
+        completionColumnId: '99',
         updatedAt: '2026-11-20T10:00:00.000Z',
         updatedByLabel: 'владелец@cairn.local',
-      }).tracker,
-    ).toBe(TrackerKind.Weeek);
+      }),
+    ).toMatchObject({ tracker: TrackerKind.Weeek, completionColumnId: '99' });
   });
 });
 
@@ -472,6 +484,7 @@ describe('projectTrackerSchema', () => {
         externalProjectId: '7',
         boardId: '11',
         boardColumnId: '31',
+        completionColumnId: null,
         updatedAt: '2026-11-20T10:00:00.000Z',
         updatedByLabel: 'владелец@cairn.local',
       },
@@ -485,5 +498,26 @@ describe('projectTrackerSchema', () => {
       projectTrackerSchema.parse({ isOperational: false, blockedBy: 'secret_missing', binding: null })
         .binding,
     ).toBeNull();
+  });
+});
+
+describe('taskSyncResultSchema', () => {
+  it('отдаёт исход общей синхронизации без содержимого проекта', () => {
+    expect(taskSyncResultSchema.parse({ checked: 3, found: 2, failureCode: null })).toEqual({
+      checked: 3,
+      found: 2,
+      failureCode: null,
+    });
+  });
+
+  it('называет код отказа, но не тело чужого ответа', () => {
+    expect(
+      taskSyncResultSchema.safeParse({
+        checked: 1,
+        found: 0,
+        failureCode: TRACKER_REJECTED,
+        response: '{"token":"weeek-token"}',
+      }).success,
+    ).toBe(false);
   });
 });

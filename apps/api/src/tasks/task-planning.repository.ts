@@ -60,7 +60,7 @@ export class TaskPlanningRepository {
       .where(and(eq(projectTasks.id, taskId), eq(projectTasks.projectId, projectId)))
       .for('no key update');
     if (!task) throw new SectionNotVisibleError();
-    if (input.completionRule) {
+    if (input.completionRule?.columnId) {
       const [binding] = await tx
         .select()
         .from(trackerProjectBindings)

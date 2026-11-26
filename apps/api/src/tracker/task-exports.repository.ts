@@ -6,7 +6,7 @@ import {
   type TaskExport,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 
 import { SectionNotVisibleError } from '../access/access.errors';
@@ -468,6 +468,21 @@ export class TaskExportsRepository {
    * набора не дождалось бы своей очереди никогда.
    */
   async listForPoll(limit: number): Promise<TaskExportPollTarget[]> {
+    return this.pollQuery(ne(projects.lifecycle, ProjectLifecycle.Archived)).limit(limit);
+  }
+
+  async listForProject(
+    subject: RequestSubject,
+    projectId: string,
+  ): Promise<TaskExportPollTarget[]> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write);
+
+    return this.pollQuery(
+      and(eq(projects.id, projectId), eq(taskExports.tracker, TrackerKind.Weeek)),
+    );
+  }
+
+  private pollQuery(where: SQL | undefined) {
     return this.db
       .select({
         taskId: taskExports.taskId,
@@ -486,13 +501,12 @@ export class TaskExportsRepository {
         trackerProjectBindings,
         eq(trackerProjectBindings.projectId, projectTasks.projectId),
       )
-      .where(ne(projects.lifecycle, ProjectLifecycle.Archived))
+      .where(where)
       .orderBy(
         // `nulls first` именно так и читается: ни разу не спрошенные сверху.
         sql`${taskExports.checkedAt} asc nulls first`,
         asc(taskExports.exportedAt),
-      )
-      .limit(limit);
+      );
   }
 }
 

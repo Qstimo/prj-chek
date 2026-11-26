@@ -19,6 +19,7 @@ import {
   useMutationDetachTask,
   useMutationExportTasks,
   useMutationLinkTask,
+  useMutationSyncTrackerTasks,
   useMutationUpdateTask,
   useQueryPlatforms,
   useQueryProjectTracker,
@@ -66,6 +67,7 @@ export function TasksScreen({ projectId }: { projectId: string }) {
   const detach = useMutationDetachTask(projectId);
   const exportTasks = useMutationExportTasks(projectId);
   const linkTask = useMutationLinkTask(projectId);
+  const syncTasks = useMutationSyncTrackerTasks(projectId);
   const [isCreating, setIsCreating] = useState(false);
   const [editing, setEditing] = useState<ProjectTask | null>(null);
   const [removing, setRemoving] = useState<ProjectTask | null>(null);
@@ -80,7 +82,7 @@ export function TasksScreen({ projectId }: { projectId: string }) {
       </p>
     );
   const rows = tasks.data.filter((task) => matchesTaskFilters(task, params));
-  const failed = remove.error ?? exportTasks.error ?? linkTask.error;
+  const failed = remove.error ?? exportTasks.error ?? linkTask.error ?? syncTasks.error;
   const failure = summaryFailureOf(failed);
   const error =
     (failure.code && taskFailureTextOf(failure.code)) ??
@@ -167,6 +169,27 @@ export function TasksScreen({ projectId }: { projectId: string }) {
           >
             Настройки задач
           </Link>
+        </div>
+      )}
+      {isExportVisible && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            className={TASK_BUTTON}
+            disabled={!tracker.data?.isOperational || !tracker.data.binding || syncTasks.isPending}
+            onClick={() => syncTasks.mutate()}
+          >
+            {syncTasks.isPending ? 'Синхронизируем…' : 'Синхронизировать с Weeek'}
+          </button>
+          <p className="text-xs text-muted-foreground">
+            Обновляет статусы всех связанных задач проекта и применяет правила завершения.
+          </p>
+          {syncTasks.data && (
+            <p role="status" className="text-sm">
+              Проверено: {syncTasks.data.checked}. Найдено в Weeek: {syncTasks.data.found}.
+              {syncTasks.data.failureCode && ` ${taskFailureTextOf(syncTasks.data.failureCode) ?? 'Обмен с Weeek не удался. Повторите синхронизацию.'}`}
+            </p>
+          )}
         </div>
       )}
       {filters.length > 0 && (
@@ -305,7 +328,13 @@ export function TasksScreen({ projectId }: { projectId: string }) {
                         Срок: {new Date(task.export.details.dueAt).toLocaleDateString('ru-RU')}
                       </span>
                     )}
-                    {task.completionRule && <span>Автозавершение включено</span>}
+                    {task.completionRule?.columnId ? (
+                      <span>Автозавершение включено</span>
+                    ) : task.completionRule ? (
+                      <span>Автозавершение отключено</span>
+                    ) : tracker.data?.binding?.completionColumnId ? (
+                      <span>Общее правило завершения</span>
+                    ) : null}
                   </div>
                 </td>
                 <td

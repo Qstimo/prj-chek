@@ -101,9 +101,15 @@ describe('таблица tracker_project_bindings', () => {
     // а `bigint` в JS потерял бы точность молча.
     const columns = getTableConfig(trackerProjectBindings).columns;
 
-    for (const name of ['external_project_id', 'board_id', 'board_column_id']) {
+    for (const name of [
+      'external_project_id',
+      'board_id',
+      'board_column_id',
+      'completion_column_id',
+    ]) {
       expect(columns.find((column) => column.name === name)?.columnType).toBe('PgText');
     }
+    expect(trackerProjectBindings.completionColumnId.notNull).toBe(false);
   });
 
   it('проект с привязкой не удаляется молча', () => {

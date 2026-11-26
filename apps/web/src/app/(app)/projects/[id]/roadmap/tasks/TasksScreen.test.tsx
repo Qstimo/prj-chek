@@ -99,6 +99,7 @@ const BINDING: TrackerBinding = {
   externalProjectId: '7',
   boardId: '11',
   boardColumnId: '31',
+  completionColumnId: null,
   updatedAt: '2026-11-21T08:00:00.000Z',
   updatedByLabel: null,
 };
@@ -193,6 +194,7 @@ beforeEach(() => {
   vi.mocked(hooks.useMutationDetachTask).mockReturnValue(detach);
   vi.mocked(hooks.useMutationExportTasks).mockReturnValue(exportTasks);
   vi.mocked(hooks.useMutationLinkTask).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationSyncTrackerTasks).mockReturnValue(mutation());
   // Панель «Куда выгружать» читает готовность трекера на рендере:
   // автомок отдал бы `undefined` и уронил бы экран. Умолчание —
   // установка без трекера: о нём на экране задач не сказано ничего.
@@ -812,4 +814,32 @@ describe('выгрузка задач и зеркало трекера', () => {
     // синхронно, и вложенный `act` на это не влияет (проверено: те же
     // 1,9 с).
   }, 30_000);
+});
+
+describe('общая синхронизация Weeek', () => {
+  it('синхронизирует проект без выбора строк и показывает итог', async () => {
+    ready();
+    const mutate = vi.fn();
+    vi.mocked(hooks.useMutationSyncTrackerTasks).mockReturnValue(mutation({
+      mutate, data: { checked: 3, found: 2, failureCode: null },
+    }));
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Синхронизировать с Weeek' }));
+    expect(mutate).toHaveBeenCalledWith();
+    expect(screen.getByRole('status')).toHaveTextContent('Проверено: 3. Найдено в Weeek: 2.');
+  });
+  it('блокирует повторный запрос, пока идёт синхронизация', () => {
+    ready();
+    vi.mocked(hooks.useMutationSyncTrackerTasks).mockReturnValue(mutation({ isPending: true }));
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    expect(screen.getByRole('button', { name: 'Синхронизируем…' })).toBeDisabled();
+  });
+  it('показывает причину частичной неудачи', () => {
+    ready();
+    vi.mocked(hooks.useMutationSyncTrackerTasks).mockReturnValue(mutation({
+      data: { checked: 1, found: 0, failureCode: TRACKER_UNAVAILABLE },
+    }));
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    expect(screen.getByRole('status')).toHaveTextContent(/не ответил/i);
+  });
 });

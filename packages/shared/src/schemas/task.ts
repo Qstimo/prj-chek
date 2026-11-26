@@ -36,11 +36,18 @@ export const TASK_ALREADY_PLACED = 'task_already_placed';
  */
 export const TASK_PLACED = 'task_placed';
 
-/** Автозавершение включается человеком для конкретной колонки одной доски. */
+/**
+ * Правило завершения у задачи: своя колонка или явный отказ.
+ *
+ * `columnId: null` означает «не завершать и по общему правилу проекта», а
+ * `null` у всего правила — «пользоваться общим правилом». Три состояния не
+ * сливаются: без этого человек не смог бы исключить одну задачу из общего
+ * условия, не снимая его у всего проекта.
+ */
 export const taskCompletionRuleSchema = z
   .object({
     boardId: z.string().trim().min(1).max(100),
-    columnId: z.string().trim().min(1).max(100),
+    columnId: z.string().trim().min(1).max(100).nullable(),
   })
   .strict();
 export type TaskCompletionRule = z.infer<typeof taskCompletionRuleSchema>;

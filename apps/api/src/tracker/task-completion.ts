@@ -15,15 +15,25 @@ import type { TrackerTaskState } from './tracker';
 
 export function completionRuleMatches(
   rule: TaskCompletionRule | null | undefined,
+  projectColumnId: string | null | undefined,
   state: TrackerTaskState | null,
   boardId: string,
 ): boolean {
+  const effective =
+    rule === null || rule === undefined
+      ? projectColumnId
+        ? { boardId, columnId: projectColumnId }
+        : null
+      : rule.columnId
+        ? rule
+        : null;
+
   return (
-    !!rule &&
+    !!effective &&
     !!state &&
-    rule.boardId === boardId &&
+    effective.boardId === boardId &&
     state.boardId === boardId &&
-    state.boardColumnId === rule.columnId
+    state.boardColumnId === effective.columnId
   );
 }
 
@@ -41,16 +51,20 @@ export async function applyTrackerCompletion(
     .from(projects)
     .where(eq(projects.id, target.projectId))
     .for('no key update');
+  const [binding] = await tx
+    .select()
+    .from(trackerProjectBindings)
+    .where(eq(trackerProjectBindings.projectId, target.projectId));
   const [task] = await tx
     .select()
     .from(projectTasks)
     .where(and(eq(projectTasks.id, target.taskId), eq(projectTasks.projectId, target.projectId)))
     .for('no key update');
-  if (!task || !completionRuleMatches(task.completionRule, result.state, target.boardId)) return;
-  const [binding] = await tx
-    .select()
-    .from(trackerProjectBindings)
-    .where(eq(trackerProjectBindings.projectId, target.projectId));
+  if (
+    !task ||
+    !completionRuleMatches(task.completionRule, binding?.completionColumnId, result.state, target.boardId)
+  )
+    return;
   const [mirror] = await tx.select().from(taskExports).where(eq(taskExports.taskId, target.taskId));
   if (
     binding?.boardId !== target.boardId ||

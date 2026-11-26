@@ -1,0 +1,1 @@
+ALTER TABLE "tracker_project_bindings" ADD COLUMN "completion_column_id" text;

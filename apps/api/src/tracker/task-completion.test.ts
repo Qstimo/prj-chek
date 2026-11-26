@@ -14,6 +14,7 @@ const state: TrackerTaskState = {
   isCompleted: false,
 };
 const rule = { boardId: '11', columnId: 'done' };
+const disabled = { boardId: '11', columnId: null };
 const target: TaskExportPollTarget = {
   taskId: 'task',
   projectId: 'project',
@@ -28,14 +29,15 @@ const target: TaskExportPollTarget = {
 /** Последовательные ответы SQL; аудит и запись наблюдения остаются в вызывающей транзакции. */
 function fixture({
   bindingBoard = '11',
+  projectColumnId = null as string | null,
   mirrorId = '42',
   completed = true,
-  completionRule = rule as typeof rule | null,
+  completionRule = rule as typeof rule | typeof disabled | null,
 } = {}) {
   const reads = [
     [{ id: 'project' }],
+    [{ boardId: bindingBoard, externalProjectId: '7', completionColumnId: projectColumnId }],
     [{ id: 'task', completionRule }],
-    [{ boardId: bindingBoard, externalProjectId: '7' }],
     [{ externalId: mirrorId, externalBoardId: '11' }],
   ];
   const query = () => {
@@ -59,14 +61,24 @@ function fixture({
 
 describe('автозавершение по колонке Weeek', () => {
   it('требует включённого правила и совпадения доски и колонки, не зависит от isCompleted', () => {
-    expect(completionRuleMatches(rule, state, '11')).toBe(true);
-    expect(completionRuleMatches(null, state, '11')).toBe(false);
-    expect(completionRuleMatches(rule, null, '11')).toBe(false);
-    expect(completionRuleMatches(rule, { ...state, boardId: 'other' }, '11')).toBe(false);
+    expect(completionRuleMatches(rule, null, state, '11')).toBe(true);
+    expect(completionRuleMatches(null, null, state, '11')).toBe(false);
+    expect(completionRuleMatches(rule, null, null, '11')).toBe(false);
+    expect(completionRuleMatches(rule, null, { ...state, boardId: 'other' }, '11')).toBe(false);
     expect(
-      completionRuleMatches(rule, { ...state, boardColumnId: 'start', isCompleted: true }, '11'),
+      completionRuleMatches(rule, null, { ...state, boardColumnId: 'start', isCompleted: true }, '11'),
     ).toBe(false);
   });
+
+  it('использует общее правило проекта, когда у задачи нет своего', () => {
+    expect(completionRuleMatches(null, 'done', state, '11')).toBe(true);
+    expect(completionRuleMatches(null, 'other', state, '11')).toBe(false);
+  });
+
+  it('явный отказ задачи сильнее общего правила проекта', () => {
+    expect(completionRuleMatches(disabled, 'done', state, '11')).toBe(false);
+  });
+
   it('пишет завершение и системный аудит, повтор не добавляет запись в журнал', async () => {
     const { tx, set } = fixture();
     const record = vi.fn();
@@ -91,6 +103,18 @@ describe('автозавершение по колонке Weeek', () => {
     );
     expect(record).not.toHaveBeenCalled();
   });
+
+  it('завершает по общему правилу проекта без правила у задачи', async () => {
+    const { tx, set } = fixture({ completionRule: null, projectColumnId: 'done' });
+    await applyTrackerCompletion(
+      tx,
+      target,
+      { tracker: TrackerKind.Weeek, state, code: null },
+      { record: vi.fn() } as unknown as AuditService,
+    );
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ isDone: true }));
+  });
+
   it('не меняет размещение без правила, после смены доски или при устаревшем внешнем id', async () => {
     for (const options of [
       { completionRule: null },
@@ -107,6 +131,7 @@ describe('автозавершение по колонке Weeek', () => {
       expect(update).not.toHaveBeenCalled();
     }
   });
+
   it('при отказе и пропуске задачи не делает ни одного SQL-запроса', async () => {
     await applyTrackerCompletion(
       {} as Transaction,

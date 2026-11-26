@@ -1,4 +1,10 @@
-import { taskExportRequestSchema, type TaskExport, type TaskExportRequest, type TaskExportResult } from '@cairn/shared';
+import {
+  taskExportRequestSchema,
+  type TaskExport,
+  type TaskExportRequest,
+  type TaskExportResult,
+  type TaskSyncResult,
+} from '@cairn/shared';
 import { Body, Controller, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 
 import type { RequestSubject } from '../access/access.types';
@@ -6,6 +12,7 @@ import { CurrentSubject } from '../auth/current-subject.decorator';
 import { SessionGuard } from '../auth/session.guard';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { TaskExportsService } from './task-exports.service';
+import { TaskSyncService } from './task-sync.service';
 
 /**
  * Выгрузка задач проекта во внешний трекер.
@@ -26,7 +33,18 @@ import { TaskExportsService } from './task-exports.service';
 @Controller('projects/:projectId/tasks')
 @UseGuards(SessionGuard)
 export class TaskExportsController {
-  constructor(private readonly exports: TaskExportsService) {}
+  constructor(
+    private readonly exports: TaskExportsService,
+    private readonly sync: TaskSyncService,
+  ) {}
+
+  @Post('sync')
+  async syncLinkedTasks(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ): Promise<TaskSyncResult> {
+    return this.sync.sync(subject, projectId);
+  }
 
   @Post(':taskId/link')
   async link(
