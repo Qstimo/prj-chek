@@ -6,7 +6,7 @@ import {
   type TrackerBinding,
   type TrackerImportQuery,
 } from '@cairn/shared';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 
 import { describeApiError } from '@/api';
 import { useQueryTrackerTargets, useQueryRoadmap } from '@/api/hooks';
@@ -14,6 +14,7 @@ import { useMutationImportTasks, useQueryImportTasks } from '@/api/hooks/useTask
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { Loader } from '@/components/Loader';
 import { Select } from '@/components/Select';
+import { TASK_BUTTON } from './controls';
 
 export function TaskImportPanel({
   projectId,
@@ -23,6 +24,7 @@ export function TaskImportPanel({
   binding: TrackerBinding | null;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [release, setRelease] = useState('auto');
   const roadmap = useQueryRoadmap(projectId, open);
   const defaultVersion = defaultTaskVersion(roadmap?.data?.versions ?? []);
@@ -102,6 +104,7 @@ export function TaskImportPanel({
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         disabled={!binding}
         onClick={() => {
@@ -113,11 +116,12 @@ export function TaskImportPanel({
           setRelease('auto');
           setOpen(true);
         }}
-        className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+        className={`${TASK_BUTTON} col-span-2 sm:col-span-1`}
       >
         Подтянуть из Weeek
       </button>
       <Drawer
+        returnFocusRef={triggerRef}
         isOpen={open}
         onClose={() => {
           if (!imports.isPending) setOpen(false);

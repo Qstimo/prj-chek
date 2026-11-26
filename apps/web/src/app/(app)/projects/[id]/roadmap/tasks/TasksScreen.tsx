@@ -3,7 +3,6 @@
 import {
   MAX_TASK_EXPORT_BATCH,
   isWeeekLink,
-  TRACKER_BASE_URL_MISSING,
   TaskExportOutcome,
   type ProjectTask,
   type ProjectTracker,
@@ -11,8 +10,7 @@ import {
 } from '@cairn/shared';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
-
+import { useRef, useState } from 'react';
 import { describeApiError, summaryFailureOf } from '@/api';
 import { hasProjectTrackerConnection } from '@/api/trackerConnection';
 import {
@@ -28,16 +26,16 @@ import {
   useQueryRoadmap,
 } from '@/api/hooks';
 import { CheckpointForm } from '@/components/CheckpointForm';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { Loader } from '@/components/Loader';
-
-import { TaskFilters } from './TaskFilters';
 import { matchesTaskFilters } from './task-filters';
+import { TaskFiltersPanel, TASK_FILTER_KEYS, taskFilterLabels } from './TaskFiltersPanel';
+import { TaskActionsPanel } from './TaskActionsPanel';
 import { TaskPlanningPanel } from './TaskPlanningPanel';
 import { TaskExportCell } from './TaskExportCell';
 import { TaskImportPanel } from './TaskImportPanel';
 import { TaskExportSummary } from './TaskExportSummary';
+import { TASK_BUTTON, TASK_PRIMARY, TASK_DANGER } from './controls';
 import {
   EXPORT_TEXTS,
   ORIGIN_LABELS,
@@ -47,13 +45,17 @@ import {
   taskFailureTextOf,
 } from './constants';
 
-/** Отдельная вкладка задач: фильтры в адресе, настройки доски на соседней странице.
- * Задачи и прогресс используют право на «Роадмап».
- */
+/** Фильтры применяются в панели, действия строки открываются одним контролом. */
 export function TasksScreen({ projectId }: { projectId: string }) {
+  const createTrigger = useRef<HTMLButtonElement>(null);
+  const taskTrigger = useRef<HTMLButtonElement | null>(null);
+  const taskFocus = {
+    get current() {
+      return taskTrigger.current?.isConnected ? taskTrigger.current : createTrigger.current;
+    },
+  };
   const router = useRouter();
   const params = useSearchParams();
-  const isLoose = params.get('loose') === 'true' || params.get('release') === 'loose';
   const tasks = useQueryTasks(projectId);
   const platforms = useQueryPlatforms(projectId);
   const tracker = useQueryProjectTracker(projectId);
@@ -68,352 +70,329 @@ export function TasksScreen({ projectId }: { projectId: string }) {
   const [editing, setEditing] = useState<ProjectTask | null>(null);
   const [removing, setRemoving] = useState<ProjectTask | null>(null);
   const [planning, setPlanning] = useState<ProjectTask | null>(null);
+  const [viewing, setViewing] = useState<string | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-
-  if (tasks.isPending) {
-    return <Loader size="page" />;
-  }
-
-  if (tasks.isError || !tasks.data) {
+  if (tasks.isPending) return <Loader size="page" />;
+  if (tasks.isError || !tasks.data)
     return (
       <p role="alert" className="text-destructive">
         {TASKS_TEXTS.loadFailed}
       </p>
     );
-  }
-
   const rows = tasks.data.filter((task) => matchesTaskFilters(task, params));
   const failed = remove.error ?? exportTasks.error ?? linkTask.error;
   const failure = summaryFailureOf(failed);
   const error =
     (failure.code && taskFailureTextOf(failure.code)) ??
     describeApiError(failed ?? detach.error ?? update.error ?? create.error);
-
-  // Колонка и отметки живут вместе с трекером: `base_url_missing` означает
-  // «подключения не заводили вовсе», и тогда о выгрузке на экране нет ни
-  // слова — установка без трекера полностью рабочая. Начатую настройку
-  // (нет токена, снята галочка) наоборот называем: её кто-то начал и ждёт,
-  // что выгрузка работает.
   const isExportVisible = isExportKnown(tracker.data) && !tracker.isError;
-
-  // Уезжает только отмеченное **и видимое**: человек отметил, переключил
-  // фильтр и видит одну строку — уехавшая вместе с ней скрытая задача была
-  // бы правкой в чужом трекере, о которой на экране не сказано ничего.
   const chosen = rows.filter((task) => selected.has(task.id)).map((task) => task.id);
   const blocked = blockedReasonOf(tracker.data, chosen.length);
-
-  // Итог последней выгрузки берётся из ответа ручки, а не из перечитанного
-  // реестра: сервер отвечает `201` и когда обмен не удался, а при первом
-  // неудачном обмене строки зеркала не возникает вовсе (контракт,
-  // `taskExportResultSchema`) — то есть реестр о неудаче не знает ничего.
   const results = exportTasks.data;
   const attempts = attemptsOf(results);
-
-  /** Переключение фильтра: состояние живёт в адресе, а не в памяти. */
-  function toggleLoose(): void {
-    changeFilter('loose', isLoose ? '' : 'true');
-  }
-
-  function changeFilter(key: string, value: string): void {
-    const next = new URLSearchParams(params.toString());
-    if (value) next.set(key, value);
-    else next.delete(key);
-    if (key === 'release') next.delete('loose');
-    if (key === 'loose') next.delete('release');
+  const versions = roadmap?.data?.versions ?? [];
+  const filters = taskFilterLabels(tasks.data, versions, params);
+  const viewed = tasks.data.find((task) => task.id === viewing);
+  const allSelected = rows.length > 0 && chosen.length === rows.length;
+  function apply(next: URLSearchParams) {
     router.replace(`?${next}`, { scroll: false });
   }
-
-  /** Отметка строки: набор целиком, чтобы «что уедет» читалось одним местом. */
-  function toggle(taskId: string, isOn: boolean): void {
+  function clearFilter(key?: string) {
+    const next = new URLSearchParams(params.toString());
+    for (const field of key ? [key] : TASK_FILTER_KEYS) next.delete(field);
+    if (key === 'loose' || key === 'release') {
+      next.delete('loose');
+      next.delete('release');
+    }
+    apply(next);
+  }
+  function toggle(id: string, on: boolean) {
     setSelected((current) => {
       const next = new Set(current);
-
-      if (isOn) {
-        next.add(taskId);
-      } else {
-        next.delete(taskId);
-      }
-
+      if (on) next.add(id);
+      else next.delete(id);
       return next;
     });
   }
-
-  /**
-   * Выгрузка набора: отметка снимается только с уехавшего.
-   *
-   * Прежде удача снимала их все, и это была потеря: исход у набора не один,
-   * а повтор — ровно то действие, которое человек сделает с неудавшейся и с
-   * недошедшей задачей. Снять отметки значило бы отправить его искать те же
-   * строки заново, по экрану, где о неудаче тогда не было сказано ничего.
-   *
-   * Отметка задачи, скрытой фильтром, не трогается вовсе: она не уезжала, и
-   * снять её значило бы молча отменить выбор, которого на экране не видно, —
-   * тот же инвариант, по которому уезжает только отмеченное **и видимое**.
-   */
-  function runExport(): void {
+  function runExport() {
     exportTasks.mutate(chosen, {
       onSuccess: (done) => {
         const gone = new Set(done.filter(hasArrived).map((result) => result.taskId));
-
         setSelected((current) => new Set([...current].filter((id) => !gone.has(id))));
       },
     });
   }
-
   return (
     <div className="space-y-4">
       {error && (
-        <p role="alert" className="text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       )}
-
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <button
+          type="button"
+          onClick={() => {
+            create.reset?.();
+            setIsCreating(true);
+          }}
+          className={TASK_PRIMARY}
+          ref={createTrigger}
+        >
+          {TASKS_TEXTS.create}
+        </button>
+        <TaskFiltersPanel
+          tasks={tasks.data}
+          versions={versions}
+          params={params}
+          showTracker={hasProjectTrackerConnection(tracker.data)}
+          onApply={apply}
+        />
+        {tracker.data?.isOperational && (
+          <TaskImportPanel projectId={projectId} binding={tracker.data.binding} />
+        )}
+      </div>
       {hasProjectTrackerConnection(tracker.data) && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3 text-sm">
-          <p>
-            {tracker.data?.binding
-              ? 'Доска Weeek подключена. Импорт и выгрузка работают с доской проекта.'
-              : 'Доска Weeek ещё не выбрана.'}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
+          <p className="min-w-0 text-muted-foreground">
+            {!tracker.data?.isOperational
+              ? 'Синхронизация Weeek приостановлена'
+              : tracker.data.binding
+                ? 'Weeek подключён'
+                : 'Выберите доску Weeek в настройках'}
           </p>
-          <Link href={`/projects/${projectId}/tasks/settings`} className="underline">
+          <Link
+            href={`/projects/${projectId}/tasks/settings`}
+            className="shrink-0 font-medium underline underline-offset-4"
+          >
             Настройки задач
           </Link>
         </div>
       )}
-      <TaskFilters
-        showTracker={hasProjectTrackerConnection(tracker.data)}
-        tasks={tasks.data}
-        versions={roadmap?.data?.versions ?? []}
-        params={params}
-        change={changeFilter}
-      />
-      {[
-        'loose',
-        'release',
-        'integration',
-        'assignee',
-        'status',
-        'search',
-        'origin',
-        'from',
-        'to',
-      ].some((key) => params.get(key)) && (
-        <button
-          type="button"
-          onClick={() => router.replace('?', { scroll: false })}
-          className="text-sm underline"
-        >
-          Сбросить фильтры
-        </button>
+      {filters.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2" aria-label="Применённые фильтры">
+          {filters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              aria-label={`Убрать фильтр: ${filter.label}`}
+              onClick={() => clearFilter(filter.key)}
+              className="inline-flex min-h-9 max-w-full items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs"
+            >
+              <span className="truncate">{filter.label}</span>
+              <span aria-hidden>×</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => clearFilter()}
+            className="min-h-9 px-2 text-xs underline"
+          >
+            Сбросить фильтры
+          </button>
+        </div>
       )}
       {(params.get('from') ?? '') > (params.get('to') ?? '9999-12-31') && (
         <p role="alert" className="text-sm text-destructive">
-          Начало периода должно быть не позже конца.
+          Начало периода должно быть не позже конца. Измените условия в фильтрах.
         </p>
       )}
-      <p className="text-sm text-muted-foreground">
-        Показано {rows.length} из {tasks.data.length} задач.
-      </p>
-
-      <div className="space-y-1">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <p className="text-muted-foreground">
+          Показано {rows.length} из {tasks.data.length} задач.
+        </p>
+        {isExportVisible && rows.length > 0 && (
           <button
             type="button"
-            onClick={toggleLoose}
-            aria-pressed={isLoose}
-            className="rounded-md border border-border px-3 py-2 text-sm"
+            className="min-h-9 text-sm underline underline-offset-4"
+            onClick={() =>
+              setSelected((current) => {
+                const next = new Set(current);
+                for (const row of rows) {
+                  if (allSelected) next.delete(row.id);
+                  else next.add(row.id);
+                }
+                return next;
+              })
+            }
           >
-            {isLoose ? TASKS_TEXTS.filterAll : TASKS_TEXTS.filterLoose}
+            {allSelected ? 'Снять выбор показанных' : 'Выбрать показанные'}
           </button>
-          <div className="flex flex-wrap items-center gap-3">
-            {tracker.data?.isOperational && (
-              <TaskImportPanel projectId={projectId} binding={tracker.data.binding} />
-            )}
-            {isExportVisible && (
-              <button
-                type="button"
-                onClick={runExport}
-                disabled={blocked !== undefined || exportTasks.isPending}
-                className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
-              >
-                {EXPORT_TEXTS.action}
-              </button>
-            )}
+        )}
+      </div>
+      {isExportVisible && chosen.length === 0 && rows.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Отметьте задачи галочками, чтобы выгрузить их в Weeek.
+        </p>
+      )}
+      {isExportVisible && chosen.length > 0 && (
+        <div className="sticky top-20 z-20 space-y-2 rounded-lg border border-border bg-surface p-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm">
+              {chosen.length ? `Выбрано: ${chosen.length}` : 'Отметьте задачи для выгрузки в Weeek'}
+            </p>
             <button
               type="button"
-              onClick={() => setIsCreating(true)}
-              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
+              onClick={runExport}
+              disabled={blocked !== undefined || exportTasks.isPending}
+              className={TASK_BUTTON}
             >
-              {TASKS_TEXTS.create}
+              {exportTasks.isPending ? 'Выгружаем…' : EXPORT_TEXTS.action}
             </button>
           </div>
-        </div>
-
-        {/* Почему кнопка не нажимается — подписью, а не молчанием.
-            Выключенная кнопка без причины отправляет человека к
-            администратору с вопросом «почему», тогда как три из четырёх
-            причин он чинит сам и на этом же экране. */}
-        {isExportVisible && blocked !== undefined && (
-          <p className="text-right text-sm text-muted-foreground">{blocked}</p>
-        )}
-
-        {/* Итог набора стоит у кнопки, которой его получили, а не в баннере
-            отказов наверху: отказы там — про весь запрос (нет права, нет
-            привязки, сеть), а здесь исход у каждой задачи свой, и бирки
-            строк — продолжение этих же чисел. */}
-        {results !== undefined && <TaskExportSummary results={results} />}
-      </div>
-
-      {rows.length === 0 ? (
-        <p className="text-muted-foreground">
-          {tasks.data.length > 0
-            ? 'По выбранным фильтрам задач нет.'
-            : isLoose
-              ? TASKS_TEXTS.emptyLoose
-              : TASKS_TEXTS.empty}
-        </p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-muted-foreground">
-                {(isExportVisible ? TASK_COLUMNS_WITH_EXPORT : TASK_COLUMNS).map((column) => (
-                  <th key={column.key} className={`${column.width} px-2 py-2 font-medium`}>
-                    {column.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((task) => (
-                <tr key={task.id} className="relative border-b border-border align-top">
-                  {isExportVisible && (
-                    <td className="px-2 py-2">
-                      {/* Область отметки растянута на всю строку
-                        (`after:inset-0`): целят в строку, а не в квадратик
-                        четырёх пикселей. Тот же приём, что у ссылки в
-                        истории саммари, поэтому всё, что ниже по строке и
-                        нажимается само, получает свой слой (`relative`). */}
-                      <label className="flex items-center after:absolute after:inset-0">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(task.id)}
-                          onChange={(event) => toggle(task.id, event.target.checked)}
-                          className="h-4 w-4"
-                        />
-                        <span className="sr-only">{EXPORT_TEXTS.select(task.title)}</span>
-                      </label>
-                    </td>
-                  )}
-                  <td className="px-2 py-2">
-                    {/* Формулировка переносится по словам и видна целиком, а
-                      не обрезается с подсказкой `title`. Подсказка здесь не
-                      работала бы вовсе: область отметки растянута на всю
-                      строку (`after:inset-0`) и перехватывает курсор, —
-                      а доля колонки упала с 46% до 34%, когда появилась
-                      колонка выгрузки, то есть обрезалось теперь и
-                      короткое. Поднять формулировку своим слоем (`relative`,
-                      как ссылки ниже) значило бы вернуть подсказку, которой
-                      нет ни с клавиатуры, ни на телефоне, и отобрать у
-                      самого крупного места строки нажатие отметки. Две-три
-                      строки текста при `align-top` ничего не ломают. */}
-                    <span className="block break-words">{task.title}</span>
-                    {task.completionRule && (
-                      <span className="block text-xs text-muted-foreground">
-                        Автозавершение по колонке Weeek включено
-                      </span>
-                    )}
-                    {task.url && (
-                      <a
-                        href={task.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="relative block truncate text-xs text-muted-foreground underline"
-                      >
-                        {task.url}
-                      </a>
-                    )}
-                  </td>
-                  <td className="px-2 py-2">
-                    {task.placement ? (
-                      <>
-                        {task.placement.versionLabel}
-                        <span className="block text-xs text-muted-foreground">
-                          {task.placement.isDone ? 'Выполнена' : 'В работе'}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">{TASKS_TEXTS.loose}</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2 text-muted-foreground">{ORIGIN_LABELS[task.origin]}</td>
-                  {isExportVisible && (
-                    <td className="px-2 py-2">
-                      <TaskExportCell task={task} attempt={attempts.get(task.id) ?? null} />
-                      {task.export === null && isWeeekLink(task.url) && (
-                        <button
-                          type="button"
-                          disabled={
-                            !tracker.data?.isOperational ||
-                            !tracker.data.binding ||
-                            linkTask.isPending
-                          }
-                          onClick={() => linkTask.mutate(task.id)}
-                          className="relative mt-2 rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50"
-                        >
-                          Связать с Weeek
-                        </button>
-                      )}
-                    </td>
-                  )}
-                  <td className="px-2 py-2">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPlanning(task)}
-                        className="relative rounded-md border border-border px-2 py-1 text-xs"
-                      >
-                        Релиз и выполнение
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditing(task)}
-                        className="relative rounded-md border border-border px-2 py-1 text-xs"
-                      >
-                        Править
-                      </button>
-                      {task.placement ? (
-                        <button
-                          type="button"
-                          onClick={() => detach.mutate(task.id)}
-                          className="relative rounded-md border border-border px-2 py-1 text-xs"
-                        >
-                          {TASKS_TEXTS.detach}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setRemoving(task)}
-                          className="relative rounded-md border border-border px-2 py-1 text-xs"
-                        >
-                          {TASKS_TEXTS.remove}
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
+          {selected.size > chosen.length && (
+            <p className="text-xs text-muted-foreground">
+              Скрытые фильтрами задачи не попадут в выгрузку.
+            </p>
+          )}
         </div>
       )}
-
-      <Link href={`/projects/${projectId}/roadmap`} className="inline-block text-sm underline">
+      {results !== undefined && <TaskExportSummary results={results} />}
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-5 py-8 text-sm text-muted-foreground">
+          <p>{tasks.data.length ? 'По выбранным фильтрам задач нет.' : TASKS_TEXTS.empty}</p>
+          {tasks.data.length > 0 && (
+            <button type="button" className="mt-3 underline" onClick={() => clearFilter()}>
+              Показать все задачи
+            </button>
+          )}
+        </div>
+      ) : (
+        <table className="block w-full text-sm lg:table lg:table-fixed">
+          <caption className="sr-only">Задачи проекта</caption>
+          <thead className="hidden lg:table-header-group">
+            <tr className="border-b border-border text-left text-xs text-muted-foreground">
+              {(isExportVisible ? TASK_COLUMNS_WITH_EXPORT : TASK_COLUMNS).map((column) => (
+                <th key={column.key} className={`${column.width} px-3 py-3 font-medium`}>
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="grid gap-3 sm:grid-cols-2 lg:table-row-group">
+            {rows.map((task) => (
+              <tr
+                key={task.id}
+                className={`grid ${isExportVisible ? 'grid-cols-[auto_minmax(0,1fr)_auto]' : 'grid-cols-[minmax(0,1fr)_auto]'} gap-x-3 gap-y-3 rounded-lg border border-border bg-surface p-4 align-top lg:table-row lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:p-0`}
+              >
+                {isExportVisible && (
+                  <td className="col-start-1 row-start-1 block min-w-0 lg:table-cell lg:px-2 lg:py-3">
+                    <label className="inline-flex h-10 w-8 cursor-pointer items-start justify-center pt-1 lg:w-full">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-primary"
+                        checked={selected.has(task.id)}
+                        onChange={(event) => toggle(task.id, event.target.checked)}
+                      />
+                      <span className="sr-only">{EXPORT_TEXTS.select(task.title)}</span>
+                    </label>
+                  </td>
+                )}
+                <td
+                  className={`${isExportVisible ? 'col-start-2' : 'col-start-1'} col-span-2 row-start-1 block min-w-0 lg:table-cell lg:px-3 lg:py-4`}
+                >
+                  <span className="block break-words font-medium leading-6">{task.title}</span>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                    <span>{ORIGIN_LABELS[task.origin]}</span>
+                    {task.export?.details?.assignees.length ? (
+                      <span>
+                        {task.export.details.assignees.map((person) => person.name).join(', ')}
+                      </span>
+                    ) : null}
+                    {task.export?.details?.dueAt && (
+                      <span>
+                        Срок: {new Date(task.export.details.dueAt).toLocaleDateString('ru-RU')}
+                      </span>
+                    )}
+                    {task.completionRule && <span>Автозавершение включено</span>}
+                  </div>
+                </td>
+                <td
+                  className={`${isExportVisible ? 'col-start-2' : 'col-start-1'} row-start-2 block min-w-0 self-center lg:table-cell lg:px-3 lg:py-4`}
+                >
+                  <span className="block text-[11px] text-muted-foreground lg:hidden">Релиз</span>
+                  {task.placement ? (
+                    <>
+                      <span className="break-words">{task.placement.versionLabel}</span>
+                      <span
+                        className={`mt-1 block text-xs ${task.placement.isDone ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}
+                      >
+                        {task.placement.isDone ? 'Выполнена' : 'В работе'}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">{TASKS_TEXTS.loose}</span>
+                  )}
+                </td>
+                {isExportVisible && (
+                  <td className="col-span-2 col-start-2 row-start-3 block min-w-0 border-t border-border pt-3 lg:table-cell lg:border-0 lg:px-3 lg:py-4">
+                    <TaskExportCell compact task={task} attempt={attempts.get(task.id) ?? null} />
+                  </td>
+                )}
+                <td className="col-start-[-2] row-start-2 block self-center lg:table-cell lg:px-3 lg:py-4">
+                  <button
+                    type="button"
+                    aria-label={`Действия: ${task.title}`}
+                    onClick={(event) => {
+                      taskTrigger.current = event.currentTarget;
+                      detach.reset?.();
+                      linkTask.reset?.();
+                      setViewing(task.id);
+                    }}
+                    className={`${TASK_BUTTON} !h-9 !px-3`}
+                  >
+                    Действия
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <Link
+        href={`/projects/${projectId}/roadmap`}
+        className="inline-block min-h-10 py-2 text-sm underline underline-offset-4"
+      >
         {TASKS_TEXTS.back}
       </Link>
-
+      {viewed && (
+        <TaskActionsPanel
+          returnFocusRef={taskFocus}
+          task={viewed}
+          attempt={attempts.get(viewed.id) ?? null}
+          showTracker={isExportVisible}
+          canLink={
+            isExportVisible &&
+            viewed.export === null &&
+            isWeeekLink(viewed.url) &&
+            !!tracker.data?.isOperational &&
+            !!tracker.data.binding
+          }
+          isLinking={linkTask.isPending}
+          error={describeApiError(detach.error ?? linkTask.error)}
+          onClose={() => setViewing(null)}
+          onEdit={() => {
+            update.reset?.();
+            setViewing(null);
+            setEditing(viewed);
+          }}
+          onPlan={() => {
+            setViewing(null);
+            setPlanning(viewed);
+          }}
+          onLink={() => linkTask.mutate(viewed.id)}
+          onDetach={() => detach.mutate(viewed.id, { onSuccess: () => setViewing(null) })}
+          onRemove={() => {
+            remove.reset?.();
+            setViewing(null);
+            setRemoving(viewed);
+          }}
+        />
+      )}
       {planning && (
         <TaskPlanningPanel
+          returnFocusRef={taskFocus}
           showTracker={hasProjectTrackerConnection(tracker.data)}
           projectId={projectId}
           task={planning}
@@ -421,40 +400,64 @@ export function TasksScreen({ projectId }: { projectId: string }) {
           onClose={() => setPlanning(null)}
         />
       )}
-
-      {removing && (
-        <ConfirmDialog
-          label={TASKS_TEXTS.removeLabel}
-          confirmLabel={TASKS_TEXTS.removeConfirm}
-          onConfirm={() => {
-            remove.mutate(removing.id);
-            setRemoving(null);
-          }}
-          onCancel={() => setRemoving(null)}
-        >
-          {TASKS_TEXTS.removeQuestion}
-        </ConfirmDialog>
-      )}
-
+      <Drawer
+        isOpen={removing !== null}
+        onClose={() => {
+          if (!remove.isPending) setRemoving(null);
+        }}
+        returnFocusRef={taskFocus}
+        title={TASKS_TEXTS.removeLabel}
+        width={DrawerWidth.Half}
+      >
+        {removing && (
+          <div className="space-y-4">
+            <p className="break-words font-medium">{removing.title}</p>
+            <p className="text-sm text-muted-foreground">{TASKS_TEXTS.removeQuestion}</p>
+            {remove.error && (
+              <p role="alert" className="text-sm text-destructive">
+                {describeApiError(remove.error)}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={TASK_DANGER}
+                disabled={remove.isPending}
+                onClick={() => remove.mutate(removing.id, { onSuccess: () => setRemoving(null) })}
+              >
+                {remove.isPending ? 'Удаляем…' : TASKS_TEXTS.removeConfirm}
+              </button>
+              <button
+                type="button"
+                className={TASK_BUTTON}
+                disabled={remove.isPending}
+                onClick={() => setRemoving(null)}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
+      </Drawer>
       <Drawer
         isOpen={isCreating}
         onClose={() => setIsCreating(false)}
+        returnFocusRef={createTrigger}
         title={TASKS_TEXTS.createTitle}
         width={DrawerWidth.Half}
       >
         <CheckpointForm
           submitLabel="Завести"
-          {...(platforms.data && platforms.data.length > 0 ? { platforms: platforms.data } : {})}
+          {...(platforms.data?.length ? { platforms: platforms.data } : {})}
           isSubmitting={create.isPending}
-          onSubmit={(input) => {
-            create.mutate(input, { onSuccess: () => setIsCreating(false) });
-          }}
+          error={describeApiError(create.error)}
+          onSubmit={(input) => create.mutate(input, { onSuccess: () => setIsCreating(false) })}
         />
       </Drawer>
-
       <Drawer
         isOpen={editing !== null}
         onClose={() => setEditing(null)}
+        returnFocusRef={taskFocus}
         title={TASKS_TEXTS.editTitle}
         width={DrawerWidth.Half}
       >
@@ -466,12 +469,13 @@ export function TasksScreen({ projectId }: { projectId: string }) {
               platformIds: editing.platformIds,
             }}
             submitLabel="Сохранить"
-            {...(platforms.data && platforms.data.length > 0 ? { platforms: platforms.data } : {})}
+            {...(platforms.data?.length ? { platforms: platforms.data } : {})}
             isSubmitting={update.isPending}
+            error={describeApiError(update.error)}
             onCancel={() => setEditing(null)}
-            onSubmit={(input) => {
-              update.mutate({ taskId: editing.id, input }, { onSuccess: () => setEditing(null) });
-            }}
+            onSubmit={(input) =>
+              update.mutate({ taskId: editing.id, input }, { onSuccess: () => setEditing(null) })
+            }
           />
         )}
       </Drawer>

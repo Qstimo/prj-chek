@@ -27,13 +27,12 @@ export const TASKS_TEXTS = {
   /** Фильтр — не кнопка «показать меньше», а ответ на «что не в плане». */
   filterAll: 'Все задачи',
   filterLoose: 'Только вне версий',
-  loose: 'вне версии',
-  detach: 'Вынуть из версии',
+  loose: 'Вне релиза',
+  detach: 'Убрать из релиза',
   remove: 'Удалить',
   removeLabel: 'Удаление задачи',
   /** Потеря названа целиком: задача уносится вместе с тегами и ссылкой. */
-  removeQuestion:
-    'Задача будет удалена вместе со ссылкой и тегами платформ. Это нельзя отменить.',
+  removeQuestion: 'Задача будет удалена вместе со ссылкой и тегами платформ. Это нельзя отменить.',
   /**
    * Подтверждение названо иначе, чем кнопка строки.
    *
@@ -108,7 +107,7 @@ export const EXPORT_TEXTS = {
    * упавший опрос, снятый токен или переименованная колонка молча
    * останавливают прогресс роадмапа (дизайн, 5).
    */
-  divergent: 'Расхождение: закрыта там, открыта здесь',
+  divergent: 'В Weeek закрыта, в релизе ещё не выполнена',
   /** Отказ обмена, названный кодом: «не удалось» без кода не ищется нигде. */
   failed: (reason: string) => `Обмен не удался: ${reason}`,
   /**
@@ -162,7 +161,7 @@ export const EXPORT_TEXTS = {
    * Без этой строки бирка утверждала бы, что зеркало свежее: вебхуков у
    * Weeek нет, статус запаздывает на интервал опроса (дизайн, 10.2).
    */
-  checkedAt: (when: string) => `Статус спрашивали ${when}`,
+  checkedAt: (when: string) => `Проверка: ${when}`,
   /**
    * Опроса ещё не было — сказано отдельно от «не менялось».
    *
@@ -196,8 +195,10 @@ export const EXPORT_TEXTS = {
  * без кода не ищется нигде.
  */
 export const EXPORT_FAILURES: Record<string, string> = {
-  [TRACKER_LINK_REQUIRED]: 'у задачи уже есть ссылка Weeek — нажмите «Связать с Weeek», чтобы не создавать дубль',
-  [TRACKER_LINK_INVALID]: 'проверьте постоянную ссылку Weeek, рабочее пространство и выбранную доску',
+  [TRACKER_LINK_REQUIRED]:
+    'у задачи уже есть ссылка Weeek — нажмите «Связать с Weeek», чтобы не создавать дубль',
+  [TRACKER_LINK_INVALID]:
+    'проверьте постоянную ссылку Weeek, рабочее пространство и выбранную доску',
   [TRACKER_UNAVAILABLE]: 'трекер не ответил, можно повторить',
   [TRACKER_REJECTED]: 'трекер отказал — токен или доска; это правит администратор',
   [TRACKER_NOT_CONFIGURED]: 'подключение трекера снято',
@@ -251,18 +252,16 @@ export interface ITaskColumn {
  * четыре процента ширины у соседей по случайности, а не по решению.
  */
 export const TASK_COLUMNS: ITaskColumn[] = [
-  { key: 'title', label: 'Задача', width: 'w-[46%]' },
-  { key: 'placement', label: 'Версия', width: 'w-[18%]' },
-  { key: 'origin', label: 'Откуда', width: 'w-[18%]' },
-  { key: 'actions', label: '', width: 'w-[18%]' },
+  { key: 'title', label: 'Задача', width: 'w-[66%]' },
+  { key: 'placement', label: 'Релиз', width: 'w-[20%]' },
+  { key: 'actions', label: '', width: 'w-[14%]' },
 ];
 
 /** Те же колонки на установке с трекером: отметка слева, выгрузка справа. */
 export const TASK_COLUMNS_WITH_EXPORT: ITaskColumn[] = [
-  { key: 'select', label: '', width: 'w-[4%]' },
-  { key: 'title', label: 'Задача', width: 'w-[34%]' },
-  { key: 'placement', label: 'Версия', width: 'w-[13%]' },
-  { key: 'origin', label: 'Откуда', width: 'w-[14%]' },
-  { key: 'export', label: EXPORT_TEXTS.column, width: 'w-[21%]' },
-  { key: 'actions', label: '', width: 'w-[14%]' },
+  { key: 'select', label: '', width: 'w-[5%]' },
+  { key: 'title', label: 'Задача', width: 'w-[40%]' },
+  { key: 'placement', label: 'Релиз', width: 'w-[15%]' },
+  { key: 'export', label: 'Weeek', width: 'w-[28%]' },
+  { key: 'actions', label: '', width: 'w-[12%]' },
 ];
