@@ -14,6 +14,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 
 import { describeApiError, summaryFailureOf } from '@/api';
+import { hasProjectTrackerConnection } from '@/api/trackerConnection';
 import {
   useMutationCreateTask,
   useMutationDeleteTask,
@@ -24,13 +25,16 @@ import {
   useQueryPlatforms,
   useQueryProjectTracker,
   useQueryTasks,
+  useQueryRoadmap,
 } from '@/api/hooks';
 import { CheckpointForm } from '@/components/CheckpointForm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { Loader } from '@/components/Loader';
 
-import { TrackerBindingPanel } from '../TrackerBindingPanel';
+import { TaskFilters } from './TaskFilters';
+import { matchesTaskFilters } from './task-filters';
+import { TaskPlanningPanel } from './TaskPlanningPanel';
 import { TaskExportCell } from './TaskExportCell';
 import { TaskImportPanel } from './TaskImportPanel';
 import { TaskExportSummary } from './TaskExportSummary';
@@ -43,33 +47,17 @@ import {
   taskFailureTextOf,
 } from './constants';
 
-/**
- * Реестр задач проекта.
- *
- * Живёт под «Роадмапом», а не своим разделом: право на задачу — право на
- * «Роадмап», а список разделов закрыт составом секций. Поэтому и адрес
- * вложен в роадмап, и выдачу проверяет та же ручка.
- *
- * Фильтр живёт в адресе (`?loose`), как `?view` и `?tag`: ссылку на «что
- * не разложено по версиям» отправляют соседу, и состояние, спрятанное в
- * памяти компонента, такую ссылку сделать не позволяет.
- *
- * Платформы запрашиваются **мягко**: без выдачи на «Инфо» их не видно, и
- * тогда переключателей тегов просто не будет — отказ этого запроса не
- * повод показать экран ошибки вместо задач.
- *
- * Выгрузка в трекер живёт здесь же: отметки слева, колонка «Выгрузка»
- * справа, одна кнопка на набор. На установке без трекера ни отметок, ни
- * колонки, ни кнопки нет вовсе — та же лестница, что у загрузки записи при
- * выключенной расшифровке.
+/** Отдельная вкладка задач: фильтры в адресе, настройки доски на соседней странице.
+ * Задачи и прогресс используют право на «Роадмап».
  */
 export function TasksScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
   const params = useSearchParams();
-  const isLoose = params.get('loose') === 'true';
+  const isLoose = params.get('loose') === 'true' || params.get('release') === 'loose';
   const tasks = useQueryTasks(projectId);
   const platforms = useQueryPlatforms(projectId);
   const tracker = useQueryProjectTracker(projectId);
+  const roadmap = useQueryRoadmap(projectId);
   const create = useMutationCreateTask(projectId);
   const update = useMutationUpdateTask(projectId);
   const remove = useMutationDeleteTask(projectId);
@@ -79,6 +67,7 @@ export function TasksScreen({ projectId }: { projectId: string }) {
   const [isCreating, setIsCreating] = useState(false);
   const [editing, setEditing] = useState<ProjectTask | null>(null);
   const [removing, setRemoving] = useState<ProjectTask | null>(null);
+  const [planning, setPlanning] = useState<ProjectTask | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
   if (tasks.isPending) {
@@ -93,7 +82,7 @@ export function TasksScreen({ projectId }: { projectId: string }) {
     );
   }
 
-  const rows = isLoose ? tasks.data.filter((task) => task.placement === null) : tasks.data;
+  const rows = tasks.data.filter((task) => matchesTaskFilters(task, params));
   const failed = remove.error ?? exportTasks.error ?? linkTask.error;
   const failure = summaryFailureOf(failed);
   const error =
@@ -122,7 +111,16 @@ export function TasksScreen({ projectId }: { projectId: string }) {
 
   /** Переключение фильтра: состояние живёт в адресе, а не в памяти. */
   function toggleLoose(): void {
-    router.replace(isLoose ? '?' : '?loose=true', { scroll: false });
+    changeFilter('loose', isLoose ? '' : 'true');
+  }
+
+  function changeFilter(key: string, value: string): void {
+    const next = new URLSearchParams(params.toString());
+    if (value) next.set(key, value);
+    else next.delete(key);
+    if (key === 'release') next.delete('loose');
+    if (key === 'loose') next.delete('release');
+    router.replace(`?${next}`, { scroll: false });
   }
 
   /** Отметка строки: набор целиком, чтобы «что уедет» читалось одним местом. */
@@ -170,13 +168,52 @@ export function TasksScreen({ projectId }: { projectId: string }) {
         </p>
       )}
 
-      {/*
-        Привязка доски стоит здесь, а не на экране версий: она отвечает на
-        «куда уедут задачи», и спрашивают это, глядя на сами задачи. На
-        установке без трекера панель не рисуется вовсе — та же лестница, что
-        у загрузки записи при выключенной расшифровке.
-      */}
-      <TrackerBindingPanel projectId={projectId} />
+      {hasProjectTrackerConnection(tracker.data) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3 text-sm">
+          <p>
+            {tracker.data?.binding
+              ? 'Доска Weeek подключена. Импорт и выгрузка работают с доской проекта.'
+              : 'Доска Weeek ещё не выбрана.'}
+          </p>
+          <Link href={`/projects/${projectId}/tasks/settings`} className="underline">
+            Настройки задач
+          </Link>
+        </div>
+      )}
+      <TaskFilters
+        showTracker={hasProjectTrackerConnection(tracker.data)}
+        tasks={tasks.data}
+        versions={roadmap?.data?.versions ?? []}
+        params={params}
+        change={changeFilter}
+      />
+      {[
+        'loose',
+        'release',
+        'integration',
+        'assignee',
+        'status',
+        'search',
+        'origin',
+        'from',
+        'to',
+      ].some((key) => params.get(key)) && (
+        <button
+          type="button"
+          onClick={() => router.replace('?', { scroll: false })}
+          className="text-sm underline"
+        >
+          Сбросить фильтры
+        </button>
+      )}
+      {(params.get('from') ?? '') > (params.get('to') ?? '9999-12-31') && (
+        <p role="alert" className="text-sm text-destructive">
+          Начало периода должно быть не позже конца.
+        </p>
+      )}
+      <p className="text-sm text-muted-foreground">
+        Показано {rows.length} из {tasks.data.length} задач.
+      </p>
 
       <div className="space-y-1">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -229,42 +266,47 @@ export function TasksScreen({ projectId }: { projectId: string }) {
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground">
-          {isLoose ? TASKS_TEXTS.emptyLoose : TASKS_TEXTS.empty}
+          {tasks.data.length > 0
+            ? 'По выбранным фильтрам задач нет.'
+            : isLoose
+              ? TASKS_TEXTS.emptyLoose
+              : TASKS_TEXTS.empty}
         </p>
       ) : (
-        <table className="w-full table-fixed border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-muted-foreground">
-              {(isExportVisible ? TASK_COLUMNS_WITH_EXPORT : TASK_COLUMNS).map((column) => (
-                <th key={column.key} className={`${column.width} px-2 py-2 font-medium`}>
-                  {column.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((task) => (
-              <tr key={task.id} className="relative border-b border-border align-top">
-                {isExportVisible && (
-                  <td className="px-2 py-2">
-                    {/* Область отметки растянута на всю строку
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-muted-foreground">
+                {(isExportVisible ? TASK_COLUMNS_WITH_EXPORT : TASK_COLUMNS).map((column) => (
+                  <th key={column.key} className={`${column.width} px-2 py-2 font-medium`}>
+                    {column.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((task) => (
+                <tr key={task.id} className="relative border-b border-border align-top">
+                  {isExportVisible && (
+                    <td className="px-2 py-2">
+                      {/* Область отметки растянута на всю строку
                         (`after:inset-0`): целят в строку, а не в квадратик
                         четырёх пикселей. Тот же приём, что у ссылки в
                         истории саммари, поэтому всё, что ниже по строке и
                         нажимается само, получает свой слой (`relative`). */}
-                    <label className="flex items-center after:absolute after:inset-0">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(task.id)}
-                        onChange={(event) => toggle(task.id, event.target.checked)}
-                        className="h-4 w-4"
-                      />
-                      <span className="sr-only">{EXPORT_TEXTS.select(task.title)}</span>
-                    </label>
-                  </td>
-                )}
-                <td className="px-2 py-2">
-                  {/* Формулировка переносится по словам и видна целиком, а
+                      <label className="flex items-center after:absolute after:inset-0">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(task.id)}
+                          onChange={(event) => toggle(task.id, event.target.checked)}
+                          className="h-4 w-4"
+                        />
+                        <span className="sr-only">{EXPORT_TEXTS.select(task.title)}</span>
+                      </label>
+                    </td>
+                  )}
+                  <td className="px-2 py-2">
+                    {/* Формулировка переносится по словам и видна целиком, а
                       не обрезается с подсказкой `title`. Подсказка здесь не
                       работала бы вовсе: область отметки растянута на всю
                       строку (`after:inset-0`) и перехватывает курсор, —
@@ -275,76 +317,110 @@ export function TasksScreen({ projectId }: { projectId: string }) {
                       нет ни с клавиатуры, ни на телефоне, и отобрать у
                       самого крупного места строки нажатие отметки. Две-три
                       строки текста при `align-top` ничего не ломают. */}
-                  <span className="block break-words">{task.title}</span>
-                  {task.url && (
-                    <a
-                      href={task.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="relative block truncate text-xs text-muted-foreground underline"
-                    >
-                      {task.url}
-                    </a>
-                  )}
-                </td>
-                <td className="px-2 py-2">
-                  {task.placement ? (
-                    task.placement.versionLabel
-                  ) : (
-                    <span className="text-muted-foreground">{TASKS_TEXTS.loose}</span>
-                  )}
-                </td>
-                <td className="px-2 py-2 text-muted-foreground">{ORIGIN_LABELS[task.origin]}</td>
-                {isExportVisible && (
-                  <td className="px-2 py-2">
-                    <TaskExportCell task={task} attempt={attempts.get(task.id) ?? null} />
-                    {task.export === null && isWeeekLink(task.url) && (
-                      <button type="button"
-                        disabled={!tracker.data?.isOperational || !tracker.data.binding || linkTask.isPending}
-                        onClick={() => linkTask.mutate(task.id)}
-                        className="relative mt-2 rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50"
-                      >Связать с Weeek</button>
+                    <span className="block break-words">{task.title}</span>
+                    {task.completionRule && (
+                      <span className="block text-xs text-muted-foreground">
+                        Автозавершение по колонке Weeek включено
+                      </span>
                     )}
-
+                    {task.url && (
+                      <a
+                        href={task.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="relative block truncate text-xs text-muted-foreground underline"
+                      >
+                        {task.url}
+                      </a>
+                    )}
                   </td>
-                )}
-                <td className="px-2 py-2">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditing(task)}
-                      className="relative rounded-md border border-border px-2 py-1 text-xs"
-                    >
-                      Править
-                    </button>
+                  <td className="px-2 py-2">
                     {task.placement ? (
-                      <button
-                        type="button"
-                        onClick={() => detach.mutate(task.id)}
-                        className="relative rounded-md border border-border px-2 py-1 text-xs"
-                      >
-                        {TASKS_TEXTS.detach}
-                      </button>
+                      <>
+                        {task.placement.versionLabel}
+                        <span className="block text-xs text-muted-foreground">
+                          {task.placement.isDone ? 'Выполнена' : 'В работе'}
+                        </span>
+                      </>
                     ) : (
+                      <span className="text-muted-foreground">{TASKS_TEXTS.loose}</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-muted-foreground">{ORIGIN_LABELS[task.origin]}</td>
+                  {isExportVisible && (
+                    <td className="px-2 py-2">
+                      <TaskExportCell task={task} attempt={attempts.get(task.id) ?? null} />
+                      {task.export === null && isWeeekLink(task.url) && (
+                        <button
+                          type="button"
+                          disabled={
+                            !tracker.data?.isOperational ||
+                            !tracker.data.binding ||
+                            linkTask.isPending
+                          }
+                          onClick={() => linkTask.mutate(task.id)}
+                          className="relative mt-2 rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50"
+                        >
+                          Связать с Weeek
+                        </button>
+                      )}
+                    </td>
+                  )}
+                  <td className="px-2 py-2">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => setRemoving(task)}
+                        onClick={() => setPlanning(task)}
                         className="relative rounded-md border border-border px-2 py-1 text-xs"
                       >
-                        {TASKS_TEXTS.remove}
+                        Релиз и выполнение
                       </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      <button
+                        type="button"
+                        onClick={() => setEditing(task)}
+                        className="relative rounded-md border border-border px-2 py-1 text-xs"
+                      >
+                        Править
+                      </button>
+                      {task.placement ? (
+                        <button
+                          type="button"
+                          onClick={() => detach.mutate(task.id)}
+                          className="relative rounded-md border border-border px-2 py-1 text-xs"
+                        >
+                          {TASKS_TEXTS.detach}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setRemoving(task)}
+                          className="relative rounded-md border border-border px-2 py-1 text-xs"
+                        >
+                          {TASKS_TEXTS.remove}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <Link href={`/projects/${projectId}/roadmap`} className="inline-block text-sm underline">
         {TASKS_TEXTS.back}
       </Link>
+
+      {planning && (
+        <TaskPlanningPanel
+          showTracker={hasProjectTrackerConnection(tracker.data)}
+          projectId={projectId}
+          task={planning}
+          binding={tracker.data?.binding ?? null}
+          onClose={() => setPlanning(null)}
+        />
+      )}
 
       {removing && (
         <ConfirmDialog
@@ -394,10 +470,7 @@ export function TasksScreen({ projectId }: { projectId: string }) {
             isSubmitting={update.isPending}
             onCancel={() => setEditing(null)}
             onSubmit={(input) => {
-              update.mutate(
-                { taskId: editing.id, input },
-                { onSuccess: () => setEditing(null) },
-              );
+              update.mutate({ taskId: editing.id, input }, { onSuccess: () => setEditing(null) });
             }}
           />
         )}
@@ -439,7 +512,7 @@ function hasArrived(result: TaskExportResult): boolean {
  * из-за трекера, который на этом экране дело десятое, хуже её отсутствия.
  */
 function isExportKnown(tracker: ProjectTracker | undefined): tracker is ProjectTracker {
-  return tracker !== undefined && tracker.blockedBy !== TRACKER_BASE_URL_MISSING;
+  return tracker !== undefined && hasProjectTrackerConnection(tracker);
 }
 
 /**

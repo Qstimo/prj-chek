@@ -73,7 +73,7 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
         своей единицы выдачи доступа не имеет.
       */}
       <div className="flex justify-end">
-        <Link href={`/projects/${projectId}/roadmap/tasks`} className="text-sm underline">
+        <Link href={`/projects/${projectId}/tasks`} className="text-sm underline">
           Задачи проекта
         </Link>
       </div>
@@ -103,9 +103,7 @@ export function RoadmapScreen({ projectId, isSuperadmin }: IProps) {
         прислать. Простой щелчок по-прежнему открывает панель версии —
         правка живёт в ней.
       */}
-      <TimelineHrefProvider
-        hrefOf={(versionId) => reportHrefOf(projectId, versionId)}
-      >
+      <TimelineHrefProvider hrefOf={(versionId) => reportHrefOf(projectId, versionId)}>
         <RoadmapTimeline
           versions={roadmap.data.versions}
           currentIndex={currentIndex}

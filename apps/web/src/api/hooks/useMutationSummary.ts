@@ -7,13 +7,16 @@ import type {
   SummaryDetail,
   SummaryReleaseResult,
   SummaryTasksReplace,
+  SummaryTransferResult,
 } from '@cairn/shared';
+import { summaryTransferResultSchema } from '@cairn/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '../client';
 import { CHRONICLE_KEYS } from './useQueryChronicle';
 import { ROADMAP_KEYS } from './useQueryRoadmap';
 import { SUMMARY_KEYS } from './useQuerySummaries';
+import { TASK_KEYS } from './useTasks';
 
 /**
  * Сброс кэшей после правки саммари.
@@ -123,16 +126,44 @@ export function useMutationReleaseSummary(projectId: string, summaryId: string) 
 
   return useMutation({
     mutationFn: (input: SummaryRelease) =>
-      apiClient<SummaryReleaseResult>(`/projects/${projectId}/summaries/${summaryId}/tasks/release`, {
-        method: 'POST',
-        body: input,
-      }),
+      apiClient<SummaryReleaseResult>(
+        `/projects/${projectId}/summaries/${summaryId}/tasks/release`,
+        {
+          method: 'POST',
+          body: input,
+        },
+      ),
     onSuccess: async () => {
       await invalidate();
       await client.invalidateQueries({ queryKey: CHRONICLE_KEYS.forProject(projectId) });
       // В роадмапе появились версия и чекпоинты: открытая рядом полоса
       // иначе показывала бы роадмап без них.
       await client.invalidateQueries({ queryKey: ROADMAP_KEYS.forProject(projectId) });
+      await client.invalidateQueries({ queryKey: TASK_KEYS.forProject(projectId) });
+    },
+  });
+}
+
+export function useMutationTransferSummaryTasks(projectId: string, summaryId: string) {
+  const client = useQueryClient();
+  const invalidate = useSummaryInvalidation(projectId, summaryId);
+  return useMutation({
+    mutationFn: async (input: SummaryTaskIds): Promise<SummaryTransferResult> => {
+      const result = summaryTransferResultSchema.safeParse(
+        await apiClient<unknown>(`/projects/${projectId}/summaries/${summaryId}/tasks/transfer`, {
+          method: 'POST',
+          body: input,
+        }),
+      );
+      if (!result.success)
+        throw new Error(
+          'Не удалось прочитать ответ переноса. Повторите: повтор не создаёт копии задач.',
+        );
+      return result.data;
+    },
+    onSettled: async () => {
+      await invalidate();
+      await client.invalidateQueries({ queryKey: TASK_KEYS.forProject(projectId) });
     },
   });
 }

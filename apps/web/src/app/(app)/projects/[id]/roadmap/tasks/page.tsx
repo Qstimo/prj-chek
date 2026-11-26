@@ -1,20 +1,17 @@
-import { TASKS_TEXTS } from './constants';
-import { TasksScreen } from './TasksScreen';
+import { redirect } from 'next/navigation';
 
-/**
- * Страница реестра задач проекта.
- *
- * Адрес вложен в роадмап намеренно: право на задачу — право на «Роадмап»,
- * а состав разделов проекта закрыт секциями, и своего пункта навигации у
- * задач не появляется.
- */
-export default async function TasksPage({ params }: { params: Promise<{ id: string }> }) {
+/** Старые закладки сохраняют фильтры после переезда. */
+export default async function LegacyTasksPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
-
-  return (
-    <main className="space-y-6 pb-6">
-      <h1 className="text-2xl font-semibold">{TASKS_TEXTS.heading}</h1>
-      <TasksScreen projectId={id} />
-    </main>
-  );
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(await searchParams)) {
+    for (const item of Array.isArray(value) ? value : value ? [value] : []) query.append(key, item);
+  }
+  redirect(`/projects/${id}/tasks${query.size ? `?${query}` : ''}`);
 }

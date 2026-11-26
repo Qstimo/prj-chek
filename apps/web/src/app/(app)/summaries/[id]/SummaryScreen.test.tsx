@@ -222,11 +222,23 @@ async function selectAll(): Promise<void> {
 }
 
 beforeEach(() => {
+  vi.mocked(hooks.useQueryProjectTracker).mockReturnValue(
+    query({
+      hasConnection: false,
+      isOperational: false,
+      blockedBy: 'secret_missing',
+      binding: null,
+    }),
+  );
+  vi.mocked(hooks.useMutationTransferSummaryTasks).mockReturnValue(mutation());
+  vi.mocked(hooks.useMutationExportTasks).mockReturnValue(mutation());
   vi.mocked(hooks.useQuerySections).mockReturnValue(
     query({ [Section.Chronicle]: AccessLevel.Write, [Section.Roadmap]: AccessLevel.Write }),
   );
   vi.mocked(hooks.useQueryPublicLink).mockReturnValue(query(null));
-  vi.mocked(hooks.useQueryRoadmap).mockReturnValue(query({ stage: { current: null, total: 0 }, versions: [], summary: [] }));
+  vi.mocked(hooks.useQueryRoadmap).mockReturnValue(
+    query({ stage: { current: null, total: 0 }, versions: [], summary: [] }),
+  );
   vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationSaveSummaryTasks).mockReturnValue(mutation());
   vi.mocked(hooks.useMutationArchiveSummaryTasks).mockReturnValue(mutation());
@@ -238,6 +250,31 @@ beforeEach(() => {
 });
 
 describe('экран саммари', () => {
+  it('переносит выбранные задачи в реестр без обязательного создания релиза', async () => {
+    const transfer = mutation();
+    vi.mocked(hooks.useMutationTransferSummaryTasks).mockReturnValue(transfer);
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Перенести в «Задачи» (1)' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Перенести выбранные' }));
+    expect(mutateOf(transfer)).toHaveBeenCalledWith({ taskIds: [TASK_ID] }, expect.anything());
+    expect(screen.queryByRole('button', { name: 'Выгрузить в Weeek (1)' })).not.toBeInTheDocument();
+  });
+  it('с токеном и доской предлагает выгрузку из саммари', async () => {
+    vi.mocked(hooks.useQueryProjectTracker).mockReturnValue(
+      query({
+        hasConnection: true,
+        isOperational: true,
+        blockedBy: null,
+        binding: { boardId: '11', externalProjectId: '7', boardColumnId: '31' },
+      }),
+    );
+    renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
+    await selectAll();
+    await userEvent.click(screen.getByRole('button', { name: 'Выгрузить в Weeek (1)' }));
+    expect(screen.getByRole('button', { name: 'Перенести и выгрузить' })).toBeInTheDocument();
+  });
+
   it('работающая разбивка над кнопкой ничего не рассказывает', () => {
     // Узел и модель задаёт тот же человек на `/settings`, и пересказ его
     // же настройки на каждом саммари — шум, за которым перестаёт
@@ -355,11 +392,7 @@ describe('экран саммари', () => {
     // влияет. Настоящая проверка этого свойства стоит на сервере —
     // `summaries.service.test.ts`, «отказ оставляет прежний черновик».
     vi.mocked(hooks.useMutationSuggestSummaryTasks).mockReturnValue(
-      failed(
-        SUGGESTER_UNAVAILABLE,
-        {},
-        'Разбивка не удалась: api.proxyapi.ru — узел ответил 400.',
-      ),
+      failed(SUGGESTER_UNAVAILABLE, {}, 'Разбивка не удалась: api.proxyapi.ru — узел ответил 400.'),
     );
 
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
@@ -520,7 +553,9 @@ describe('экран саммари', () => {
   });
 
   it('опубликованный роадмап предупреждает о публичной выдаче', async () => {
-    vi.mocked(hooks.useQueryPublicLink).mockReturnValue(query({ token: 'abc', url: '/roadmap/abc' }));
+    vi.mocked(hooks.useQueryPublicLink).mockReturnValue(
+      query({ token: 'abc', url: '/roadmap/abc' }),
+    );
 
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
@@ -868,7 +903,7 @@ describe('архив и уехавшие задачи саммари', () => {
   it('уехавшие только читаются и ведут на свою версию', async () => {
     renderScreen(ALL_STATES, LOCAL_SUGGESTER);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Уехали в релиз (1)' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Перенесены в задачи / релизы (1)' }));
 
     expect(screen.getByText(RELEASED_TASK.title)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'v1.4' })).toHaveAttribute(
@@ -888,13 +923,13 @@ describe('архив и уехавшие задачи саммари', () => {
       LOCAL_SUGGESTER,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'Уехали в релиз (1)' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Перенесены в задачи / релизы (1)' }));
 
     expect(screen.getByText(RELEASED_TASK.title)).toBeInTheDocument();
     // Ни одной ссылки в списке, а не «ни одной с обозначением»: ссылка
     // без обозначения была бы безымянной дорогой в `404`. Вместо неё
     // сказано, что версия скрыта, — молчание читалось бы как «не уехала».
-    const list = screen.getByRole('list', { name: 'Задачи, уехавшие в релиз' });
+    const list = screen.getByRole('list', { name: 'Задачи, перенесённые в проект' });
 
     expect(within(list).queryByRole('link')).not.toBeInTheDocument();
     expect(screen.getByText('Версия скрыта')).toBeInTheDocument();
@@ -906,6 +941,6 @@ describe('архив и уехавшие задачи саммари', () => {
     renderScreen(WITH_TASKS, LOCAL_SUGGESTER);
 
     expect(screen.queryByRole('button', { name: /^Архив/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Уехали в релиз/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Перенесены в задачи/ })).not.toBeInTheDocument();
   });
 });

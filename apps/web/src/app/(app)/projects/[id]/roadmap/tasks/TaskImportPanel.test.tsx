@@ -1,4 +1,4 @@
-import { TrackerKind, type TrackerImportPreview } from '@cairn/shared';
+import { RoadmapVersionState, TrackerKind, type TrackerImportPreview } from '@cairn/shared';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -59,6 +59,26 @@ function query(data: unknown, overrides = {}) {
 beforeEach(() => {
   mutate.mockReset();
   reset.mockReset();
+  vi.mocked(hooks.useQueryRoadmap).mockReturnValue(
+    query({
+      versions: [
+        {
+          id: 'late',
+          label: 'v2.0',
+          state: RoadmapVersionState.InProgress,
+          plannedDate: '2026-12-10',
+          position: 1,
+        },
+        {
+          id: 'early',
+          label: 'v1.0',
+          state: RoadmapVersionState.InProgress,
+          plannedDate: '2026-11-30',
+          position: 2,
+        },
+      ],
+    }),
+  );
   vi.mocked(hooks.useQueryTrackerTargets).mockReturnValue(
     query({
       projects: [{ id: '7', name: 'Разработка' }],
@@ -124,6 +144,21 @@ describe('импорт задач из Weeek', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'Импортировать: Оплата' }));
     await userEvent.click(screen.getByRole('button', { name: 'Импортировать выбранные (1)' }));
     expect(mutate).toHaveBeenCalledWith({ boardId: '11', externalIds: ['42'] }, expect.anything());
+  });
+  it('показывает ближайший разрабатываемый релиз и позволяет выбрать другой', async () => {
+    await open();
+    expect(
+      screen.getByRole('option', { name: 'По умолчанию: v1.0 (в разработке)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Доска Weeek')).toBeDisabled();
+    await userEvent.selectOptions(screen.getByLabelText('Импортировать в релиз'), 'late');
+    await userEvent.click(screen.getByRole('button', { name: 'Показать задачи' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Импортировать: Оплата' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Импортировать выбранные (1)' }));
+    expect(mutate).toHaveBeenCalledWith(
+      { boardId: '11', externalIds: ['42'], versionId: 'late' },
+      expect.anything(),
+    );
   });
   it('не предлагает импортировать дубли и задачи с недопустимым заголовком', async () => {
     vi.mocked(imports.useQueryImportTasks).mockReturnValue(

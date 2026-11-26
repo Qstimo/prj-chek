@@ -1,4 +1,4 @@
-import { SubjectKind, TaskOrigin, TrackerKind } from '@cairn/shared';
+import { RoadmapVersionState, SubjectKind, TaskOrigin, TrackerKind } from '@cairn/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
@@ -9,12 +9,15 @@ import {
   auditLog,
   projects,
   projectTasks,
+  roadmapCheckpoints,
+  roadmapVersions,
   subjects,
   taskExports,
   trackerProjectBindings,
 } from '../db/schema';
 import { TaskExportsRepository } from './task-exports.repository';
 import { TaskImportsRepository } from './task-imports.repository';
+import { TaskPlanningRepository } from '../tasks/task-planning.repository';
 import { TaskImportsService } from './task-imports.service';
 import { TrackerBindingsRepository } from './tracker-bindings.repository';
 import type { Tracker, TrackerSource } from './tracker';
@@ -84,16 +87,14 @@ describe('импорт задач: миграция, атомарность и �
       .values({ slug: 'import', name: 'Импорт' })
       .returning();
     projectId = project!.id;
-    await fixture.db
-      .insert(trackerProjectBindings)
-      .values({
-        projectId,
-        tracker: TrackerKind.Weeek,
-        externalProjectId: '7',
-        boardId: '11',
-        boardColumnId: '31',
-        updatedBySubjectId: subject.id,
-      });
+    await fixture.db.insert(trackerProjectBindings).values({
+      projectId,
+      tracker: TrackerKind.Weeek,
+      externalProjectId: '7',
+      boardId: '12',
+      boardColumnId: '31',
+      updatedBySubjectId: subject.id,
+    });
   });
 
   function service(db: Database, audit = new AuditService(), repo?: TaskImportsRepository) {
@@ -105,6 +106,7 @@ describe('импорт задач: миграция, атомарность и �
       new TaskExportsRepository(db, access),
       audit,
       source,
+      new TaskPlanningRepository(access),
     );
   }
 
@@ -123,6 +125,75 @@ describe('импорт задач: миграция, атомарность и �
       new AccessService(fixture.db),
     ).listForPoll(10);
     expect(poll[0]?.boardId).toBe('12');
+  });
+  it('импорт по умолчанию размещает задачу в ближайшем разрабатываемом релизе', async () => {
+    const versions = await fixture.db
+      .insert(roadmapVersions)
+      .values([
+        {
+          projectId,
+          label: 'later',
+          position: 1,
+          state: RoadmapVersionState.InProgress,
+          plannedDate: '2026-12-10',
+        },
+        {
+          projectId,
+          label: 'nearest',
+          position: 2,
+          state: RoadmapVersionState.InProgress,
+          plannedDate: '2026-11-30',
+        },
+      ])
+      .returning();
+    await service(fixture.appDb).import(subject, projectId, { boardId: '12', externalIds: ['42'] });
+    const [placement] = await fixture.rowsOf(roadmapCheckpoints);
+    expect(placement?.versionId).toBe(versions[1]?.id);
+    expect(placement?.isDone).toBe(false);
+  });
+  it('явный выбор вне релиза побеждает автоматически выбранный', async () => {
+    await fixture.db
+      .insert(roadmapVersions)
+      .values({ projectId, label: 'active', position: 1, state: RoadmapVersionState.InProgress });
+    await service(fixture.appDb).import(subject, projectId, {
+      boardId: '12',
+      externalIds: ['42'],
+      versionId: null,
+    });
+    expect(await fixture.rowsOf(roadmapCheckpoints)).toHaveLength(0);
+  });
+  it('роль приложения сохраняет правило и переносит задачу, чужой релиз откатывает правку', async () => {
+    await service(fixture.appDb).import(subject, projectId, {
+      boardId: '12',
+      externalIds: ['42'],
+      versionId: null,
+    });
+    const [task] = await fixture.rowsOf(projectTasks);
+    const [version] = await fixture.db
+      .insert(roadmapVersions)
+      .values({ projectId, label: 'active', position: 1 })
+      .returning();
+    const planning = new TaskPlanningRepository(new AccessService(fixture.appDb));
+    await fixture.appDb.transaction((tx) =>
+      planning.assign(subject, tx, projectId, task!.id, {
+        versionId: version!.id,
+        completionRule: { boardId: '12', columnId: '32' },
+      }),
+    );
+    expect((await fixture.rowsOf(projectTasks))[0]?.completionRule).toEqual({
+      boardId: '12',
+      columnId: '32',
+    });
+    expect((await fixture.rowsOf(roadmapCheckpoints))[0]?.versionId).toBe(version!.id);
+    await expect(
+      fixture.appDb.transaction((tx) =>
+        planning.assign(subject, tx, projectId, task!.id, {
+          versionId: '11111111-1111-4111-8111-111111111111',
+          completionRule: null,
+        }),
+      ),
+    ).rejects.toThrow();
+    expect((await fixture.rowsOf(projectTasks))[0]?.completionRule).not.toBeNull();
   });
 
   it('отказ журнала откатывает и задачу, и связь', async () => {

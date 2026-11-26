@@ -36,6 +36,24 @@ export const TASK_ALREADY_PLACED = 'task_already_placed';
  */
 export const TASK_PLACED = 'task_placed';
 
+/** Автозавершение включается человеком для конкретной колонки одной доски. */
+export const taskCompletionRuleSchema = z
+  .object({
+    boardId: z.string().trim().min(1).max(100),
+    columnId: z.string().trim().min(1).max(100),
+  })
+  .strict();
+export type TaskCompletionRule = z.infer<typeof taskCompletionRuleSchema>;
+
+export const taskPlanningUpdateSchema = z
+  .object({
+    versionId: z.string().uuid().nullable(),
+    isDone: z.boolean().optional(),
+    completionRule: taskCompletionRuleSchema.nullable().optional(),
+  })
+  .strict();
+export type TaskPlanningUpdate = z.infer<typeof taskPlanningUpdateSchema>;
+
 /**
  * Размещение задачи в версии роадмапа.
  *
@@ -91,10 +109,12 @@ export const projectTaskSchema = z.object({
    * этих двух состояниях показывает разное: кнопку «Выгрузить» и ссылку
    * наружу.
    *
-   * Зеркало ничего не закрывает (дизайн, 5): `export.isCompleted` и
+   * Сам `export.isCompleted` ничего не закрывает: для этого нужно явное
+   * правило по колонке у задачи. `export.isCompleted` и
    * `placement.isDone` — два независимых поля, и их расхождение законно.
    */
   export: taskExportSchema.nullable(),
+  completionRule: taskCompletionRuleSchema.nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

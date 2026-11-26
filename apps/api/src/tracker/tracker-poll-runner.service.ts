@@ -10,6 +10,8 @@ import { sql } from 'drizzle-orm';
 
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
+import { AuditService } from '../audit/audit.service';
+import { applyTrackerCompletion } from './task-completion';
 import {
   TaskExportsRepository,
   type TaskExportPollTarget,
@@ -71,41 +73,10 @@ const LOCK_OBJECT = 3;
  */
 export const MAX_POLLED_PER_TICK = 200;
 
-/**
- * Фоновый прогон опроса статусов трекера (дизайн, 8).
- *
- * Устройство повторяет `StatusRunnerService` и
- * `TranscriptionRunnerService`, и это повторение, а не совпадение: замок
- * лежит **в базе** (`pg_try_advisory_xact_lock`) на **отдельном
- * соединении**, он **уровня транзакции**, а признак идущего тика
- * захватывается **синхронно**, до первого `await`. В памяти замок не
- * защитил бы от второго экземпляра API за прокси, а два тика сразу — это
- * два одинаковых вопроса в API, который считает частоту.
- *
- * Три отличия от соседних прогонов, и каждое надо назвать прямо, иначе их
- * прочтут как небрежность:
- *
- * 1. **при подъёме тик не идёт.** У прогона проверок он нужен: без него
- *    только что вписанный адрес до четверти часа остаётся «неизвестно». У
- *    расшифровки — тоже: загруженная запись иначе ждала бы лишние двадцать
- *    секунд. Здесь же зеркало уже лежит в базе и старше интервала не
- *    бывает, а деплой перезапускает API — то есть каждый перезапуск стучался
- *    бы в чужой API ради знания, которым никто не распоряжается
- *    автоматически;
- * 2. **в журнал действий тик не пишет ничего, и записи о передаче у него
- *    нет вовсе.** Наружу не уходит ни байта содержимого проекта: вопрос
- *    состоит из идентификаторов доски и проекта в трекере. Запись
- *    «передали» ставится там, где уезжает формулировка, — в выгрузке
- *    (`TaskExportsService`), и ставить её здесь значило бы называть передачей
- *    то, что ею не является;
- * 3. **тяжёлого шага у тика нет**, поэтому и бюджета в один шаг нет: вопрос
- *    о доске — короткий `GET` без тела, и ограничен тик числом **записей**
- *    (см. {@link MAX_POLLED_PER_TICK}), а не числом походов в сеть.
- *
- * **Зеркало ничего не закрывает** (решение владельца, дизайн 5): чекпоинтов
- * прогон не касается ни одним запросом, прогресс версии считается только из
- * них, а расхождение «в трекере закрыто, здесь открыто» показывается биркой.
- * Это сторожится тестом прямо: тик не меняет ни одной строки размещения.
+/** Фоновый опрос под транзакционным замком базы на отдельном соединении.
+ * Порт выбирается один раз на тик. Успешный ответ обновляет зеркало и,
+ * только при включённом человеком правиле колонки, завершает размещение
+ * с системным аудитом в той же транзакции. Тик при старте не запускается.
  */
 @Injectable()
 export class TrackerPollRunnerService implements OnModuleInit, OnModuleDestroy {
@@ -127,6 +98,7 @@ export class TrackerPollRunnerService implements OnModuleInit, OnModuleDestroy {
     // Источник, а не адаптер: подключение правится на экране и действует
     // без перезапуска, а порт берётся **один раз на тик** (см. `sweep`).
     @Inject(TRACKER_SOURCE) private readonly trackers: TrackerSource,
+    private readonly audit: AuditService,
   ) {}
 
   /** Сколько тиков было запрошено: по нему виден тик при подъёме. */
@@ -353,14 +325,12 @@ export class TrackerPollRunnerService implements OnModuleInit, OnModuleDestroy {
    * прерывается падением одного адреса: остальные задачи этой доски уже
    * получили ответ, и терять его из-за одной строки незачем.
    */
-  private async write(
-    target: TaskExportPollTarget,
-    result: TaskPollResult,
-  ): Promise<void> {
+  private async write(target: TaskExportPollTarget, result: TaskPollResult): Promise<void> {
     try {
-      await this.db.transaction((tx) =>
-        this.exports.recordPolled(tx, target.taskId, result),
-      );
+      await this.db.transaction(async (tx) => {
+        await applyTrackerCompletion(tx, target, result, this.audit);
+        await this.exports.recordPolled(tx, target.taskId, result);
+      });
     } catch (cause) {
       this.logger.warn(`Зеркало задачи ${target.taskId} не записано: ${String(cause)}`);
     }

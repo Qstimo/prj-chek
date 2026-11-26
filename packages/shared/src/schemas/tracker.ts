@@ -292,6 +292,8 @@ export const trackerProbeResultSchema = z
  * с вопросом «почему» вместо «включите токен» (дизайн, 9.2 и C4 плана).
  */
 export const projectTrackerSchema = z.object({
+  /** Токен сохранён в общих настройках; секрет наружу не выходит. */
+  hasConnection: z.boolean().optional(),
   isOperational: z.boolean(),
   blockedBy: z.string().nullable(),
   /** `null` — привязки нет: состояние, а не ошибка. */

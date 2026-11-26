@@ -8,13 +8,20 @@ import {
   type TrackerImportRequest,
   type TrackerImportResult,
 } from '@cairn/shared';
-import { BadGatewayException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
 
 import type { RequestSubject } from '../access/access.types';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/audit.types';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
+import { TaskPlanningRepository } from '../tasks/task-planning.repository';
 import { TaskExportsRepository } from './task-exports.repository';
 import { TaskImportsRepository, existingImportTask } from './task-imports.repository';
 import { TrackerBindingsRepository } from './tracker-bindings.repository';
@@ -30,18 +37,24 @@ export class TaskImportsService {
     private readonly exports: TaskExportsRepository,
     private readonly audit: AuditService,
     @Inject(TRACKER_SOURCE) private readonly trackers: TrackerSource,
+    private readonly planning: TaskPlanningRepository,
   ) {}
 
   private async source(subject: RequestSubject, projectId: string, boardId: string) {
     await this.bindings.requireWrite(subject, projectId);
     const binding = await this.bindings.findForProject(subject, projectId);
     if (!binding) throw new TrackerBindingMissingError();
+    if (binding.boardId !== boardId)
+      throw new BadRequestException(
+        'Импорт доступен только с доски, выбранной в настройках задач проекта.',
+      );
     const port = await this.trackers.current();
     if (!port.isEnabled) throw new TrackerNotConfiguredError();
     const controller = new AbortController();
     try {
       return {
         tracker: port.kind,
+        binding,
         source: await port.readImportTasks({ ...binding, boardId }, controller.signal),
       };
     } catch (cause) {
@@ -78,10 +91,17 @@ export class TaskImportsService {
     input: TrackerImportRequest,
   ): Promise<TrackerImportResult[]> {
     // Перечитываем Weeek: заголовок, ссылка и исполнитель никогда не принимаются от браузера.
-    const { source, tracker } = await this.source(subject, projectId, input.boardId);
+    const { source, tracker, binding } = await this.source(subject, projectId, input.boardId);
     const available = new Map(source.tasks.map((task) => [task.externalId, task]));
     return this.db.transaction(async (tx) => {
       await this.repository.lock(subject, tx, projectId);
+      const current = await this.bindings.findForProject(subject, projectId, tx);
+      if (
+        current?.boardId !== binding.boardId ||
+        current?.externalProjectId !== binding.externalProjectId
+      )
+        throw new ConflictException('Доска проекта изменилась. Обновите список перед импортом.');
+      const versionId = await this.planning.resolveVersion(subject, tx, projectId, input.versionId);
       const known = await this.repository.known(subject, projectId, tx);
       const results: TrackerImportResult[] = [];
       for (const externalId of input.externalIds) {
@@ -122,6 +142,8 @@ export class TaskImportsService {
           state,
         });
         await this.exports.recordPolled(tx, row.id, { tracker, state, code: null });
+        if (versionId !== null)
+          await this.planning.assign(subject, tx, projectId, row.id, { versionId });
         await this.audit.record(
           tx,
           {
@@ -134,7 +156,7 @@ export class TaskImportsService {
             entityType: 'task',
             entityId: row.id,
             projectId,
-            metadata: { tracker, externalId, boardId: task.boardId },
+            metadata: { tracker, externalId, boardId: task.boardId, versionId },
           },
         );
         known.push({

@@ -78,6 +78,8 @@ export const summaryTaskSchema = z.object({
   state: z.nativeEnum(SummaryTaskState),
   releasedVersionId: z.string().uuid().nullable(),
   releasedVersionLabel: z.string().nullable(),
+  /** Подтверждённая задача реестра; скрыта без Roadmap Read. */
+  taskId: z.string().uuid().nullable().optional(),
   /**
    * Ссылка на задачу во внешнем трекере.
    *
@@ -260,9 +262,11 @@ export const summaryTasksReplaceSchema = z
   .strict();
 
 /** Набор отмеченных задач для одного действия. */
-export const summaryTaskIdsSchema = z.object({
-  taskIds: z.array(z.string().uuid()).min(1).max(MAX_SUMMARY_TASKS),
-}).strict();
+export const summaryTaskIdsSchema = z
+  .object({
+    taskIds: z.array(z.string().uuid()).min(1).max(MAX_SUMMARY_TASKS),
+  })
+  .strict();
 
 export const summaryReleaseSchema = summaryTaskIdsSchema.extend({
   target: z.discriminatedUnion('kind', [
@@ -272,6 +276,8 @@ export const summaryReleaseSchema = summaryTaskIdsSchema.extend({
 });
 
 export type SummaryTaskIds = z.infer<typeof summaryTaskIdsSchema>;
+export const summaryTransferResultSchema = z.object({ taskIds: z.array(z.string().uuid()) });
+export type SummaryTransferResult = z.infer<typeof summaryTransferResultSchema>;
 export type SummaryRelease = z.infer<typeof summaryReleaseSchema>;
 
 /** Результат формирования релиза: куда уехали задачи. */

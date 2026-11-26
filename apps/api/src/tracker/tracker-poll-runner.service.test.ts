@@ -12,8 +12,10 @@ import { eq, sql } from 'drizzle-orm';
 import { vi, afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { startTestDatabase, type TestDatabase } from '../../test/db-fixture';
+import { AuditService } from '../audit/audit.service';
 import { AccessService } from '../access/access.service';
 import {
+  auditLog,
   projectTasks,
   projects,
   roadmapCheckpoints,
@@ -27,10 +29,7 @@ import {
 } from '../db/schema';
 import { TaskExportsRepository } from './task-exports.repository';
 import { TRACKER_POLL_ENV } from './tracker-poll';
-import {
-  TrackerPollOutcome,
-  TrackerPollRunnerService,
-} from './tracker-poll-runner.service';
+import { TrackerPollOutcome, TrackerPollRunnerService } from './tracker-poll-runner.service';
 import {
   TrackerFailure,
   type Tracker,
@@ -187,7 +186,13 @@ describe('прогон опроса статусов трекера', () => {
    * единственного соединения: занять его значило бы запереть сам прогон.
    */
   function runner(): TrackerPollRunnerService {
-    return new TrackerPollRunnerService(testDb.appDb, testDb.db, repository, source);
+    return new TrackerPollRunnerService(
+      testDb.appDb,
+      testDb.db,
+      repository,
+      source,
+      new AuditService(),
+    );
   }
 
   async function seedTask(title: string, project = projectId): Promise<string> {
@@ -200,11 +205,7 @@ describe('прогон опроса статусов трекера', () => {
   }
 
   /** Привязка доски: без неё спрашивать нечем, и в обход проект не попадёт. */
-  async function bind(
-    project = projectId,
-    boardId = '11',
-    boardColumnId = '31',
-  ): Promise<void> {
+  async function bind(project = projectId, boardId = '11', boardColumnId = '31'): Promise<void> {
     await testDb.db.insert(trackerProjectBindings).values({
       projectId: project,
       tracker: TrackerKind.Weeek,
@@ -239,10 +240,7 @@ describe('прогон опроса статусов трекера', () => {
   }
 
   async function exportRow(taskId: string): Promise<TaskExportRow | undefined> {
-    const [row] = await testDb.db
-      .select()
-      .from(taskExports)
-      .where(eq(taskExports.taskId, taskId));
+    const [row] = await testDb.db.select().from(taskExports).where(eq(taskExports.taskId, taskId));
 
     return row;
   }
@@ -337,18 +335,38 @@ describe('прогон опроса статусов трекера', () => {
       expect((await exportRow(alien))?.isCompleted).toBe(true);
     });
 
-    it('закрытая в трекере задача больше не опрашивается', async () => {
-      // Закрытая задача не меняется, и спрашивать о ней — платить трафиком
-      // за известное (дизайн, 8). Проверяется у самого прогона, а не только
-      // у выборки: путь к сети начинается здесь.
+    it('закрытая в трекере задача продолжает опрашиваться для правил и повторного открытия', async () => {
       await bind();
       const taskId = await seedTask('Оплата');
       await seedExport(taskId, { isCompleted: true, checkedAt: null });
 
       await runner().runAll();
 
-      expect(tracker.asked).toEqual([]);
-      expect((await exportRow(taskId))?.checkedAt).toBeNull();
+      expect(tracker.asked).toHaveLength(1);
+      expect((await exportRow(taskId))?.checkedAt).not.toBeNull();
+    });
+    it('правило завершает только настроенное размещение, повторный опрос не дублирует аудит', async () => {
+      await bind();
+      const taskId = await seedTask('Оплата');
+      const placement = await place(taskId);
+      await seedExport(taskId);
+      await testDb.db
+        .update(projectTasks)
+        .set({ completionRule: { boardId: '11', columnId: 'done' } })
+        .where(eq(projectTasks.id, taskId));
+      tracker.answers.set('11', [state({ boardColumnId: 'done' })]);
+      await runner().runAll();
+      const [updated] = await testDb.db
+        .select()
+        .from(roadmapCheckpoints)
+        .where(eq(roadmapCheckpoints.id, placement.id));
+      expect(updated?.isDone).toBe(true);
+      await runner().runAll();
+      const entries = await testDb.rowsOf(auditLog);
+      expect(entries.filter((entry) => entry.action === 'checkpoint.updated')).toHaveLength(1);
+      tracker.answers.set('11', [state({ boardColumnId: '31' })]);
+      await runner().runAll();
+      expect((await testDb.rowsOf(roadmapCheckpoints))[0]?.isDone).toBe(true);
     });
 
     it('время проверки пишется, даже когда статус не изменился', async () => {
@@ -576,8 +594,8 @@ describe('прогон опроса статусов трекера', () => {
         await holding;
       }
 
-      expect(tracker.asked).toEqual([]);
-      expect((await exportRow(taskId))?.checkedAt).toBeNull();
+      expect(tracker.asked).toHaveLength(1);
+      expect((await exportRow(taskId))?.checkedAt).not.toBeNull();
     });
 
     it('нулевой интервал цикл не запускает', async () => {

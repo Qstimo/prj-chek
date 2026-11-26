@@ -37,6 +37,10 @@ export function TasksBlock({
   isSaving,
   saveError,
   onRelease,
+  onTransfer,
+  onExport,
+  onExportTransferred,
+  exportBlockedNote,
   onArchive,
   onRestore,
   onDelete,
@@ -143,6 +147,9 @@ export function TasksBlock({
         error={saveError}
         actions={{
           onRelease,
+          onTransfer,
+          onExport,
+          exportBlockedNote,
           onArchive,
           onDelete,
           releaseBlockedNote,
@@ -174,7 +181,11 @@ export function TasksBlock({
         </ConfirmDialog>
       )}
 
-      <ReleasedTasks tasks={released} projectId={summary.projectId} />
+      <ReleasedTasks
+        tasks={released}
+        projectId={summary.projectId}
+        onExport={onExportTransferred}
+      />
     </section>
   );
 }

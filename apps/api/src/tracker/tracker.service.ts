@@ -219,6 +219,7 @@ export class TrackerService {
     const connection = await this.connections.connection(TrackerKind.Weeek);
 
     return {
+      hasConnection: connection.hasSecret,
       isOperational: connection.isOperational,
       blockedBy: connection.blockedBy,
       binding,
@@ -318,9 +319,7 @@ function outwardOf(cause: unknown): Error {
   return new BadGatewayException({
     code: cause instanceof TrackerFailure ? cause.code : TRACKER_UNAVAILABLE,
     message:
-      cause instanceof TrackerFailure
-        ? cause.message
-        : 'Трекер не ответил. Попробуйте ещё раз.',
+      cause instanceof TrackerFailure ? cause.message : 'Трекер не ответил. Попробуйте ещё раз.',
   });
 }
 

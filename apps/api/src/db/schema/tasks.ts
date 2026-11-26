@@ -1,6 +1,7 @@
-import { TaskOrigin } from '@cairn/shared';
+import { TaskOrigin, type TaskCompletionRule } from '@cairn/shared';
 import {
   index,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -43,6 +44,7 @@ export const projectTasks = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: 'restrict' }),
     title: text('title').notNull(),
+    completionRule: jsonb('completion_rule').$type<TaskCompletionRule>(),
     /**
      * Ссылка на задачу во внешнем трекере, вписанная человеком.
      *

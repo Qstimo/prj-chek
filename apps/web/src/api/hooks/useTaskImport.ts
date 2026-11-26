@@ -10,6 +10,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 
 import { apiClient } from '../client';
 import { TASK_KEYS } from './useTasks';
+import { ROADMAP_KEYS } from './useQueryRoadmap';
 
 export function useQueryImportTasks(projectId: string, filter: TrackerImportQuery | undefined) {
   return useQuery({
@@ -42,6 +43,7 @@ export function useMutationImportTasks(projectId: string) {
     onSettled: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: TASK_KEYS.forProject(projectId) }),
+        client.invalidateQueries({ queryKey: ROADMAP_KEYS.forProject(projectId) }),
         client.invalidateQueries({ queryKey: ['task-import', projectId] }),
       ]),
   });

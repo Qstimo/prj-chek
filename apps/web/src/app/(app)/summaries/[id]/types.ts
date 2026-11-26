@@ -65,6 +65,10 @@ export interface ITasksProps {
    * поведением закрытия.
    */
   onRelease: (taskIds: string[]) => void;
+  onTransfer?: (taskIds: string[]) => void;
+  onExport?: (taskIds: string[]) => void;
+  onExportTransferred?: (taskIds: string[]) => void;
+  exportBlockedNote?: string;
   onArchive: (taskIds: string[]) => void;
   onRestore: (taskIds: string[]) => void;
   onDelete: (taskIds: string[]) => void;
@@ -92,6 +96,7 @@ export interface IArchivedProps {
 
 /** Пропсы списка уехавших задач. */
 export interface IReleasedProps {
+  onExport?: (taskIds: string[]) => void;
   tasks: SummaryTask[];
   /** Проект нужен ссылке на версию: роадмап живёт под проектом. */
   projectId: string;

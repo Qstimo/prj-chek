@@ -22,6 +22,30 @@ function renderNav() {
 }
 
 describe('ProjectNav', () => {
+  it('выделяет отдельную вкладку задач по тому же праву на роадмап', () => {
+    pathname.value = '/projects/p1/tasks/settings';
+    renderNav();
+    const [breadcrumbs, tabs] = screen.getAllByRole('list');
+    expect(within(breadcrumbs!).getByRole('link', { name: 'Задачи' })).toHaveAttribute(
+      'href',
+      '/projects/p1/tasks',
+    );
+    expect(within(tabs!).getByRole('link', { name: 'Задачи' })).toHaveClass('bg-surface-strong');
+    expect(within(tabs!).getByRole('link', { name: 'Роадмап' })).not.toHaveClass(
+      'bg-surface-strong',
+    );
+    pathname.value = '/projects/p1/variables';
+  });
+  it('не показывает задачи без доступа к роадмапу', () => {
+    render(
+      <ProjectNav
+        projectId="p1"
+        projectName="Проект"
+        sections={{ [Section.Info]: AccessLevel.Read }}
+      />,
+    );
+    expect(screen.queryByRole('link', { name: 'Задачи' })).not.toBeInTheDocument();
+  });
   it('ведёт из раздела назад к проекту и к списку проектов', () => {
     // Без этого из раздела можно было выйти только кнопкой браузера.
     renderNav();

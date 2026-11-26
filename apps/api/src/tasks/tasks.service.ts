@@ -3,6 +3,7 @@ import {
   type ProjectTask,
   type ProjectTaskCreate,
   type ProjectTaskUpdate,
+  type TaskPlanningUpdate,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
 
@@ -13,6 +14,7 @@ import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import type { ProjectTaskRow } from '../db/schema';
 import { TasksRepository } from './tasks.repository';
+import { TaskPlanningRepository } from './task-planning.repository';
 
 /**
  * Задачи проекта: изменения вместе с журналированием.
@@ -33,7 +35,31 @@ export class TasksService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly repository: TasksRepository,
     private readonly audit: AuditService,
+    private readonly planning: TaskPlanningRepository,
   ) {}
+
+  async plan(
+    subject: RequestSubject,
+    projectId: string,
+    taskId: string,
+    input: TaskPlanningUpdate,
+  ) {
+    await this.db.transaction(async (tx) => {
+      await this.planning.assign(subject, tx, projectId, taskId, input);
+      await this.audit.record(tx, actorOf(subject), {
+        action: AuditAction.TaskUpdated,
+        entityType: 'task',
+        entityId: taskId,
+        projectId,
+        metadata: {
+          fields: ['placement', ...(input.completionRule !== undefined ? ['completionRule'] : [])],
+          versionId: input.versionId,
+          isDone: input.isDone,
+          completionRule: input.completionRule,
+        },
+      });
+    });
+  }
 
   /** Задачи проекта вместе с размещением. */
   async findForProject(

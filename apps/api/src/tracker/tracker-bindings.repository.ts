@@ -12,7 +12,7 @@ import { AccessService } from '../access/access.service';
 import type { RequestSubject } from '../access/access.types';
 import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
-import { subjects, trackerProjectBindings } from '../db/schema';
+import { projects, subjects, trackerProjectBindings } from '../db/schema';
 
 /**
  * Привязка проекта к доске трекера: куда выгружать его задачи.
@@ -40,13 +40,7 @@ export class TrackerBindingsRepository {
     projectId: string,
     executor: Executor = this.db,
   ): Promise<TrackerBinding | null> {
-    await this.access.requireLevel(
-      subject,
-      projectId,
-      Section.Roadmap,
-      AccessLevel.Read,
-      executor,
-    );
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Read, executor);
 
     const [row] = await executor
       .select({ binding: trackerProjectBindings, updatedByLabel: subjects.label })
@@ -85,6 +79,11 @@ export class TrackerBindingsRepository {
     input: TrackerBindingUpdate,
   ): Promise<void> {
     await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write, tx);
+    await tx
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .for('no key update');
 
     const fields = {
       // Вид трекера задаёт **путь**, а не тело: трекер на установку один, и

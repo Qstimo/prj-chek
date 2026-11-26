@@ -1,25 +1,61 @@
 import {
-  summaryCreateSchema, summaryReleaseSchema, summaryTaskIdsSchema, summaryTasksReplaceSchema,
-  type SummaryRelease, type SummaryTaskIds, type SummaryCreate, type SummaryDetail,
-  type SummaryListItem, type SummaryReleaseResult, type SummaryTasksReplace,
+  summaryCreateSchema,
+  summaryReleaseSchema,
+  summaryTaskIdsSchema,
+  summaryTasksReplaceSchema,
+  type SummaryRelease,
+  type SummaryTaskIds,
+  type SummaryCreate,
+  type SummaryDetail,
+  type SummaryListItem,
+  type SummaryReleaseResult,
+  type SummaryTasksReplace,
 } from '@cairn/shared';
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 
 import type { RequestSubject } from '../access/access.types';
 import { CurrentSubject } from '../auth/current-subject.decorator';
 import { SessionGuard } from '../auth/session.guard';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { SummariesService } from './summaries.service';
+import { SummaryTaskTransferService } from './summary-task-transfer.service';
 
 /** Права остаются в выборке репозитория: guard защищает только сессию. */
 @Controller('projects/:projectId/summaries')
 @UseGuards(SessionGuard)
 export class SummariesController {
-  constructor(private readonly summaries: SummariesService) {}
+  constructor(
+    private readonly summaries: SummariesService,
+    private readonly transfers: SummaryTaskTransferService,
+  ) {}
+
+  @Post(':id/tasks/transfer')
+  transfer(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(summaryTaskIdsSchema)) body: SummaryTaskIds,
+  ) {
+    return this.transfers.transfer(subject, projectId, id, body);
+  }
 
   /** История саммари проекта. */
   @Get()
-  list(@CurrentSubject() subject: RequestSubject, @Param('projectId', ParseUUIDPipe) projectId: string): Promise<SummaryListItem[]> {
+  list(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ): Promise<SummaryListItem[]> {
     return this.summaries.list(subject, projectId);
   }
 

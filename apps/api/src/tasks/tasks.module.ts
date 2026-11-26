@@ -7,6 +7,7 @@ import { DbModule } from '../db/db.module';
 import { TasksController } from './tasks.controller';
 import { TasksRepository } from './tasks.repository';
 import { TasksService } from './tasks.service';
+import { TaskPlanningModule } from './task-planning.module';
 
 /**
  * Модуль задач проекта.
@@ -16,7 +17,7 @@ import { TasksService } from './tasks.service';
  * черновика заводит задачи реестра, а не чекпоинты напрямую.
  */
 @Module({
-  imports: [DbModule, AccessModule, AuditModule, AuthModule],
+  imports: [DbModule, AccessModule, AuditModule, AuthModule, TaskPlanningModule],
   controllers: [TasksController],
   providers: [TasksRepository, TasksService],
   exports: [TasksRepository, TasksService],

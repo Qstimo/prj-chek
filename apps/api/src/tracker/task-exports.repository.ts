@@ -427,6 +427,19 @@ export class TaskExportsRepository {
    * **до** нажатия, а следом остаются записи журнала о каждой выгрузке.
    */
   async removeForTracker(tx: Transaction, tracker: TrackerKind): Promise<void> {
+    // Старое правило не должно ожить после подключения другого пространства с теми же id досок.
+    await tx
+      .update(projectTasks)
+      .set({ completionRule: null })
+      .where(
+        inArray(
+          projectTasks.id,
+          tx
+            .select({ id: taskExports.taskId })
+            .from(taskExports)
+            .where(eq(taskExports.tracker, tracker)),
+        ),
+      );
     await tx.delete(taskExports).where(eq(taskExports.tracker, tracker));
   }
 
@@ -442,8 +455,9 @@ export class TaskExportsRepository {
    *
    * Что из обхода исключено, и почему каждое:
    *
-   * - закрытые в трекере: закрытая задача не меняется, и спрашивать о ней
-   *   каждые пять минут — платить трафиком за известное;
+   * Закрытые задачи также опрашиваются: их могут открыть или перенести,
+   * а правило завершения зависит от текущей колонки.
+   *
    * - архивные проекты — то же правило, что у прогона проверок: архив
    *   никто не чинит;
    * - проекты без привязки: спрашивают **по доске**, и без привязки
@@ -472,9 +486,7 @@ export class TaskExportsRepository {
         trackerProjectBindings,
         eq(trackerProjectBindings.projectId, projectTasks.projectId),
       )
-      .where(
-        and(eq(taskExports.isCompleted, false), ne(projects.lifecycle, ProjectLifecycle.Archived)),
-      )
+      .where(ne(projects.lifecycle, ProjectLifecycle.Archived))
       .orderBy(
         // `nulls first` именно так и читается: ни разу не спрошенные сверху.
         sql`${taskExports.checkedAt} asc nulls first`,

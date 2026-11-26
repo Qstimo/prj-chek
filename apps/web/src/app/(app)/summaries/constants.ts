@@ -99,7 +99,7 @@ export const SUMMARY_TEXTS = {
    */
   releasedHidden: 'Версия скрыта',
   /** Имя списка уехавших для читалок. */
-  releasedListLabel: 'Задачи, уехавшие в релиз',
+  releasedListLabel: 'Задачи, перенесённые в проект',
   /**
    * Бирки состояния потока в шапке рабочего экрана.
    *
@@ -186,7 +186,7 @@ export function archivedHeadingOf(count: number): string {
 
 /** Заголовок свёрнутого списка уехавших. */
 export function releasedHeadingOf(count: number): string {
-  return `Уехали в релиз (${count})`;
+  return `Перенесены в задачи / релизы (${count})`;
 }
 
 /** Число с разделителями разрядов обычным пробелом. */

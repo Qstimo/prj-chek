@@ -231,6 +231,31 @@ export function SummaryTaskEditor({
 
           {actions !== undefined && (
             <>
+              {actions.onTransfer && (
+                <button
+                  type="button"
+                  onClick={() => actions.onTransfer?.(selected)}
+                  disabled={!canAct || actions.releaseBlockedNote !== undefined}
+                  className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+                >
+                  Перенести в «Задачи» ({selected.length})
+                </button>
+              )}
+              {actions.onExport && (
+                <button
+                  type="button"
+                  onClick={() => actions.onExport?.(selected)}
+                  disabled={
+                    !canAct ||
+                    actions.releaseBlockedNote !== undefined ||
+                    actions.exportBlockedNote !== undefined ||
+                    selected.length > 50
+                  }
+                  className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+                >
+                  Выгрузить в Weeek ({selected.length})
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => actions.onRelease(selected)}

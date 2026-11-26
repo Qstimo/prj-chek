@@ -39,7 +39,7 @@ export function stateOf(item: SummaryListItem): string {
 }
 
 /**
- * Строка истории: «3 в работе · 2 в архиве · 5 в релизе».
+ * Строка истории: «3 в работе · 2 в архиве · 5 в проекте».
  *
  * Нули не показываются, и пустая строка законна: одного числа задач
  * после архива и выборочного релиза не хватает — «задач: 3» не говорит,
@@ -49,7 +49,7 @@ export function countsNoteOf(item: SummaryListItem): string {
   return [
     [item.taskCount, 'в работе'],
     [item.archivedCount, 'в архиве'],
-    [item.releasedCount, 'в релизе'],
+    [item.releasedCount, 'в проекте'],
   ]
     .filter(([count]) => (count as number) > 0)
     .map(([count, where]) => `${count} ${where}`)

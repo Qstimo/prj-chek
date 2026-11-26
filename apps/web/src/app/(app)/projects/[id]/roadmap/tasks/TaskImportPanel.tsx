@@ -2,13 +2,14 @@
 
 import {
   trackerImportQuerySchema,
+  defaultTaskVersion,
   type TrackerBinding,
   type TrackerImportQuery,
 } from '@cairn/shared';
 import { useState, type FormEvent, type ReactNode } from 'react';
 
 import { describeApiError } from '@/api';
-import { useQueryTrackerTargets } from '@/api/hooks';
+import { useQueryTrackerTargets, useQueryRoadmap } from '@/api/hooks';
 import { useMutationImportTasks, useQueryImportTasks } from '@/api/hooks/useTaskImport';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { Loader } from '@/components/Loader';
@@ -22,6 +23,9 @@ export function TaskImportPanel({
   binding: TrackerBinding | null;
 }) {
   const [open, setOpen] = useState(false);
+  const [release, setRelease] = useState('auto');
+  const roadmap = useQueryRoadmap(projectId, open);
+  const defaultVersion = defaultTaskVersion(roadmap?.data?.versions ?? []);
   const [draft, setDraft] = useState<TrackerImportQuery>({
     boardId: binding?.boardId ?? '',
     status: 'open',
@@ -33,9 +37,7 @@ export function TaskImportPanel({
   const targets = useQueryTrackerTargets(projectId, open);
   const preview = useQueryImportTasks(projectId, open ? filter : undefined);
   const imports = useMutationImportTasks(projectId);
-  const boards = (targets.data?.boards ?? []).filter(
-    (board) => board.projectId === binding?.externalProjectId,
-  );
+  const boards = (targets.data?.boards ?? []).filter((board) => board.id === binding?.boardId);
   const columns = (targets.data?.columns ?? []).filter(
     (column) => column.boardId === draft.boardId,
   );
@@ -78,7 +80,11 @@ export function TaskImportPanel({
   function runImport() {
     if (!filter) return;
     imports.mutate(
-      { boardId: filter.boardId, externalIds: chosen },
+      {
+        boardId: filter.boardId,
+        externalIds: chosen,
+        ...(release !== 'auto' ? { versionId: release || null } : {}),
+      },
       {
         onSuccess: (results) => {
           setSelected(
@@ -104,6 +110,7 @@ export function TaskImportPanel({
           setValidation(undefined);
           setFilter(undefined);
           setSelected(new Set());
+          setRelease('auto');
           setOpen(true);
         }}
         className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
@@ -124,7 +131,12 @@ export function TaskImportPanel({
               type="button"
               onClick={runImport}
               disabled={
-                !chosen.length || chosen.length > 50 || imports.isPending || preview.isFetching
+                !chosen.length ||
+                chosen.length > 50 ||
+                imports.isPending ||
+                preview.isFetching ||
+                roadmap?.isPending ||
+                roadmap?.isError
               }
               className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
             >
@@ -135,9 +147,37 @@ export function TaskImportPanel({
       >
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Выберите задачи с доски Weeek. Они появятся в проекте вне версий, со ссылкой, статусом,
-            датами и исполнителями. В Weeek ничего не изменится.
+            Выберите задачи с доски проекта Weeek и релиз. Они появятся со ссылкой, статусом, датами
+            и исполнителями. В Weeek ничего не изменится.
           </p>
+          <Field label="Импортировать в релиз" id="importRelease">
+            <Select
+              id="importRelease"
+              value={release}
+              onChange={setRelease}
+              isDisabled={imports.isPending}
+            >
+              <option value="auto">
+                {defaultVersion
+                  ? `По умолчанию: ${defaultVersion.label} (в разработке)`
+                  : 'По умолчанию: вне релиза (нет релиза в разработке)'}
+              </option>
+              <option value="">Вне релиза</option>
+              {(roadmap?.data?.versions ?? []).map((version) => (
+                <option key={version.id} value={version.id}>
+                  {version.label}
+                </option>
+              ))}
+            </Select>
+            {roadmap?.isPending && (
+              <p className="text-xs text-muted-foreground">Загружаем релизы…</p>
+            )}
+            {roadmap?.isError && (
+              <p role="alert" className="text-sm text-destructive">
+                Не удалось загрузить релизы. Повторите открытие импорта.
+              </p>
+            )}
+          </Field>
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}
@@ -147,6 +187,7 @@ export function TaskImportPanel({
             <Field label="Доска Weeek" id="importBoard">
               <Select
                 id="importBoard"
+                isDisabled
                 value={draft.boardId}
                 onChange={(value) => change('boardId', value)}
               >
@@ -250,8 +291,8 @@ export function TaskImportPanel({
             </button>
           </form>
           <p className="text-xs text-muted-foreground">
-            Границы периода включаются. Задачи без выбранной даты не попадают в период. Закрытие в
-            Weeek не закрывает чекпоинты роадмапа.
+            Границы периода включаются. Задачи без выбранной даты не попадают в период. Импорт не
+            отмечает выполнение. Правило завершения можно включить у задачи после импорта.
           </p>
           {preview.isFetching && <Loader size="page" />}
           {filter && preview.data && (
@@ -286,7 +327,12 @@ export function TaskImportPanel({
                   type="button"
                   onClick={runImport}
                   disabled={
-                    !chosen.length || chosen.length > 50 || imports.isPending || preview.isFetching
+                    !chosen.length ||
+                    chosen.length > 50 ||
+                    imports.isPending ||
+                    preview.isFetching ||
+                    roadmap?.isPending ||
+                    roadmap?.isError
                   }
                   className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
                 >

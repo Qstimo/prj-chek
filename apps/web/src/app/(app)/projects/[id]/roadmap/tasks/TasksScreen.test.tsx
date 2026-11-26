@@ -128,8 +128,9 @@ function exported(results: TaskExportResult[]): void {
   vi.mocked(hooks.useMutationExportTasks).mockReturnValue(
     mutation({
       data: results,
-      mutate: vi.fn((_ids: string[], options?: { onSuccess?: (data: TaskExportResult[]) => void }) =>
-        options?.onSuccess?.(results),
+      mutate: vi.fn(
+        (_ids: string[], options?: { onSuccess?: (data: TaskExportResult[]) => void }) =>
+          options?.onSuccess?.(results),
       ),
     }),
   );
@@ -203,13 +204,26 @@ beforeEach(() => {
 });
 
 describe('реестр задач проекта', () => {
+  it('фильтр релиза сохраняет остальные условия, его можно снять быстрой кнопкой', async () => {
+    search.value = 'release=loose&integration=local';
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    expect(screen.getByLabelText('Релиз')).toHaveValue('loose');
+    expect(screen.queryByText(PLACED.title)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: TASKS_TEXTS.filterAll }));
+    expect(replace).toHaveBeenCalledWith('?integration=local', { scroll: false });
+  });
+  it('старая ссылка loose показывает тот же выбранный фильтр релиза', () => {
+    search.value = 'loose=true';
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    expect(screen.getByLabelText('Релиз')).toHaveValue('loose');
+  });
   it('существующая ссылка Weeek связывает задачу без обычной выгрузки', async () => {
     ready();
     const link = mutation();
     vi.mocked(hooks.useMutationLinkTask).mockReturnValue(link);
-    vi.mocked(hooks.useQueryTasks).mockReturnValue(query([
-      { ...LOOSE, url: 'https://app.weeek.net/ws/4242/task/42' },
-    ]));
+    vi.mocked(hooks.useQueryTasks).mockReturnValue(
+      query([{ ...LOOSE, url: 'https://app.weeek.net/ws/4242/task/42' }]),
+    );
     render(<TasksScreen projectId={PROJECT_ID} />);
     await userEvent.click(screen.getByRole('button', { name: 'Связать с Weeek' }));
     expect(mutateOf(link)).toHaveBeenCalledWith(LOOSE.id);
@@ -220,9 +234,9 @@ describe('реестр задач проекта', () => {
     render(<TasksScreen projectId={PROJECT_ID} />);
 
     expect(screen.getByText('Поднять предел текста')).toBeInTheDocument();
-    expect(screen.getByText('v1.2')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: /v1.2/ })).toBeInTheDocument();
     expect(screen.getByText(TASKS_TEXTS.loose)).toBeInTheDocument();
-    expect(screen.getByText('Из саммари')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Из саммари' })).toBeInTheDocument();
   });
 
   it('пустой реестр говорит словами, а не пустым местом', () => {
@@ -357,7 +371,10 @@ describe('реестр задач проекта', () => {
 
     render(<TasksScreen projectId={PROJECT_ID} />);
 
-    expect(screen.getByRole('button', { name: /Выбрать доску Weeek/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Настройки задач' })).toHaveAttribute(
+      'href',
+      `/projects/${PROJECT_ID}/tasks/settings`,
+    );
   });
 });
 
@@ -633,7 +650,9 @@ describe('выгрузка задач и зеркало трекера', () => {
     expect(row.textContent).not.toContain(TRACKER_REJECTED);
     // Недошедшая задача ничего о себе не сообщает: с ней не произошло
     // ничего, и бирка отказа у неё была бы неправдой.
-    const skipped = screen.getAllByRole('row').find((it) => it.textContent?.includes(PLACED.title))!;
+    const skipped = screen
+      .getAllByRole('row')
+      .find((it) => it.textContent?.includes(PLACED.title))!;
 
     expect(skipped.textContent).not.toContain(EXPORT_TEXTS.failed(''));
   });
@@ -705,15 +724,15 @@ describe('выгрузка задач и зеркало трекера', () => {
     expect(screen.getByText(EXPORT_TEXTS.bindingMissing)).toBeInTheDocument();
   });
 
-  it('при неработающем подключении кнопка не нажимается, и причина названа', () => {
+  it('без токена настройки и кнопка выгрузки скрыты', () => {
     // Подключение начато и не работает — об этом сказано: его кто-то
     // настраивал и ждёт, что выгрузка работает.
     tracker({ isOperational: false, blockedBy: TRACKER_SECRET_MISSING, binding: BINDING });
 
     render(<TasksScreen projectId={PROJECT_ID} />);
 
-    expect(screen.getByRole('button', { name: EXPORT_TEXTS.action })).toBeDisabled();
-    expect(screen.getByText(EXPORT_TEXTS.blocked)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: EXPORT_TEXTS.action })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Настройки задач' })).not.toBeInTheDocument();
   });
 
   it('набор больше предела не уходит молча', () => {

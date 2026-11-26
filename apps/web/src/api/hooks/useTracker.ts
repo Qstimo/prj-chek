@@ -50,7 +50,10 @@ export function useMutationSaveTrackerConnection(kind: TrackerKind) {
   return useMutation({
     mutationFn: (input: TrackerConnectionUpdate) =>
       apiClient<TrackerConnection>(`/tracker-connections/${kind}`, { method: 'PUT', body: input }),
-    onSuccess: () => client.invalidateQueries({ queryKey: TRACKER_KEYS.connection(kind) }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: TRACKER_KEYS.connection(kind) });
+      await client.invalidateQueries({ queryKey: ['tracker', 'project'] });
+    },
   });
 }
 

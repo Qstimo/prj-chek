@@ -7,6 +7,7 @@ import {
   type ProjectTaskUpdate,
   type TaskExportResult,
   type TaskExport,
+  type TaskPlanningUpdate,
 } from '@cairn/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -73,6 +74,18 @@ export function useMutationUpdateTask(projectId: string) {
   return useMutation({
     mutationFn: ({ taskId, input }: { taskId: string; input: ProjectTaskUpdate }) =>
       apiClient<ProjectTask>(`/projects/${projectId}/tasks/${taskId}`, {
+        method: 'PUT',
+        body: input,
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useMutationPlanTask(projectId: string) {
+  const invalidate = useTaskInvalidation(projectId);
+  return useMutation({
+    mutationFn: ({ taskId, input }: { taskId: string; input: TaskPlanningUpdate }) =>
+      apiClient<ProjectTask>(`/projects/${projectId}/tasks/${taskId}/planning`, {
         method: 'PUT',
         body: input,
       }),
@@ -180,8 +193,8 @@ export function useMutationDetachTask(projectId: string) {
 export function useMutationLinkTask(projectId: string) {
   const invalidate = useTaskInvalidation(projectId);
   return useMutation({
-    mutationFn: (taskId: string) => apiClient<TaskExport>(
-      `/projects/${projectId}/tasks/${taskId}/link`, { method: 'POST' }),
+    mutationFn: (taskId: string) =>
+      apiClient<TaskExport>(`/projects/${projectId}/tasks/${taskId}/link`, { method: 'POST' }),
     onSuccess: invalidate,
   });
 }

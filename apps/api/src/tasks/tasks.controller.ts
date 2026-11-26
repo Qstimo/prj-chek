@@ -4,6 +4,8 @@ import {
   type ProjectTask,
   type ProjectTaskCreate,
   type ProjectTaskUpdate,
+  taskPlanningUpdateSchema,
+  type TaskPlanningUpdate,
 } from '@cairn/shared';
 import {
   Body,
@@ -40,6 +42,17 @@ import { TasksService } from './tasks.service';
 @UseGuards(SessionGuard)
 export class TasksController {
   constructor(private readonly tasks: TasksService) {}
+
+  @Put(':taskId/planning')
+  async plan(
+    @CurrentSubject() subject: RequestSubject,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Body(new ZodValidationPipe(taskPlanningUpdateSchema)) body: TaskPlanningUpdate,
+  ): Promise<ProjectTask> {
+    await this.tasks.plan(subject, projectId, taskId, body);
+    return this.oneOf(subject, projectId, taskId);
+  }
 
   /**
    * Задачи проекта: вне версий сверху.
