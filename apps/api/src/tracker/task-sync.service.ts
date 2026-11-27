@@ -6,6 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { DATABASE } from '../db/db.module';
 import type { Database } from '../db/db.types';
 import { applyTrackerCompletion } from './task-completion';
+import { TaskExportsService } from './task-exports.service';
 import {
   TaskExportsRepository,
   type TaskExportPollTarget,
@@ -28,6 +29,7 @@ export class TaskSyncService {
     private readonly bindings: TrackerBindingsRepository,
     private readonly audit: AuditService,
     @Inject(TRACKER_SOURCE) private readonly trackers: TrackerSource,
+    private readonly taskExports: TaskExportsService,
   ) {}
 
   async sync(subject: RequestSubject, projectId: string): Promise<TaskSyncResult> {
@@ -44,11 +46,11 @@ export class TaskSyncService {
       throw new TrackerNotConfiguredError();
     }
 
+    let failureCode = await this.taskExports.linkUnlinkedForProject(subject, projectId);
     const targets = await this.exports.listForProject(subject, projectId);
     const controller = new AbortController();
     let checked = 0;
     let found = 0;
-    let failureCode: string | null = null;
 
     try {
       for (const group of groupsOf(targets)) {
@@ -57,10 +59,11 @@ export class TaskSyncService {
         try {
           states = await port.readTasks(targetOf(group[0]!), controller.signal);
         } catch (cause) {
-          failureCode = codeOf(cause);
+          const pollFailureCode = codeOf(cause);
+          failureCode ??= pollFailureCode;
 
           for (const target of group) {
-            await this.write(target, { tracker: target.tracker, state: null, code: failureCode });
+            await this.write(target, { tracker: target.tracker, state: null, code: pollFailureCode });
           }
 
           checked += group.length;

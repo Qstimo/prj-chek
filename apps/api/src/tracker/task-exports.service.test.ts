@@ -207,6 +207,57 @@ describe('выгрузка задач в трекер', () => {
     return row;
   }
 
+  describe('автосвязка проекта', () => {
+    it('создаёт зеркало и аудит через обычное связывание', async () => {
+      await grant(AccessLevel.Write);
+      await bind();
+      const taskId = await seedTask('Связать', STATE.externalUrl);
+
+      expect(await service.linkUnlinkedForProject(member(), projectId)).toBeNull();
+      expect((await exportRow(taskId))?.externalId).toBe(STATE.externalId);
+      expect((await auditRows()).map((row) => row.action)).toEqual([AuditAction.TaskTrackerLinked]);
+      expect(readTaskLink).toHaveBeenCalledTimes(1);
+      expect(createTask).not.toHaveBeenCalled();
+      expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('игнорирует невалидные, чужие ссылки и задачи с зеркалом', async () => {
+      await grant(AccessLevel.Write);
+      await bind();
+      const linked = await seedTask('Уже связана', STATE.externalUrl);
+      await service.link(member(), projectId, linked);
+      // Даже изменённая ссылка у связанной задачи не запускает повторное связывание.
+      await testDb.db.update(projectTasks).set({ url: 'https://app.weeek.net/ws/4242/task/999' })
+        .where(eq(projectTasks.id, linked));
+      readTaskLink.mockClear();
+      for (const url of [null, '', 'not a url', 'https://example.com/ws/4242/task/4096',
+        'https://app.weeek.net/ws/4242/task/no-id']) {
+        await seedTask('Пропустить', url);
+      }
+
+      expect(await service.linkUnlinkedForProject(member(), projectId)).toBeNull();
+      expect(readTaskLink).not.toHaveBeenCalled();
+      expect((await exportRow(linked))?.externalId).toBe(STATE.externalId);
+      expect(await testDb.db.select().from(taskExports)).toHaveLength(1);
+      expect(await auditRows()).toHaveLength(1);
+    });
+
+    it('продолжает связывание после отказов и возвращает первый код', async () => {
+      await grant(AccessLevel.Write);
+      await bind();
+      for (let index = 0; index < 3; index += 1) {
+        await seedTask('Связать', STATE.externalUrl);
+      }
+      readTaskLink.mockRejectedValueOnce(new TrackerFailure(TRACKER_REJECTED, 'отказ'))
+        .mockRejectedValueOnce(new TrackerFailure(TRACKER_UNAVAILABLE, 'нет связи'));
+
+      expect(await service.linkUnlinkedForProject(member(), projectId)).toBe(TRACKER_REJECTED);
+      expect(readTaskLink).toHaveBeenCalledTimes(3);
+      expect(await testDb.db.select().from(taskExports)).toHaveLength(1);
+      expect((await auditRows()).map((row) => row.action)).toEqual([AuditAction.TaskTrackerLinked]);
+    });
+  });
+
   describe('связь по существующей ссылке', () => {
     it('сохраняет внешний id и статус, не создавая и не меняя задачу Weeek', async () => {
       await grant(AccessLevel.Write);

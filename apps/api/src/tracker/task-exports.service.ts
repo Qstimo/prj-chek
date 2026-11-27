@@ -15,6 +15,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
+  HttpException,
   NotFoundException,
   Inject,
   Injectable,
@@ -214,6 +215,27 @@ export class TaskExportsService {
     }
 
     return results;
+  }
+
+  /** Автосвязка не мешает остальным задачам и последующему опросу. */
+  async linkUnlinkedForProject(subject: RequestSubject, projectId: string): Promise<string | null> {
+    const targets = await this.exports.listUnlinkedWithUrl(subject, projectId);
+    let failureCode: string | null = null;
+
+    for (const target of targets) {
+      if (!weeekTaskLinkOf(target.url)) continue;
+
+      try {
+        await this.link(subject, projectId, target.taskId);
+      } catch (cause) {
+        const response = cause instanceof HttpException ? cause.getResponse() : null;
+        const code = response && typeof response === 'object' && 'code' in response
+          && typeof response.code === 'string' ? response.code : codeOf(cause);
+        failureCode ??= code;
+      }
+    }
+
+    return failureCode;
   }
 
   /** Связать по сохранённой ссылке: в Weeek идут только GET-запросы. */
