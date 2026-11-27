@@ -138,6 +138,7 @@ export class RoadmapController {
       isDone: created.isDone,
       position: created.position,
       platformIds: created.platformIds,
+      assignees: created.assignees,
     };
   }
 
@@ -166,6 +167,7 @@ export class RoadmapController {
       isDone: updated.isDone,
       position: updated.position,
       platformIds: updated.platformIds,
+      assignees: updated.assignees,
     };
   }
 
@@ -203,6 +205,7 @@ export class RoadmapController {
         isDone: carried.checkpoint.isDone,
         position: carried.checkpoint.position,
         platformIds: carried.checkpoint.platformIds,
+        assignees: carried.checkpoint.assignees,
       },
       // Идентификатор берётся из самого чекпоинта: после переноса он и
       // есть версия-получатель, и второго источника правды тут нет.

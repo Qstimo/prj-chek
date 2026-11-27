@@ -17,10 +17,10 @@ import type {
 export type ReportView = ReleaseReport | PublicReleaseReport;
 
 /** Чекпоинт отчёта: со ссылкой на задачу или без неё. */
-export type ReportCheckpointView = ReportCheckpoint | Omit<ReportCheckpoint, 'url'>;
+export type ReportCheckpointView = ReportCheckpoint | Omit<ReportCheckpoint, 'url' | 'assignees'>;
 
 /** Унесённый чекпоинт: со ссылкой на задачу или без неё. */
-export type CarriedOutCheckpointView = CarriedOutCheckpoint | Omit<CarriedOutCheckpoint, 'url'>;
+export type CarriedOutCheckpointView = CarriedOutCheckpoint | Omit<CarriedOutCheckpoint, 'url' | 'assignees'>;
 
 /** Пропсы отчёта по релизу. */
 export interface IProps {

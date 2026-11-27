@@ -7,6 +7,8 @@ import {
   RoadmapVersionState,
   Section,
   SubjectKind,
+  TrackerKind,
+  publicRoadmapSchema,
   type RoadmapVersionDetail,
 } from '@cairn/shared';
 import { ConflictException, NotFoundException } from '@nestjs/common';
@@ -18,6 +20,7 @@ import { InsufficientLevelError, SectionNotVisibleError } from '../access/access
 import type { RequestSubject } from '../access/access.types';
 import {
   projectTaskPlatforms,
+  taskExports,
   projectTasks,
   environments,
   grants,
@@ -144,6 +147,27 @@ describe('репозиторий роадмапа', () => {
 
     return created!.id;
   }
+
+  it('загружает исполнителей по задаче и исключает их из публичной выдачи', async () => {
+    const versionId = await createVersion();
+    const checkpoint = await testDb.db.transaction((tx) => repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'С исполнителями' }));
+    await testDb.db.transaction((tx) => repository.createCheckpoint(admin(), tx, projectId, versionId, { title: 'Без зеркала' }));
+    await testDb.db.insert(taskExports).values({
+      taskId: checkpoint.taskId, tracker: TrackerKind.Weeek, externalId: '17', externalBoardId: '11',
+      details: { projectId: '7', assignees: [{ id: '1', name: 'Иван' }, { id: '2', name: 'Ольга' }], author: null, createdAt: null, startAt: null, dueAt: null, completedAt: null },
+    });
+    const internal = await repository.findForProject(admin(), projectId);
+    expect((internal.versions[0] as RoadmapVersionDetail).checkpoints.map((row) => row.assignees)).toEqual([['Иван', 'Ольга'], []]);
+    const updated = await testDb.db.transaction((tx) => repository.updateCheckpoint(admin(), tx, projectId, versionId, checkpoint.id, { isDone: true }));
+    expect(updated.assignees).toEqual(['Иван', 'Ольга']);
+    const token = await testDb.db.transaction((tx) => repository.publish(admin(), tx, projectId));
+    const external = await repository.publicRoadmap(token);
+    expect(publicRoadmapSchema.safeParse(external).success).toBe(true);
+    for (const row of external!.versions[0]!.checkpoints) expect(row).not.toHaveProperty('assignees');
+    expect(JSON.stringify(external)).not.toContain('Иван');
+    const redacted = await repository.findForProject(admin(), projectId, { withLinks: false });
+    expect((redacted.versions[0] as RoadmapVersionDetail).checkpoints[0]).not.toHaveProperty('assignees');
+  });
 
   describe('версии', () => {
     it('создаёт версии с растущей позицией', async () => {

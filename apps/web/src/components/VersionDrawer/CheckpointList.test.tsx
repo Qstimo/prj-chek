@@ -13,6 +13,7 @@ const plain: RoadmapCheckpoint = {
   isDone: false,
   position: 1,
   platformIds: [],
+  assignees: [],
 };
 
 const withUrl: RoadmapCheckpoint = {
@@ -23,6 +24,7 @@ const withUrl: RoadmapCheckpoint = {
   isDone: false,
   position: 2,
   platformIds: [],
+  assignees: [],
 };
 
 describe('CheckpointList', () => {
@@ -290,4 +292,11 @@ describe('CheckpointList', () => {
     expect(screen.queryByLabelText('Формулировка')).not.toBeInTheDocument();
     expect(onEdit).not.toHaveBeenCalled();
   });
+});
+
+it('показывает имена исполнителей под задачей и скрывает пустой список', () => {
+  const { rerender } = render(<CheckpointList checkpoints={[{ ...plain, assignees: ['Иван', 'Ольга'] }]} canWrite={false} onToggle={vi.fn()} onDelete={vi.fn()} />);
+  expect(screen.getByText('Исполнитель: Иван, Ольга')).toBeInTheDocument();
+  rerender(<CheckpointList checkpoints={[plain]} canWrite={false} onToggle={vi.fn()} onDelete={vi.fn()} />);
+  expect(screen.queryByText(/Исполнитель:/)).not.toBeInTheDocument();
 });

@@ -283,3 +283,14 @@ describe('выпуски и дата в проекции версии', () => {
   });
 });
 
+
+it('отдаёт исполнителей только во внутренней проекции', () => {
+  const rows = [{ ...checkpoints[0]!, details: {
+    projectId: '7', assignees: [{ id: '1', name: 'Иван' }, { id: '2', name: 'Ольга' }],
+    author: null, createdAt: null, startAt: null, dueAt: null, completedAt: null,
+  } }, checkpoints[1]!];
+  const internal = versionProjection(version, rows, [], AccessLevel.Read) as RoadmapVersionDetail;
+  expect(internal.checkpoints.map((row) => row.assignees)).toEqual([['Иван', 'Ольга'], []]);
+  const external = versionProjection(version, rows, [], AccessLevel.Read, { withLinks: false }) as RoadmapVersionDetail;
+  for (const row of external.checkpoints) expect(row).not.toHaveProperty('assignees');
+});

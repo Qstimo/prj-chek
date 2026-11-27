@@ -48,6 +48,7 @@ const report: ReleaseReport = {
       isDone: true,
       position: 1,
       url: null,
+      assignees: [],
       platformIds: [],
       carriedFrom: null,
     },

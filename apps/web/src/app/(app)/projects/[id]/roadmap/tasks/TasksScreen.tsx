@@ -2,6 +2,7 @@
 
 import {
   MAX_TASK_EXPORT_BATCH,
+  TRACKER_BASE_URL_MISSING,
   isWeeekLink,
   TaskExportOutcome,
   type ProjectTask,
@@ -29,6 +30,7 @@ import {
 import { CheckpointForm } from '@/components/CheckpointForm';
 import { Drawer, DrawerWidth } from '@/components/Drawer';
 import { Loader } from '@/components/Loader';
+import { BINDING_BLOCKED, BINDING_FAILURES } from '../constants';
 import { matchesTaskFilters } from './task-filters';
 import { TaskFiltersPanel, TASK_FILTER_KEYS, taskFilterLabels } from './TaskFiltersPanel';
 import { TaskActionsPanel } from './TaskActionsPanel';
@@ -82,12 +84,28 @@ export function TasksScreen({ projectId }: { projectId: string }) {
       </p>
     );
   const rows = tasks.data.filter((task) => matchesTaskFilters(task, params));
-  const failed = remove.error ?? exportTasks.error ?? linkTask.error ?? syncTasks.error;
+  const failed = remove.error ?? exportTasks.error ?? linkTask.error;
   const failure = summaryFailureOf(failed);
   const error =
     (failure.code && taskFailureTextOf(failure.code)) ??
     describeApiError(failed ?? detach.error ?? update.error ?? create.error);
+  const trackerFailure = summaryFailureOf(syncTasks.error ?? tracker.error);
+  const trackerError =
+    (syncTasks.data?.failureCode && (taskFailureTextOf(syncTasks.data.failureCode) ?? 'Обмен с Weeek не удался. Повторите синхронизацию.')) ||
+    (trackerFailure.code && taskFailureTextOf(trackerFailure.code)) ||
+    describeApiError(syncTasks.error ?? tracker.error) ||
+    (tracker.data?.blockedBy && tracker.data.blockedBy !== TRACKER_BASE_URL_MISSING && (BINDING_BLOCKED[tracker.data.blockedBy] ?? BINDING_FAILURES[tracker.data.blockedBy] ?? 'Подключение Weeek не настроено.'));
   const isExportVisible = isExportKnown(tracker.data) && !tracker.isError;
+  let trackerStatus = 'проверяем подключение…';
+  if (tracker.isError) {
+    trackerStatus = 'статус подключения неизвестен';
+  } else if (!tracker.isPending && tracker.data) {
+    if (tracker.data.isOperational && tracker.data.binding === null) {
+      trackerStatus = 'Выберите доску Weeek в настройках';
+    } else {
+      trackerStatus = hasProjectTrackerConnection(tracker.data) ? 'подключён' : 'не подключён';
+    }
+  }
   const chosen = rows.filter((task) => selected.has(task.id)).map((task) => task.id);
   const blocked = blockedReasonOf(tracker.data, chosen.length);
   const results = exportTasks.data;
@@ -153,45 +171,34 @@ export function TasksScreen({ projectId }: { projectId: string }) {
         {tracker.data?.isOperational && (
           <TaskImportPanel projectId={projectId} binding={tracker.data.binding} />
         )}
-      </div>
-      {hasProjectTrackerConnection(tracker.data) && (
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
-          <p className="min-w-0 text-muted-foreground">
-            {!tracker.data?.isOperational
-              ? 'Синхронизация Weeek приостановлена'
-              : tracker.data.binding
-                ? 'Weeek подключён'
-                : 'Выберите доску Weeek в настройках'}
-          </p>
-          <Link
-            href={`/projects/${projectId}/tasks/settings`}
-            className="shrink-0 font-medium underline underline-offset-4"
-          >
-            Настройки задач
-          </Link>
-        </div>
-      )}
-      {isExportVisible && (
-        <div className="space-y-2">
+        {isExportVisible && (
           <button
             type="button"
             className={TASK_BUTTON}
+            title="Обновляет статусы всех связанных задач проекта и применяет правила завершения."
             disabled={!tracker.data?.isOperational || !tracker.data.binding || syncTasks.isPending}
             onClick={() => syncTasks.mutate()}
           >
             {syncTasks.isPending ? 'Синхронизируем…' : 'Синхронизировать с Weeek'}
           </button>
-          <p className="text-xs text-muted-foreground">
-            Обновляет статусы всех связанных задач проекта и применяет правила завершения.
-          </p>
+        )}
+        <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-2 text-sm sm:ml-auto" data-testid="weeek-status">
+          <span className="text-muted-foreground">
+            Weeek: {trackerStatus}
+          </span>
+          {hasProjectTrackerConnection(tracker.data) && (
+            <Link href={`/projects/${projectId}/tasks/settings`} className="underline underline-offset-4">
+              Настройки задач
+            </Link>
+          )}
+          {trackerError && <span role="alert" className="text-destructive">{trackerError}</span>}
           {syncTasks.data && (
-            <p role="status" className="text-sm">
+            <span role="status">
               Проверено: {syncTasks.data.checked}. Найдено в Weeek: {syncTasks.data.found}.
-              {syncTasks.data.failureCode && ` ${taskFailureTextOf(syncTasks.data.failureCode) ?? 'Обмен с Weeek не удался. Повторите синхронизацию.'}`}
-            </p>
+            </span>
           )}
         </div>
-      )}
+      </div>
       {filters.length > 0 && (
         <div className="flex flex-wrap items-center gap-2" aria-label="Применённые фильтры">
           {filters.map((filter) => (
