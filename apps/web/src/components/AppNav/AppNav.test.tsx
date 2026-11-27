@@ -12,6 +12,12 @@ const subject = {
 };
 
 describe('AppNav', () => {
+  it('не показывает постоянный пункт «Что нового»', () => {
+    render(<AppNav subject={subject} onLogout={vi.fn()} />);
+
+    expect(screen.queryByRole('link', { name: 'Что нового' })).not.toBeInTheDocument();
+  });
+
   it('показывает ссылку на проекты всем', () => {
     render(<AppNav subject={subject} onLogout={vi.fn()} />);
 

@@ -1,0 +1,22 @@
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Без разрешения на движение карточки сразу видны и неподвижны. */
+@media (prefers-reduced-motion: no-preference) {
+  .card {
+    animation: fade-up 400ms ease-out backwards;
+    transition: transform 180ms ease-out;
+  }
+
+  .card:hover {
+    transform: translateY(-3px);
+  }
+}

@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { ApiError } from '@/api';
 import { apiServer } from '@/api/server';
 import { AppNavContainer } from '@/components/AppNav/AppNavContainer';
+import { WhatsNewIntro } from '@/components/WhatsNewIntro/WhatsNewIntro';
 
 import { requiresTotpBinding } from './requiresTotpBinding';
 
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <AppNavContainer subject={subject} />
+      <WhatsNewIntro />
       {children}
     </>
   );
