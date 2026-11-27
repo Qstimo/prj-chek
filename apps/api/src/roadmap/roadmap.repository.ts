@@ -22,6 +22,8 @@ import {
   type RoadmapVersionDetail,
   type RoadmapVersionUpdate,
   TaskOrigin,
+  TrackerKind,
+  type TrackerTaskDetails,
 } from '@cairn/shared';
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, inArray } from 'drizzle-orm';
@@ -34,6 +36,7 @@ import { DATABASE } from '../db/db.module';
 import type { Database, Executor, Transaction } from '../db/db.types';
 import {
   projectTaskPlatforms,
+  taskExports,
   projectTasks,
   projectPlatforms,
   projects,
@@ -686,8 +689,12 @@ export class RoadmapRepository {
     checkpoint: RoadmapCheckpointRow,
   ): Promise<TaggedCheckpointRow> {
     const [task] = await executor
-      .select({ title: projectTasks.title, url: projectTasks.url })
+      .select({ title: projectTasks.title, url: projectTasks.url, details: taskExports.details })
       .from(projectTasks)
+      .leftJoin(taskExports, and(
+        eq(taskExports.taskId, projectTasks.id),
+        eq(taskExports.tracker, TrackerKind.Weeek),
+      ))
       .where(eq(projectTasks.id, checkpoint.taskId))
       .limit(1);
 
@@ -697,6 +704,7 @@ export class RoadmapRepository {
       // Пустые значения здесь — не «бывает», а «база потеряла строку».
       title: task!.title,
       url: task!.url,
+      assignees: task!.details?.assignees.map((person) => person.name) ?? [],
       platformIds: await this.tagsOf(executor, checkpoint.taskId),
     };
   }
@@ -1046,7 +1054,7 @@ export class RoadmapRepository {
         carriedTo: labels.get(checkpoint.versionId)!,
         // Поле добавляется, а не обнуляется: публичная схема отчёта
         // строгая, и `url: null` для неё такая же ошибка, как адрес.
-        ...(withLinks ? { url: checkpoint.url } : {}),
+        ...(withLinks ? { url: checkpoint.url, assignees: checkpoint.details?.assignees.map((person) => person.name) ?? [] } : {}),
       })) as CarriedOutCheckpoint[];
 
     return releaseReportOf(
@@ -1090,9 +1098,14 @@ export class RoadmapRepository {
             updatedAt: roadmapCheckpoints.updatedAt,
             title: projectTasks.title,
             url: projectTasks.url,
+            details: taskExports.details,
           })
           .from(roadmapCheckpoints)
           .innerJoin(projectTasks, eq(projectTasks.id, roadmapCheckpoints.taskId))
+          .leftJoin(taskExports, and(
+            eq(taskExports.taskId, roadmapCheckpoints.taskId),
+            eq(taskExports.tracker, TrackerKind.Weeek),
+          ))
           .where(
             inArray(
               roadmapCheckpoints.versionId,
@@ -1370,6 +1383,7 @@ function nextOpenVersion(
  * чтение задачи мимо репозитория прошло бы мимо проверки.
  */
 export type TaggedCheckpointRow = RoadmapCheckpointRow & {
+  assignees: string[];
   title: string;
   url: string | null;
   platformIds: string[];
@@ -1383,6 +1397,7 @@ export type TaggedCheckpointRow = RoadmapCheckpointRow & {
  * размещения сразу.
  */
 export type LoadedCheckpointRow = RoadmapCheckpointRow & {
+  details?: TrackerTaskDetails | null;
   title: string;
   url: string | null;
 };

@@ -840,6 +840,66 @@ describe('общая синхронизация Weeek', () => {
       data: { checked: 1, found: 0, failureCode: TRACKER_UNAVAILABLE },
     }));
     render(<TasksScreen projectId={PROJECT_ID} />);
-    expect(screen.getByRole('status')).toHaveTextContent(/не ответил/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/не ответил/i);
+    expect(screen.getByTestId('weeek-status')).toContainElement(screen.getByRole('alert'));
+  });
+});
+
+describe('компактный статус Weeek', () => {
+  it('объясняет, почему синхронизация недоступна без доски', () => {
+    tracker({ isOperational: true, blockedBy: null, binding: null });
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    const status = screen.getByTestId('weeek-status');
+    expect(status).toHaveTextContent('Выберите доску Weeek в настройках');
+    expect(status).not.toHaveTextContent('Weeek: подключён');
+    expect(screen.getByRole('button', { name: 'Синхронизировать с Weeek' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'Настройки задач' })).toHaveAttribute(
+      'href', `/projects/${PROJECT_ID}/tasks/settings`,
+    );
+  });
+  it('не делает вывода о подключении во время загрузки', () => {
+    vi.mocked(hooks.useQueryProjectTracker).mockReturnValue({
+      data: undefined, isPending: true, isError: false,
+    } as never);
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    const status = screen.getByTestId('weeek-status');
+    expect(status).toHaveTextContent('проверяем подключение…');
+    expect(status).not.toHaveTextContent('не подключён');
+  });
+  it.each([
+    { state: 'без данных', data: undefined },
+    { state: 'с прежними данными', data: { isOperational: false, blockedBy: TRACKER_BASE_URL_MISSING, binding: null } },
+  ])('не делает вывода о подключении при ошибке запроса $state', ({ data }) => {
+    vi.mocked(hooks.useQueryProjectTracker).mockReturnValue({
+      data, isPending: false, isError: true, error: new Error('Ошибка загрузки подключения'),
+    } as never);
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    const status = screen.getByTestId('weeek-status');
+    expect(status).toHaveTextContent('статус подключения неизвестен');
+    expect(status).not.toHaveTextContent('не подключён');
+    expect(status).toContainElement(screen.getByRole('alert'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Ошибка загрузки подключения');
+  });
+  it('показывает подключение в строке основных кнопок', () => {
+    ready();
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    const status = screen.getByTestId('weeek-status');
+    expect(status).toHaveTextContent('Weeek: подключён');
+    expect(status.parentElement).toContainElement(screen.getByRole('button', { name: 'Синхронизировать с Weeek' }));
+    expect(status.parentElement).toContainElement(screen.getByRole('button', { name: TASKS_TEXTS.create }));
+    expect(screen.queryByText('Weeek подключён')).not.toBeInTheDocument();
+  });
+  it('показывает отсутствие подключения и его ошибку рядом', () => {
+    tracker({ isOperational: false, blockedBy: TRACKER_SECRET_MISSING, binding: null });
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    const status = screen.getByTestId('weeek-status');
+    expect(status).toHaveTextContent('Weeek: не подключён');
+    expect(status.querySelector('[role="alert"]')).not.toBeNull();
+  });
+  it('показывает сетевую ошибку синхронизации рядом со статусом', () => {
+    ready();
+    vi.mocked(hooks.useMutationSyncTrackerTasks).mockReturnValue(mutation({ error: new Error('Ошибка синхронизации') }));
+    render(<TasksScreen projectId={PROJECT_ID} />);
+    expect(screen.getByTestId('weeek-status')).toContainElement(screen.getByRole('alert'));
   });
 });

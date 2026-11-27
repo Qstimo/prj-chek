@@ -95,6 +95,12 @@ export function CheckpointItem({
           </label>
         )}
 
+        {checkpoint.assignees.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            Исполнитель: {checkpoint.assignees.join(', ')}
+          </p>
+        )}
+
         {((markUnfinished && !checkpoint.isDone) || (canWrite && onCarryOver && !checkpoint.isDone)) && (
           <div className="flex flex-wrap items-center gap-2">
             {markUnfinished && !checkpoint.isDone && (

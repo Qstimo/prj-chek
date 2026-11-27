@@ -19,13 +19,7 @@ import {
  */
 export const checkpointUrlSchema = z.string().trim().url().max(2000).nullable();
 
-/**
- * Чекпоинт: формулировка результата и признак «закрыт» — и ничего больше.
- *
- * Исполнителей, оценок, дат, комментариев и вложенности не будет:
- * это сознательное ограничение ТЗ 1.4, удерживающее продукт от трекера.
- * Схемы строгие: лишние поля — ошибка, а не молчаливое отбрасывание.
- */
+/** Внутренний чекпоинт с полями задачи и именами исполнителей из Weeek. */
 export const roadmapCheckpointSchema = z.object({
   id: z.string().uuid(),
   /**
@@ -38,14 +32,15 @@ export const roadmapCheckpointSchema = z.object({
    * ручкой чекпоинта нельзя — у поля одно место записи.
    */
   taskId: z.string().uuid(),
+  /** Имена исполнителей из зеркала Weeek; только для внутренней выдачи. */
+  assignees: z.array(z.string()),
   title: z.string(),
   isDone: z.boolean(),
   position: z.number().int().positive(),
   /**
    * Ссылка на задачу во внешнем трекере.
    *
-   * Указатель наружу, а не задача внутри: исполнителей, оценок и дат
-   * у чекпоинта по-прежнему нет, и трекером продукт не становится (ТЗ 1.4).
+   * Поле задачи; изменяется через реестр задач.
    */
   url: checkpointUrlSchema,
   /**
@@ -247,7 +242,7 @@ export const publicLinkSchema = z.object({
  * отбрасывание скрыло бы ошибку проекции вместо того, чтобы её показать.
  */
 export const publicCheckpointSchema = roadmapCheckpointSchema
-  .omit({ url: true, taskId: true })
+  .omit({ url: true, taskId: true, assignees: true })
   .strict();
 
 /** Версия в публичной выдаче. */
@@ -344,8 +339,8 @@ export const publicReleaseReportSchema = releaseReportSchema
   .extend({
     projectName: z.string(),
     version: roadmapVersionMetadataSchema.strict(),
-    checkpoints: z.array(reportCheckpointSchema.omit({ url: true }).strict()),
-    carriedOut: z.array(carriedOutCheckpointSchema.omit({ url: true }).strict()),
+    checkpoints: z.array(reportCheckpointSchema.omit({ url: true, assignees: true }).strict()),
+    carriedOut: z.array(carriedOutCheckpointSchema.omit({ url: true, assignees: true }).strict()),
   })
   .strict();
 

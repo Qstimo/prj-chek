@@ -161,6 +161,7 @@ describe('схема переноса чекпоинта', () => {
         position: 4,
         url: null,
         platformIds: [],
+    assignees: [],
       },
       targetVersion: { id: versionId, label: 'v1.3' },
       versionCreated: true,
@@ -223,6 +224,7 @@ describe('ссылка на задачу у чекпоинта', () => {
     isDone: false,
     position: 1,
     platformIds: [],
+    assignees: [],
   };
 
   /**
@@ -231,7 +233,7 @@ describe('ссылка на задачу у чекпоинта', () => {
    * Снаружи ни ссылки на трекер, ни задачи реестра не существует, и
    * `taskId` был бы идентификатором, по которому снаружи нечего спросить.
    */
-  const { url: _publicUrl, taskId: _publicTaskId, ...publicCheckpoint } = checkpoint;
+  const { url: _publicUrl, taskId: _publicTaskId, assignees: _assignees, ...publicCheckpoint } = checkpoint;
 
   it('принимает ссылку на задачу', () => {
     const parsed = roadmapCheckpointSchema.parse({
@@ -343,6 +345,7 @@ describe('схема отчёта по релизу', () => {
     isDone: true,
     position: 1,
     platformIds: [],
+    assignees: [],
   };
 
   const VERSION = {
@@ -458,10 +461,11 @@ describe('схема отчёта по релизу', () => {
   });
 
   it('пропускает публичный отчёт без ссылок', () => {
+    const { assignees, ...publicCheckpoint } = CHECKPOINT;
     const parsed = publicReleaseReportSchema.parse({
       ...report({
-        checkpoints: [{ ...CHECKPOINT, carriedFrom: 'v1.1' }],
-        carriedOut: [{ ...CHECKPOINT, carriedTo: 'v1.3' }],
+        checkpoints: [{ ...publicCheckpoint, carriedFrom: 'v1.1' }],
+        carriedOut: [{ ...publicCheckpoint, carriedTo: 'v1.3' }],
       }),
       projectName: 'Лавка',
     });
@@ -551,4 +555,14 @@ describe('платформы в роадмапе', () => {
 
     expect(parsed.summary).toEqual([]);
   });
+});
+
+it('имена исполнителей обязательны внутри и запрещены снаружи', () => {
+  const checkpoint = { id: '11111111-1111-4111-8111-111111111111', taskId: '11111111-1111-4111-8111-111111111112', title: 'Задача', isDone: false, position: 1, platformIds: [], url: null, assignees: ['Иван', 'Ольга'] };
+  expect(roadmapCheckpointSchema.parse(checkpoint).assignees).toEqual(['Иван', 'Ольга']);
+  const { url, taskId, assignees, ...publicRow } = checkpoint;
+  expect(publicCheckpointSchema.safeParse(publicRow).success).toBe(true);
+  expect(publicCheckpointSchema.safeParse({ ...publicRow, assignees }).success).toBe(false);
+  expect(roadmapCheckpointSchema.safeParse({ ...checkpoint, assignees: [1] }).success).toBe(false);
+  expect(roadmapCheckpointSchema.safeParse({ ...checkpoint, assignees: undefined }).success).toBe(false);
 });

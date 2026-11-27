@@ -81,7 +81,11 @@ export function versionProjection(
         platformIds: platformsByCheckpoint?.get(checkpoint.taskId) ?? [],
         // Поле добавляется, а не обнуляется: публичная схема строгая,
         // и `url: null` был бы для неё такой же ошибкой, как и адрес.
-        ...(withLinks ? { url: checkpoint.url } : {}),
+        ...(withLinks ? {
+          taskId: checkpoint.taskId,
+          url: checkpoint.url,
+          assignees: checkpoint.details?.assignees.map((person) => person.name) ?? [],
+        } : {}),
       })),
       releases,
     }),
