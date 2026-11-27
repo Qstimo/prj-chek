@@ -1,10 +1,11 @@
-import { SubjectKind, TRACKER_REJECTED, TrackerKind, type TrackerBinding } from '@cairn/shared';
+import { SubjectKind, TRACKER_REJECTED, TRACKER_UNAVAILABLE, TrackerKind, type TrackerBinding } from '@cairn/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RequestSubject } from '../access/access.types';
 import type { AuditService } from '../audit/audit.service';
 import type { Database, Transaction } from '../db/db.types';
 import { TaskSyncService } from './task-sync.service';
+import type { TaskExportsService } from './task-exports.service';
 import type {
   TaskExportPollTarget,
   TaskExportsRepository,
@@ -78,6 +79,7 @@ function fixture({
     }),
   } as unknown as Tracker;
   const trackers = { current: vi.fn().mockResolvedValue(port) } as unknown as TrackerSource;
+  const taskExports = { linkUnlinkedForProject: vi.fn().mockResolvedValue(null) };
   const db = {
     transaction: vi.fn(async (run: (value: Transaction) => unknown) => run(tx)),
   } as unknown as Database;
@@ -87,12 +89,50 @@ function fixture({
     bindings as unknown as TrackerBindingsRepository,
     audit,
     trackers,
+    taskExports as unknown as TaskExportsService,
   );
 
-  return { service, bindings, exports, port, trackers, db, tx };
+  return { service, bindings, exports, port, trackers, db, tx, taskExports };
 }
 
 describe('общая синхронизация задач проекта', () => {
+  it('автосвязка завершается до выбора зеркал и опроса новой задачи', async () => {
+    const { service, taskExports, exports, port } = fixture({ targets: [] });
+    taskExports.linkUnlinkedForProject.mockImplementation(async () => {
+      exports.listForProject.mockResolvedValue([targetOf(STATE.externalId)]);
+      return null;
+    });
+
+    await expect(service.sync(SUBJECT, 'project')).resolves.toEqual({
+      checked: 1, found: 1, failureCode: null,
+    });
+    expect(taskExports.linkUnlinkedForProject).toHaveBeenCalledWith(SUBJECT, 'project');
+    expect(taskExports.linkUnlinkedForProject.mock.invocationCallOrder[0])
+      .toBeLessThan(exports.listForProject.mock.invocationCallOrder[0]!);
+    expect(exports.listForProject.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(port.readTasks).mock.invocationCallOrder[0]!);
+  });
+
+  it('отказ автосвязки не прерывает опрос существующих зеркал', async () => {
+    const { service, taskExports, port } = fixture();
+    taskExports.linkUnlinkedForProject.mockResolvedValue(TRACKER_UNAVAILABLE);
+
+    await expect(service.sync(SUBJECT, 'project')).resolves.toEqual({
+      checked: 1, found: 0, failureCode: TRACKER_UNAVAILABLE,
+    });
+    expect(port.readTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it('сохраняет первый отказ автосвязки, но пишет в зеркало код отказа опроса', async () => {
+    const { service, taskExports, exports } = fixture({ fail: true });
+    taskExports.linkUnlinkedForProject.mockResolvedValue(TRACKER_UNAVAILABLE);
+
+    expect((await service.sync(SUBJECT, 'project')).failureCode).toBe(TRACKER_UNAVAILABLE);
+    expect(exports.recordPolled).toHaveBeenCalledWith(
+      expect.anything(), 'task', expect.objectContaining({ code: TRACKER_REJECTED }),
+    );
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

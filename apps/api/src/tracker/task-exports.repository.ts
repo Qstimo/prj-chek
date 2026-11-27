@@ -6,7 +6,7 @@ import {
   type TaskExport,
 } from '@cairn/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 
 import { SectionNotVisibleError } from '../access/access.errors';
@@ -123,6 +123,28 @@ export class TaskExportsRepository {
     @Inject(DATABASE) private readonly db: Database,
     private readonly access: AccessService,
   ) {}
+
+  /** Кандидаты для связывания по сохранённой ссылке; зеркало исключается в SQL. */
+  async listUnlinkedWithUrl(
+    subject: RequestSubject,
+    projectId: string,
+  ): Promise<{ taskId: string; url: string }[]> {
+    await this.access.requireLevel(subject, projectId, Section.Roadmap, AccessLevel.Write);
+
+    const rows = await this.db
+      .select({ taskId: projectTasks.id, url: projectTasks.url })
+      .from(projectTasks)
+      .leftJoin(taskExports, eq(taskExports.taskId, projectTasks.id))
+      .where(and(
+        eq(projectTasks.projectId, projectId),
+        isNull(taskExports.taskId),
+        isNotNull(projectTasks.url),
+        ne(projectTasks.url, ''),
+      ))
+      .orderBy(asc(projectTasks.id));
+
+    return rows.map((row) => ({ taskId: row.taskId, url: row.url! }));
+  }
 
   /**
    * Задачи набора в порядке набора вместе с их выгрузками.

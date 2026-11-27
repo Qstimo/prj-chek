@@ -164,6 +164,35 @@ describe('репозиторий выгрузок задач', () => {
     return row;
   }
 
+  describe('несвязанные задачи со ссылкой', () => {
+    it('выбирает только задачи проекта с непустым url без зеркала', async () => {
+      await grant(AccessLevel.Write);
+      const candidate = await seedTask('Кандидат');
+      const linked = await seedTask('Связана');
+      const empty = await seedTask('Пустая ссылка');
+      await seedTask('Без ссылки');
+      const other = await seedTask('Чужая', otherProjectId);
+      for (const id of [candidate, linked, other]) {
+        await testDb.db.update(projectTasks).set({ url: STATE.externalUrl })
+          .where(eq(projectTasks.id, id));
+      }
+      await testDb.db.update(projectTasks).set({ url: '' }).where(eq(projectTasks.id, empty));
+      await seedExport(linked);
+
+      expect(await repository.listUnlinkedWithUrl(member(), projectId)).toEqual([
+        { taskId: candidate, url: STATE.externalUrl },
+      ]);
+    });
+
+    it('требует запись на роадмап', async () => {
+      await expect(repository.listUnlinkedWithUrl(member(), projectId))
+        .rejects.toBeInstanceOf(SectionNotVisibleError);
+      await grant(AccessLevel.Read);
+      await expect(repository.listUnlinkedWithUrl(member(), projectId))
+        .rejects.toBeInstanceOf(InsufficientLevelError);
+    });
+  });
+
   describe('цели выгрузки', () => {
     it('без выдачи не раскрывает даже существования задачи', async () => {
       const taskId = await seedTask('Оплата');
@@ -603,14 +632,25 @@ describe('репозиторий выгрузок задач', () => {
       ]);
     });
 
-    it('закрытая в трекере задача больше не опрашивается', async () => {
-      // Закрытая задача не меняется, и спрашивать о ней каждые пять минут
-      // — платить трафиком за известное (дизайн, 8).
+    it('закрытая в трекере задача остаётся в опросе', async () => {
+      // Задачу могут открыть или перенести в Weeek, а правило завершения
+      // должно учитывать её текущее состояние и колонку.
       await bind();
       const taskId = await seedTask('Оплата');
       await seedExport(taskId, { isCompleted: true });
 
-      expect(await repository.listForPoll(10)).toEqual([]);
+      expect(await repository.listForPoll(10)).toEqual([
+        {
+          taskId,
+          projectId,
+          tracker: TrackerKind.Weeek,
+          externalId: '4096',
+          externalProjectId: '7',
+          boardId: '11',
+          boardColumnId: '31',
+          checkedAt: null,
+        },
+      ]);
     });
 
     it('архивный проект из обхода исключён', async () => {
